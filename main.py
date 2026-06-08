@@ -34,7 +34,7 @@ from .auto_tp import auto_take_profit, apply_auto_tp
 from .trailing_sl import trailing_sl, apply_trailing_sl
 from .overbought import check_overbought, rotate_watchlist
 from .pump_detect import check_pumps
-from .auto_entry import auto_entry_scan
+from .auto_entry import auto_entry_scan, record_sl_hit
 from .health import (check_liquidation, check_bb_squeeze, check_funding_flip,
                       check_daily_drawdown, check_correlation_risk, check_funding_pump)
 from .rsi import check_rsi_divergence
@@ -88,6 +88,24 @@ def _check_risk_limits(positions: dict, risk_cfg) -> list:
         alerts.append(f'⚠️ Превышен лимит LONG: {long_count} > {max_long}')
 
     return alerts
+
+
+def _close_instant(symbol: str, position: dict):
+    """Мгновенно закрыть позицию рынком."""
+    import subprocess, json
+    side = position.get('side', 'Buy')
+    close_side = 'Sell' if side == 'Buy' else 'Buy'
+    qty = str(int(float(position.get('size', 0))))
+    body = json.dumps({
+        'category': 'linear', 'symbol': symbol, 'side': close_side,
+        'orderType': 'Market', 'qty': qty, 'positionIdx': int(position.get('positionIdx', 0)),
+        'timeInForce': 'IOC', 'reduceOnly': True,
+    })
+    try:
+        subprocess.run([BYBIT_CLI, 'raw', 'POST', '/v5/order/create', body],
+                       capture_output=True, timeout=15)
+    except Exception:
+        pass
 
 
 def main_loop():
@@ -184,17 +202,31 @@ def main_loop():
             else:
                 for change_type, sym, msg in pos_changes + ord_changes:
                     if change_type == 'CLOSED' and sym in sl_hit_syms:
-                        add_alert('STOP', f'🛑 {msg}')
+                        old_pos = old_positions.get(sym, {})
+                        pnl = old_pos.get('upnl', 0)
+                        entry = old_pos.get('entry', 0)
+                        emoji = '🔴' if pnl < 0 else '🛑'
+                        add_alert('STOP', f'{emoji} {sym} SL −${abs(pnl):.2f} (вход ${entry:.4f})')
                         record_alert('SL')
                         # SL re-entry: запомнить для лесенки
-                        old_pos = old_positions.get(sym, {})
-                        sl_price = old_pos.get('mark', 0)  # марка на момент SL ≈ цена SL
-                        entry = old_pos.get('entry', 0)
+                        sl_price = old_pos.get('mark', 0)
                         notify_sl_hit(sym, sl_price, entry)
+                        # Cooldown для LONG: запретить повторный вход на N часов
+                        record_sl_hit(sym)
                         continue
                     if change_type == 'CLOSED' and sym in tp_hit_syms:
-                        add_alert('TP', f'🎯 {msg}')
+                        old_pos = old_positions.get(sym, {})
+                        pnl = old_pos.get('upnl', 0)
+                        entry = old_pos.get('entry', 0)
+                        add_alert('TP', f'🎯 {sym} TP +${pnl:.2f} (вход ${entry:.4f})')
                         record_alert('TP')
+                        continue
+                    if change_type == 'CLOSED':
+                        old_pos = old_positions.get(sym, {})
+                        pnl = old_pos.get('upnl', 0)
+                        entry = old_pos.get('entry', 0)
+                        sign = '+' if pnl >= 0 else '−'
+                        add_alert('INFO', f'📋 {sym} закрыта {sign}${abs(pnl):.2f} (вход ${entry:.4f})')
                         continue
                     if change_type in ('SL_HIT', 'TP_HIT') and sym in closed_syms:
                         continue
@@ -256,6 +288,18 @@ def main_loop():
             if new_positions:
                 for msg in check_liquidation(new_positions):
                     add_alert('STOP', msg)
+                # Каскадная ликвидация: если mark ближе к liqPrice чем к SL → market-close
+                for sym, p in new_positions.items():
+                    liq = p.get('liqPrice')
+                    sl = p.get('stopLoss')
+                    mark = p.get('mark', 0)
+                    if liq and sl and mark:
+                        dist_to_liq = abs(mark - liq)
+                        dist_to_sl = abs(mark - sl)
+                        if dist_to_sl > 0 and dist_to_liq < dist_to_sl * 0.5:
+                            # Цена в 2 раза ближе к ликвидации чем к SL — экстренное закрытие
+                            _close_instant(sym, p)
+                            add_alert('STOP', f'🆘 {sym}: cascade protection — mark ${mark:.4f} ближе к liq ${liq:.4f} чем к SL ${sl:.4f}')
                 if cycle_count % HEAVY_CYCLE == 0:
                     dd_msg = check_daily_drawdown(new_positions)
                     if dd_msg:
@@ -264,6 +308,43 @@ def main_loop():
                     risk_msgs = _check_risk_limits(new_positions, cfg.risk)
                     for msg in risk_msgs:
                         add_alert('STOP', msg)
+                # Instant TP: закрыть указанные символы при любом профите
+                instant_syms = set(cfg.strategy.short.get('instant_tp_symbols', []))
+                if instant_syms:
+                    for sym, p in new_positions.items():
+                        if sym in instant_syms and float(p.get('upnl', 0)) > 0:
+                            _close_instant(sym, p)
+                            pnl_val = float(p["upnl"])
+                            add_alert('TP', f'⚡ {sym} мгновенный TP: +${pnl_val:.2f}')
+                # Лимит шортов: не более max_short_pct% от всех позиций (дедупликация: раз в сутки)
+                max_short_pct = cfg.strategy.short.get('max_short_pct', 20)
+                total_pos = len(new_positions)
+                shorts = sum(1 for p in new_positions.values() if p.get('side') == 'Sell')
+                if total_pos > 0 and shorts / total_pos * 100 > max_short_pct:
+                    import json as _json
+                    dedup_file = os.path.join(DATA_DIR, 'last_short_alert.json')
+                    last_alert = 0
+                    if os.path.exists(dedup_file):
+                        try:
+                            with open(dedup_file) as f:
+                                last_alert = _json.load(f).get('ts', 0)
+                        except: pass
+                    if now_ts - last_alert > 86400:  # раз в 24 часа
+                        add_alert('STOP', f'🚨 Шортов {shorts}/{total_pos} ({shorts/total_pos*100:.0f}%) > {max_short_pct}% лимит')
+                        with open(dedup_file, 'w') as f:
+                            _json.dump({'ts': now_ts, 'shorts': shorts, 'total': total_pos}, f)
+                # SHORT max_hold_hours: авто-закрытие шортов старше N часов
+                max_hold = cfg.strategy.short.get('max_hold_hours', 0)
+                if max_hold > 0:
+                    for sym, p in new_positions.items():
+                        if p.get('side') != 'Sell':
+                            continue
+                        open_time = p.get('openTime', 0)
+                        if open_time > 0:
+                            held_hours = (now_ts - open_time / 1000) / 3600
+                            if held_hours > max_hold:
+                                _close_instant(sym, p)
+                                add_alert('STOP', f'⏰ {sym}: SHORT закрыт по таймауту ({held_hours:.0f}ч > {max_hold}ч)')
 
             # Профит-триггеры
             if new_positions:

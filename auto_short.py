@@ -178,31 +178,18 @@ def check_auto_short(positions):
                 log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?")}')
                 continue
 
-            # SL через trading-stop
-            bybit('POST', '/v5/position/trading-stop', {
+            # SL + TP через trading-stop (единым вызовом — надёжнее отдельных ордеров)
+            ts_body = {
                 'category': 'linear',
                 'symbol': sym,
-                'side': 'Buy',
                 'positionIdx': 0,
-                'orderType': 'Market',
-                'qty': str(qty),
                 'stopLoss': str(sl_price),
                 'slTriggerBy': 'MarkPrice',
-            })
-
-            # TP на Middle BB
+            }
             if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
-                bybit('POST', '/v5/order/create', {
-                    'category': 'linear',
-                    'symbol': sym,
-                    'side': 'Buy',
-                    'orderType': 'Limit',
-                    'qty': str(qty),
-                    'price': str(tp_price),
-                    'positionIdx': 0,
-                    'timeInForce': 'GTC',
-                    'reduceOnly': True,
-                })
+                ts_body['takeProfit'] = str(tp_price)
+                ts_body['tpTriggerBy'] = 'MarkPrice'
+            bybit('POST', '/v5/position/trading-stop', ts_body)
 
             state[sym] = {
                 'last_short_ts': now,

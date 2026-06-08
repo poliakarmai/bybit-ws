@@ -1,6 +1,6 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
-> **Версия:** 3.4 | **Дата:** 08.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.5 | **Дата:** 08.06.2026 | **Автор:** Alexey Polyakov
 >
 > Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API для внешнего управления.
 
@@ -83,27 +83,40 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Плечо | 3x |
 | Маржа | $15 (score ≥7), $10 (≥5.5), $5 (<5.5) |
 | Скоринг | 9 метрик: Tier, BB%, объём, дни падения, Weekly/Monthly BB, фандинг, RSI |
+| Макс позиций | 15 (безопасный дефолт v3.5) |
+| Cooldown SL | 4 часа после SL перед повторным входом |
+| Приоритет проверок | margin_available → max_positions → sector_limit → correlation_stop → scoring ≥ threshold |
 
 ### SHORT (хедж)
 | Параметр | Значение |
 |----------|---------|
 | Вход | Лимитный ордер Sell на +2% выше рынка (ждём отскока) |
-| TP | Middle BB |
+| TP | Middle BB (через trading-stop takeProfit, единый вызов с SL) |
 | SL | +5% для Tier A/B, +7% для шлака C/D |
 | Плечо | 3x |
 | Маржа | $10 |
 | Порог BB | >85% (перегрев) |
 | Макс позиций | 3 |
-| ONE_WAY фильтр | XRP, ONDO, WLFI, ENJ, ESPORTS, AVAX, APT, SUI — исключены |
+| Макс удержание | 72 часа (авто-закрытие, защита от фандинга) |
+| ONE_WAY фильтр | XRP\*, ONDO, WLFI, ENJ, ESPORTS, AVAX\*, APT\*, SUI\* — исключены |
 | DCA-шорт | На аномальных пампах (>120% за 24ч) |
 
 ### Tier-классификация
 ```
 Tier S: BTC, ETH
-Tier A: SOL, LTC, XRP, ADA, DOT, LINK, UNI, AVAX, SUI, NEAR, APT
+Tier A: SOL, LTC, XRP*, ADA, DOT, LINK, UNI, AVAX*, SUI*, NEAR, APT*
 Tier B: ARB, OP, AAVE, INJ, ONDO, ENA, FET, WLD, ATOM, ALGO, RUNE
 Tier C/D: всё остальное (шлак)
+(* = ONE_WAY, SHORT невозможен)
 ```
+
+### DCA (лесенка)
+| Параметр | Значение |
+|----------|---------|
+| Уровни | -10%, -20%, -30% от входа |
+| Множитель маржи | 1.5x, 2.0x, 2.5x от базы $10 |
+| max_margin_per_symbol | $80 (не более $80 суммарной маржи на монету) |
+| max_dca_count | 2 (максимум 2 добавки, не 3) |
 
 ---
 
@@ -118,7 +131,7 @@ Tier C/D: всё остальное (шлак)
 Статус монитора.
 
 ```json
-// GET http://0.0.0.0:8766/health
+// GET http://localhost:8766/health
 {
   "status": "alive",
   "cycle_count": 12345,
@@ -132,7 +145,7 @@ Tier C/D: всё остальное (шлак)
 Текущие позиции.
 
 ```json
-// GET http://0.0.0.0:8766/positions
+// GET http://localhost:8766/positions
 {
   "count": 7,
   "long": 5,
@@ -158,7 +171,7 @@ Tier C/D: всё остальное (шлак)
 Активные лимитные ордера.
 
 ```json
-// GET http://0.0.0.0:8766/orders
+// GET http://localhost:8766/orders
 {
   "count": 7,
   "orders": [
@@ -178,7 +191,7 @@ Tier C/D: всё остальное (шлак)
 Метрики за сегодня.
 
 ```json
-// GET http://0.0.0.0:8766/metrics
+// GET http://localhost:8766/metrics
 {
   "alerts": {"INFO": 15, "STOP": 3, "ENTRY": 2},
   "auto_entries": 2,
@@ -228,7 +241,7 @@ Content-Type: application/json
 ```
 
 ### POST /enter
-Ручной вход в позицию.
+Ручной вход в позицию. Двухэтапный: `confirm: false` — превью без исполнения, `confirm: true` — реальный вход.
 
 ```
 POST /enter
@@ -239,9 +252,12 @@ Content-Type: application/json
   "side": "Sell",
   "qty": 50,
   "sl": 0.52,
-  "tp": 0.35
+  "tp": 0.35,
+  "confirm": true    // false = dry-run (показать что будет)
 }
 ```
+
+При `confirm: false` возвращает расчёт (маржа, liqPrice, scoring) без размещения ордера.
 
 ### POST /close
 Закрыть позицию.
@@ -251,6 +267,36 @@ POST /close
 Content-Type: application/json
 
 {"symbol": "SIRENUSDT"}
+```
+
+### POST /pause
+Приостановить все авто-входы (TP/SL продолжают работать).
+
+```
+POST /pause
+```
+
+### POST /resume
+Возобновить авто-входы.
+
+```
+POST /resume
+```
+
+### GET /status
+Текущий режим работы.
+
+```
+GET /status
+→ {"mode": "active"}  // active | paused | emergency_stopped
+```
+
+### GET /report
+Сводка за период.
+
+```
+GET /report?period=daily|weekly
+→ PnL за период, открытые позиции, SL/TP hits, комиссии
 ```
 
 ---
@@ -274,7 +320,9 @@ strategy:
     sl_offset: 0.07                           # -7% от Lower BB
     tp_middle_pct: 0.20                       # 20% на Middle
     tp_upper_pct: 0.80                        # 80% на Upper
-    max_positions: 0                           # 0 = безлимитно
+    max_positions: 15                          # безопасный дефолт
+    cooldown_after_sl: 14400                    # 4ч после SL перед повторным входом
+    cooldown_after_tp: 3600                     # 1ч после TP
 
   short:
     leverage: 3
@@ -285,11 +333,14 @@ strategy:
     bb_threshold: 85                           # BB% > порога
     max_positions: 3
     cooldown_seconds: 7200
+    max_hold_hours: 72                          # авто-закрытие SHORT через 72ч
 
   dca:
     enabled: true
     levels: [0.95, 0.90, 0.85]               # уровни добавки (от входа)
     multiplier: 2                              # ×2 к марже на каждом уровне
+    max_margin_per_symbol: 80                   # не более $80 на монету
+    max_dca_count: 2                            # максимум 2 добавки
 
 watchlist:
   mode: "top"                                  # top | fixed
@@ -314,16 +365,26 @@ rpc:
   rate_limit_per_min: 60                       # лимит запросов/IP/мин
 
 risk:
-  max_drawdown_pct: 15                          # стоп всего при -15% депозита
+  max_drawdown_pct: 15                          # стоп при -15% от пикового баланса
   max_total_margin: 500                         # не более $500 суммарно в позициях
   max_daily_loss: 50                            # стоп на день при -$50
   max_long_positions: 12                         # лимит LONG позиций
   emergency_close_all: true                      # закрыть всё при max_drawdown
+  drawdown_mode: "peak"                         # peak (от пика) или start (от начального)
+  drawdown_reset_hours: 24                      # авто-сброс паузы через 24ч
+  max_per_sector: 3                             # не более 3 позиций в одном секторе
+  sectors:
+    L1: [SOL, SUI, APT, NEAR, AVAX, ADA, DOT]
+    DeFi: [AAVE, UNI, INJ, RUNE]
+    AI: [FET, WLD]
+    Meme: [DOGE]
 
 logging:
   max_size_mb: 50
   max_files: 7
   format: "json"                                 # json | text
+  trades_max_size_mb: 100                        # ротация trades.jsonl
+  trades_archive: true                           # архивировать старые в .gz
 
 alerts:
   telegram_enabled: false
@@ -413,6 +474,13 @@ Score = Σ w_i × metric_i   (диапазон 0–10)
   4. Tier                     — A/B предпочтительнее C/D
 ```
 
+### Нормализация
+```
+raw_score = Σ w_i × metric_i
+max_score = 2.0 + 1.5 + 1.0×7 + 0.5 = 11.0
+Score = raw_score / 11.0 × 10    (диапазон 0–10)
+```
+
 ### Ограничения
 
 - M5/M3 BB% > 100% → вход блокируется (LONG на перегреве — нет)
@@ -470,11 +538,20 @@ GET-запросы (positions, orders): backoff [1, 3, 5] секунд.
 
 ### Edge Cases
 
-- **Flash crash -20%:** BB расширяются, lower уходит глубоко вниз. DCA включается. SL защищает каждую позицию.
+- **Flash crash -20%:** BB расширяются, lower уходит глубоко вниз. DCA включается (с лимитом $80/монету). SL защищает каждую позицию.
 - **Памп +50%:** SHORT не входит на пике (entry_offset +2% даёт буфер). BB% зашкаливает — сигнал пропускается.
-- **Фандинг раз в 8 часов:** при 3x может сжирать 0.3-1% на шорте в бычий рынок. Учитывается в PnL через cost_tracker.
+- **Фандинг раз в 8 часов:** при 3x может сжирать 0.3-1% на шорте в бычий рынок. Защита: max_hold_hours=72 (авто-закрытие). Учитывается в PnL через cost_tracker.
 - **Пустой API-ответ:** fetch_positions возвращает {} — цикл продолжается с последним снепшотом.
 - **Множественные SL за цикл:** check_and_fix_sl обрабатывает все позиции без дублирования.
+- **Каскадная ликвидация:** при резком движении SL может не исполниться (gap). Защита: каждый цикл проверяется dist(mark, liq) < dist(mark, SL) × 0.5 → market-close немедленно.
+- **Пустой API-ответ:** fetch_positions возвращает {} → повтор через 5с, 3 попытки. Если 3 раза пусто — принять.
+
+### Partial failure handling
+| Сбой | Поведение |
+|------|-----------|
+| fetch_positions() OK, fetch_orders() failed | Продолжить без check_auto_tp, check_auto_sl работает |
+| fetch_positions() пустой массив, был снепшот | НЕ считать что позиций нет. Повторить через 5с × 3 |
+| Bybit API возвращает пустой массив (не ошибка) | Считать данные потерянными, использовать снепшот |
 
 ---
 
@@ -493,8 +570,9 @@ Type=simple
 ExecStart=/usr/bin/python3 -m bybit_ws.main
 Restart=always
 RestartSec=10
-Environment=BYBIT_API_KEY=...
-Environment=BYBIT_API_SECRET=...
+EnvironmentFile=%h/.config/bybit-ws/.env
+# Файл .env (chmod 600):
+#   BYBIT_API_KEY=***   BYBIT_API_SECRET=***   RPC_TOKEN=your-secret-token
 Environment=RPC_TOKEN=your-secret-token
 
 [Install]
@@ -508,10 +586,37 @@ systemctl --user enable --now bybit-ws
 
 ### Docker
 
+```yaml
+# docker-compose.yaml
+version: "3.8"
+services:
+  bybit-ws:
+    build: .
+    restart: always
+    ports:
+      - "127.0.0.1:8766:8766"
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - bybit-data:/app/data
+volumes:
+  bybit-data:
+```
+
 ```bash
 docker-compose up -d
-# Порт 8766 проброшен на хост
 ```
+
+> ⚠️ **НИКОГДА не используйте `bind: "0.0.0.0"` без `auth_token`.** POST-эндпоинты позволяют открывать/закрывать позиции.
+
+### Канонические пути
+
+| Компонент | Путь | Описание |
+|-----------|------|----------|
+| Код | `~/.local/lib/bybit_ws/` | Установленный пакет |
+| Конфиг | `~/.config/bybit-ws/config.yaml` | YAML-конфигурация |
+| Данные | `~/.local/share/bybit-ws/` | Логи, журнал, снепшоты |
+| Systemd | `~/.config/systemd/user/bybit-ws.service` | Unit-файл |
 
 ### Переменные окружения
 
@@ -525,6 +630,7 @@ docker-compose up -d
 
 ## 9. Changelog
 
+- **v3.5** (08.06.2026): 🔥 DCA-лимиты ($80/монету, 2 добавки), защита от каскадных ликвидаций, LONG cooldown 4ч после SL, SHORT max_hold 72ч, max_positions: 15, секторные лимиты, TP через trading-stop, drawdown_mode: peak, trades.jsonl ротация, EnvironmentFile, скоринг-нормализация, partial failure handling, канонические пути
 - **v3.4** (08.06.2026): RPC auth (Bearer), rate limiting, GET /config, GET /signals (LONG+SHORT), risk-лимиты (max_drawdown, max_total_margin), graceful shutdown (SIGTERM → check SL), log rotation, error-формат v1, confirm:true для /enter, документация (scoring, edge cases, deployment)
 - **v3.3:** YAML-конфиг, REST API 8 эндпоинтов, _timed_call, Docker, SDK, OpenAPI
 - **v3.2:** auto_short исправлен (4 бага), SHORT лимитный вход +2%, SL +5%/+7% по Tier
@@ -540,6 +646,21 @@ docker-compose up -d
 - Нет бэктестинга (планируется v4.0)
 - Нет spot-поддержки
 - Нет веб-дашборда (планируется v4.0)
+
+## 10b. Roadmap v4.0+
+
+| Приоритет | Фича | Обоснование |
+|-----------|------|-------------|
+| 🔴 Высокий | Бэктестинг на исторических данных | Валидация стратегии без риска |
+| 🔴 Высокий | Мульти-аккаунт | Разделение LONG/SHORT/хедж по субаккаунтам |
+| 🔴 Высокий | Веб-дашборд (Streamlit/Grafana) | Визуализация PnL, позиций, метрик |
+| 🟡 Средний | WebSocket вместо REST polling | Снижение задержки, меньше rate limits |
+| 🟡 Средний | Prometheus-метрики `/metrics` OpenMetrics | Интеграция с Grafana |
+| 🟡 Средний | ML-модель для scoring (вместо ручных весов) | Адаптивный скоринг под рынок |
+| 🟡 Средний | Авто-фандинг-ротация | Автоматический flip LONG↔SHORT при смене ставки |
+| 🟢 Низкий | Spot-поддержка | Диверсификация инструментов |
+| 🟢 Низкий | Telegram/webhook-алерты в реальном времени | Push-уведомления вместо polling |
+| 🟢 Низкий | Мобильное PWA-приложение | Мониторинг с телефона |
 
 ---
 
@@ -592,6 +713,10 @@ docker-compose up -d
 5. **ONE_WAY монеты** — SHORT невозможен (XRP, ONDO, WLFI, ENJ, ESPORTS, AVAX, APT, SUI).
 6. **correlation_stop** (>80% LONG) блокирует LONG-вход, но разрешает SHORT.
 7. **RPC без auth** — если RPC_TOKEN не задан, API открыт для любого процесса на localhost.
-8. **DCA multiplier 2x** — при 3 уровнях: $15 → $30 → $60 = $105 на монету. При 10 монетах = $1050 — весь депозит.
-9. **Фандинг не в PnL** — авто-TP/закрытия не учитывают фандинг. Реальный PnL чуть ниже при долгом держании.
-10. **events.log** ротируется при 50 МБ, но trades.jsonl — нет (следить вручную).
+8. **DCA multiplier 2x** — v3.5: ограничено через `max_margin_per_symbol: $80` и `max_dca_count: 2`. Больше не проблема.
+9. **Фандинг не в PnL** — v3.5: SHORT авто-закрываются через 72ч (`max_hold_hours`). Реальный PnL всё ещё чуть ниже при долгом держании.
+10. **events.log** ротируется при 50 МБ. v3.5: trades.jsonl тоже ротируется при 100 МБ + архивация в .gz.
+11. **Каскадная ликвидация** — при гэпе SL не исполняется. v3.5: проверка `dist(mark, liq) < dist(mark, SL) × 0.5` → market-close.
+12. **LONG без cooldown после SL** — v3.5: cooldown_after_sl=14400 (4ч), отслеживается через `cooldown.json`.
+13. **API-ключи в systemd unit** — v3.5: `EnvironmentFile=%h/.config/bybit-ws/.env` (chmod 600) вместо `Environment=`.
+14. **SHORT TP теряется** — v3.5: TP через `takeProfit` в `trading-stop` (единый вызов с SL), не отдельным ордером.

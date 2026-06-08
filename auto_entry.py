@@ -4,6 +4,7 @@ from . import BYBIT_CLI, DATA_DIR, MAX_POSITION_VALUE
 from . import safe_run
 from .api import bybit, get_bb_data
 from .alerts import log_event
+from .config import Config
 
 AUTO_ENTRY_WATCH = [
     'BTCUSDT','ETHUSDT','SOLUSDT','LTCUSDT','XRPUSDT','ADAUSDT','DOGEUSDT',
@@ -11,6 +12,30 @@ AUTO_ENTRY_WATCH = [
     'AAVEUSDT','AVAXUSDT','DOTUSDT','INJUSDT','ONDOUSDT','ARBUSDT',
     'ENAUSDT','FETUSDT','APTUSDT','ATOMUSDT','RUNUSDT',
 ]
+
+COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
+
+
+def _load_cooldown():
+    """Загрузить cooldown-трекер (sym → timestamp последнего SL)."""
+    if os.path.exists(COOLDOWN_FILE):
+        try:
+            with open(COOLDOWN_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def record_sl_hit(sym: str):
+    """Записать что символ получил SL — для cooldown перед повторным входом."""
+    cd = _load_cooldown()
+    cd[sym] = time.time()
+    try:
+        with open(COOLDOWN_FILE, 'w') as f:
+            json.dump(cd, f)
+    except Exception:
+        pass
 
 def quick_score_bb(bb_pos):
     if bb_pos <= 10: return 15
@@ -59,6 +84,15 @@ def auto_entry_scan(positions):
     scored_candidates.sort()
     for bb_pos, sym, lower, upper, cur in scored_candidates:
         try:
+            # Cooldown после SL: не входить повторно N часов
+            cooldown = _load_cooldown()
+            cfg = Config()
+            cooldown_sl = cfg.strategy.long.get('cooldown_after_sl', 14400)
+            if sym in cooldown:
+                elapsed = time.time() - cooldown[sym]
+                if elapsed < cooldown_sl:
+                    continue  # ещё не прошло достаточно времени
+
             if bb_pos < 25 and bb_pos > 0:
                 price = round(lower, 4)
                 qty = math.ceil(10 / price * 3)

@@ -48,7 +48,9 @@ _DEFAULT_STRATEGY_LONG = {
     'sl_offset': 0.07,
     'tp_middle_pct': 0.20,
     'tp_upper_pct': 0.80,
-    'max_positions': 0,       # 0 = unlimited
+    'max_positions': 15,       # безопасный дефолт (было 0=unlimited)
+    'cooldown_after_sl': 14400,    # 4 часа после SL перед повторным входом
+    'cooldown_after_tp': 3600,     # 1 час после TP
 }
 
 _DEFAULT_STRATEGY_SHORT = {
@@ -60,12 +62,17 @@ _DEFAULT_STRATEGY_SHORT = {
     'bb_threshold': 85,
     'max_positions': 3,
     'cooldown_seconds': 7200,
+    'max_short_pct': 20,       # макс % шортов от всех позиций
+    'max_hold_hours': 72,      # авто-закрытие SHORT через 72ч если не сработал TP/SL
+    'instant_tp_symbols': ['NEARUSDT'],  # закрыть при любом профите
 }
 
 _DEFAULT_STRATEGY_DCA = {
     'enabled': True,
     'levels': [0.95, 0.90, 0.85],
     'multiplier': 2,
+    'max_margin_per_symbol': 80,   # не более $80 суммарной маржи на одну монету
+    'max_dca_count': 2,            # максимум 2 DCA-добавки (не 3)
 }
 
 _DEFAULT_WATCHLIST = {
@@ -109,12 +116,23 @@ _DEFAULT_RISK = {
     'max_daily_loss': 50,         # stop for the day at -$50
     'max_long_positions': 12,      # limit LONG entries
     'emergency_close_all': True,   # close all positions on max_drawdown
+    'drawdown_mode': 'peak',      # 'peak' (от пикового баланса) или 'start' (от начального)
+    'drawdown_reset_hours': 24,   # авто-сброс паузы через N часов после emergency
+    'max_per_sector': 3,           # не более 3 позиций в одном секторе (L1/DeFi/AI/Meme)
+    'sectors': {
+        'L1': ['SOLUSDT', 'SUIUSDT', 'APTUSDT', 'NEARUSDT', 'AVAXUSDT', 'ADAUSDT', 'DOTUSDT'],
+        'DeFi': ['AAVEUSDT', 'UNIUSDT', 'INJUSDT', 'RUNEUSDT'],
+        'AI': ['FETUSDT', 'WLDUSDT'],
+        'Meme': ['DOGEUSDT'],
+    },
 }
 
 _DEFAULT_LOGGING = {
     'max_size_mb': 50,
     'max_files': 7,
     'format': 'json',            # 'json' or 'text'
+    'trades_max_size_mb': 100,   # ротация trades.jsonl при 100 МБ
+    'trades_archive': True,       # архивировать старые в .gz
 }
 
 _DEFAULT_ALERTS = {
@@ -186,7 +204,9 @@ strategy:
     sl_offset: {_DEFAULT_STRATEGY_LONG['sl_offset']}          # -7% from Lower BB
     tp_middle_pct: {_DEFAULT_STRATEGY_LONG['tp_middle_pct']}     # 20% on Middle
     tp_upper_pct: {_DEFAULT_STRATEGY_LONG['tp_upper_pct']}      # 80% on Upper
-    max_positions: {_DEFAULT_STRATEGY_LONG['max_positions']}       # 0 = unlimited
+    max_positions: {_DEFAULT_STRATEGY_LONG['max_positions']}       # безопасный дефолт (15)
+    cooldown_after_sl: {_DEFAULT_STRATEGY_LONG['cooldown_after_sl']}  # 4ч после SL перед повторным входом
+    cooldown_after_tp: {_DEFAULT_STRATEGY_LONG['cooldown_after_tp']}   # 1ч после TP
 
   short:
     leverage: {_DEFAULT_STRATEGY_SHORT['leverage']}
@@ -197,11 +217,14 @@ strategy:
     bb_threshold: {_DEFAULT_STRATEGY_SHORT['bb_threshold']}         # BB% > threshold triggers SHORT
     max_positions: {_DEFAULT_STRATEGY_SHORT['max_positions']}
     cooldown_seconds: {_DEFAULT_STRATEGY_SHORT['cooldown_seconds']}
+    max_hold_hours: {_DEFAULT_STRATEGY_SHORT['max_hold_hours']}        # авто-закрытие SHORT через 72ч
 
   dca:
     enabled: {str(_DEFAULT_STRATEGY_DCA['enabled']).lower()}
     levels: {_DEFAULT_STRATEGY_DCA['levels']}
     multiplier: {_DEFAULT_STRATEGY_DCA['multiplier']}
+    max_margin_per_symbol: {_DEFAULT_STRATEGY_DCA['max_margin_per_symbol']}   # не более $80 на монету
+    max_dca_count: {_DEFAULT_STRATEGY_DCA['max_dca_count']}            # максимум 2 добавки
 
 watchlist:
   mode: "{_DEFAULT_WATCHLIST['mode']}"           # top | fixed
@@ -230,16 +253,21 @@ rpc:
   rate_limit_per_min: {_DEFAULT_RPC['rate_limit_per_min']}
 
 risk:
-  max_drawdown_pct: {_DEFAULT_RISK['max_drawdown_pct']}       # -15% от депозита → закрыть всё
+  max_drawdown_pct: {_DEFAULT_RISK['max_drawdown_pct']}       # -15% от пикового баланса → закрыть всё
   max_total_margin: {_DEFAULT_RISK['max_total_margin']}        # не более $500 суммарно в позициях
   max_daily_loss: {_DEFAULT_RISK['max_daily_loss']}            # стоп на день при -$50
   max_long_positions: {_DEFAULT_RISK['max_long_positions']}     # лимит LONG
   emergency_close_all: {str(_DEFAULT_RISK['emergency_close_all']).lower()}
+  drawdown_mode: "{_DEFAULT_RISK['drawdown_mode']}"            # peak (от пика) или start (от начального)
+  drawdown_reset_hours: {_DEFAULT_RISK['drawdown_reset_hours']}   # авто-сброс паузы через 24ч
+  max_per_sector: {_DEFAULT_RISK['max_per_sector']}              # не более N позиций в одном секторе
 
 logging:
   max_size_mb: {_DEFAULT_LOGGING['max_size_mb']}
   max_files: {_DEFAULT_LOGGING['max_files']}
   format: "{_DEFAULT_LOGGING['format']}"
+  trades_max_size_mb: {_DEFAULT_LOGGING['trades_max_size_mb']}    # ротация trades.jsonl
+  trades_archive: {str(_DEFAULT_LOGGING['trades_archive']).lower()}
 
 alerts:
   telegram_enabled: {str(_DEFAULT_ALERTS['telegram_enabled']).lower()}

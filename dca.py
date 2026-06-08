@@ -16,6 +16,7 @@ import json, math, os, time, subprocess
 from . import DATA_DIR, BYBIT_CLI
 from .api import bybit, fetch_positions, get_bb_data
 from .alerts import log_event
+from .config import Config
 
 DCA_STATE_FILE = os.path.join(DATA_DIR, 'dca_state.json')
 
@@ -73,6 +74,9 @@ def check_dca():
 
     state = _load_state()
     now = time.time()
+    cfg = Config()
+    max_margin_sym = cfg.strategy.dca.get('max_margin_per_symbol', 80)
+    max_dca_count = cfg.strategy.dca.get('max_dca_count', 2)
 
     for sym, p in positions.items():
         # Все Tier'ы — DCA при падении
@@ -101,6 +105,15 @@ def check_dca():
         sym_state = state.get(sym, {})
         dca_done = sym_state.get('dca_levels', [])
 
+        # Ограничение: максимум N DCA-добавок на символ
+        if len(dca_done) >= max_dca_count:
+            continue
+
+        # Считаем текущую суммарную маржу на этот символ
+        current_margin = pos_value / lev
+        dca_margin_used = sym_state.get('dca_margin_used', 0)
+        total_margin_sym = current_margin + dca_margin_used
+
         for level_pct, margin_mult in DCA_LEVELS:
             level_tag = f'{level_pct:.0%}'
 
@@ -119,6 +132,12 @@ def check_dca():
                 dca_price = round(mark * 0.995, 4)  # чуть ниже рынка
 
             margin = BASE_MARGIN * margin_mult
+            new_total = total_margin_sym + margin
+
+            # Ограничение: не более max_margin_per_symbol суммарной маржи
+            if new_total > max_margin_sym:
+                continue
+
             qty_raw = margin * lev / dca_price
             lot_step = _get_lot_step(sym)
             qty = math.ceil(qty_raw / lot_step) * lot_step
@@ -144,6 +163,8 @@ def check_dca():
             data_resp = bybit('POST', '/v5/order/create', body)
             if data_resp and data_resp.get('retCode') == 0:
                 dca_done.append(level_tag)
+                dca_margin_used += margin
+                sym_state['dca_margin_used'] = dca_margin_used
                 msg = (
                     f'📉 DCA {sym}: уровень {level_tag} @ ${dca_price:.4f}, '
                     f'{qty} шт, маржа ~${margin:.0f} ({margin_mult:.0f}x базы), '
