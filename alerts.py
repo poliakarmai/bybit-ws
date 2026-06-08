@@ -44,9 +44,50 @@ def _normalize_msg(msg):
 
 
 def log_event(msg):
+    """Записать событие в events.log с автоматической ротацией."""
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    line = f'[{ts}] {msg}\n'
+
+    # Ротация лога при превышении max_size_mb
+    try:
+        _rotate_if_needed(EVENTS_LOG)
+    except Exception:
+        pass
+
     with open(EVENTS_LOG, 'a') as f:
-        f.write(f'[{ts}] {msg}\n')
+        f.write(line)
+
+
+def _rotate_if_needed(log_path: str):
+    """Ротация лог-файла при превышении размера."""
+    max_size_mb = 50
+    max_files = 7
+    try:
+        from .config import Config
+        cfg = Config()
+        max_size_mb = cfg.logging.get('max_size_mb', 50)
+        max_files = cfg.logging.get('max_files', 7)
+    except Exception:
+        pass
+
+    max_bytes = max_size_mb * 1024 * 1024
+    if not os.path.exists(log_path):
+        return
+
+    size = os.path.getsize(log_path)
+    if size < max_bytes:
+        return
+
+    # Сдвигаем файлы: events.log → events.log.1 → events.log.2 → ...
+    for i in range(max_files, 0, -1):
+        src = f'{log_path}.{i-1}' if i > 1 else log_path
+        dst = f'{log_path}.{i}'
+        if os.path.exists(src):
+            if os.path.exists(dst):
+                os.remove(dst)
+            os.rename(src, dst)
+    # Создаём новый пустой файл
+    open(log_path, 'w').close()
 
 
 def add_alert(level, msg):

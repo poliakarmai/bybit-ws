@@ -1,6 +1,6 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
-> **Версия:** 3.3 | **Дата:** 08.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.4 | **Дата:** 08.06.2026 | **Автор:** Alexey Polyakov
 >
 > Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API для внешнего управления.
 
@@ -109,6 +109,11 @@ Tier C/D: всё остальное (шлак)
 
 ## 3. REST API (порт 8766)
 
+> Все ответы содержат `api_version: "v1"`.
+> При ошибке: `{"error": "...", "detail": "...", "api_version": "v1", "status": код}`.
+> Аутентификация: Bearer-токен через заголовок `Authorization: Bearer <RPC_TOKEN>` (опционально, настраивается в конфиге).
+> Rate limiting: 60 запросов/мин на IP (настраивается).
+
 ### GET /health
 Статус монитора.
 
@@ -184,15 +189,31 @@ Tier C/D: всё остальное (шлак)
 ```
 
 ### GET /signals
-Текущие сигналы (SHORT-кандидаты).
+Текущие сигналы (LONG + SHORT кандидаты).
 
 ```json
-// GET http://0.0.0.0:8766/signals
+// GET http://localhost:8766/signals
 {
-  "shorts": [
-    {"symbol": "SIRENUSDT", "bb_pct": 118, "price": 1.305, "upper": 1.124},
-    {"symbol": "WLDUSDT", "bb_pct": 80, "price": 0.489, "upper": 0.563}
+  "api_version": "v1",
+  "long": [
+    {"symbol": "ADAUSDT", "score": 7.2, "tier": "A", "bb_pct": 25, "raw": "..."}
+  ],
+  "short": [
+    {"symbol": "SIRENUSDT", "bb_pct": 118, "price": 1.305, "upper": 1.124}
   ]
+}
+```
+
+### GET /config
+Текущая конфигурация (без секретов).
+
+```json
+// GET http://localhost:8766/config
+{
+  "api_version": "v1",
+  "strategy": {"long": {...}, "short": {...}},
+  "risk": {"max_drawdown_pct": 15, "max_total_margin": 500, ...},
+  ...
 }
 ```
 
@@ -289,6 +310,20 @@ monitor:
 rpc:
   port: 8766
   bind: "127.0.0.1"                            # или 0.0.0.0 для внешнего доступа
+  auth_token: "${RPC_TOKEN}"                   # Bearer-токен (пусто = без auth)
+  rate_limit_per_min: 60                       # лимит запросов/IP/мин
+
+risk:
+  max_drawdown_pct: 15                          # стоп всего при -15% депозита
+  max_total_margin: 500                         # не более $500 суммарно в позициях
+  max_daily_loss: 50                            # стоп на день при -$50
+  max_long_positions: 12                         # лимит LONG позиций
+  emergency_close_all: true                      # закрыть всё при max_drawdown
+
+logging:
+  max_size_mb: 50
+  max_files: 7
+  format: "json"                                 # json | text
 
 alerts:
   telegram_enabled: false
@@ -353,32 +388,162 @@ requests.post('http://localhost:8766/close', json={'symbol': 'WLDUSDT'})
 
 ---
 
-## 6. Roadmap
+## 6. Scoring (формула)
 
-### v3.3 (текущая) ✅
-- [x] auto_short исправлен и работает
-- [x] SHORT: лимитный вход +2%, SL +5%/+7% по Tier
-- [x] RPC-сервер с /health, /positions, /orders, /metrics
-- [x] Watchdog с авто-рестартом
+Это ядро стратегии — как оцениваются кандидаты на вход.
 
-### v3.4 (следующая) — Продукт
-- [ ] Внешний конфиг YAML
-- [ ] POST /scan (GridSignal-сканер через API)
-- [ ] POST /enter + POST /close
-- [ ] Webhook на SL/TP-hit
-- [ ] Docker-образ
-- [ ] Базовая документация на английском
+```
+Score = Σ w_i × metric_i   (диапазон 0–10)
 
-### v4.0 — Продажа
-- [ ] Мульти-аккаунт (один инстанс → несколько пользователей)
-- [ ] Бэктестинг на истории
-- [ ] Дашборд (веб-интерфейс)
-- [ ] REST API с OpenAPI-схемой
-- [ ] Лицензия и биллинг
+Метрики LONG:
+  1. Tier-бонус          ×2.0    S=10, A=7, B=4, C/D=1
+  2. BB% (положение)     ×1.5    0% = нижняя полоса, 100% = верхняя. Идеал <30%
+  3. Объём (24ч)         ×1.0    нормализованный log(volume)
+  4. Дней падения        ×1.0    до 7 дней подряд
+  5. Недельный BB%       ×1.0    Weekly BB для тренда
+  6. Месячный BB%        ×1.0    Monthly BB для контекста
+  7. Фандинг             ×0.5    отрицательный фандинг = бонус
+  8. RSI(14)             ×1.0    RSI < 30 = 10, RSI > 70 = 0
+  9. BB Squeeze          ×1.0    узкие полосы перед расширением
+
+Метрики SHORT:
+  1. BB% > threshold (85%)   — перегрев верхней полосы
+  2. RSI(14) > 70             — перекупленность
+  3. Объём                   — подтверждение
+  4. Tier                     — A/B предпочтительнее C/D
+```
+
+### Ограничения
+
+- M5/M3 BB% > 100% → вход блокируется (LONG на перегреве — нет)
+- correlation_stop (>80% LONG) → LONG-вход блокируется
+- max_long_positions достигнут → пропуск
+- paused = true → все авто-входы блокируются
 
 ---
 
-## 7. Файлы проекта
+## 7. Error Handling
+
+### Формат ошибок API
+
+Все ошибки возвращают унифицированный JSON:
+
+```json
+{
+  "error": "Краткое описание",
+  "detail": "Развёрнутое описание",
+  "api_version": "v1",
+  "status": 400
+}
+```
+
+### HTTP-коды
+
+| Код | Значение | Пример |
+|-----|----------|--------|
+| 200 | OK | Успешный GET/POST |
+| 400 | Bad Request | Невалидный symbol/side/qty |
+| 401 | Unauthorized | Неверный Bearer-токен |
+| 402 | Payment Required | Недостаточно маржи |
+| 404 | Not Found | Нет позиции для закрытия |
+| 409 | Conflict | Позиция уже существует |
+| 422 | Unprocessable | Неизвестный символ (код 110001) |
+| 429 | Rate Limited | Превышен лимит запросов |
+| 500 | Internal Error | Ошибка сканера |
+| 504 | Timeout | Сканер не ответил за 120с |
+
+### Retry-логика
+
+API-запросы к Bybit: 3 попытки с exponential backoff [1, 3, 10] секунд.
+GET-запросы (positions, orders): backoff [1, 3, 5] секунд.
+
+### Поведение при сбоях
+
+| Сбой | Поведение |
+|------|-----------|
+| Bybit API 429 | Retry с backoff до 3 попыток |
+| Bybit API 503 | Retry, затем пропуск цикла |
+| get_bb_data() завис | _timed_call 25с → пропуск |
+| Главный цикл >90с | Тяжёлые проверки пропущены, лёгкие продолжаются |
+| Watchdog >180с | Аварийный os._exit(1), systemd перезапустит |
+| SIGTERM | Проверить SL на всех позициях → сохранить снепшоты → exit 0 |
+
+### Edge Cases
+
+- **Flash crash -20%:** BB расширяются, lower уходит глубоко вниз. DCA включается. SL защищает каждую позицию.
+- **Памп +50%:** SHORT не входит на пике (entry_offset +2% даёт буфер). BB% зашкаливает — сигнал пропускается.
+- **Фандинг раз в 8 часов:** при 3x может сжирать 0.3-1% на шорте в бычий рынок. Учитывается в PnL через cost_tracker.
+- **Пустой API-ответ:** fetch_positions возвращает {} — цикл продолжается с последним снепшотом.
+- **Множественные SL за цикл:** check_and_fix_sl обрабатывает все позиции без дублирования.
+
+---
+
+## 8. Deployment
+
+### Systemd (рекомендуется)
+
+```ini
+# ~/.config/systemd/user/bybit-ws.service
+[Unit]
+Description=Bybit WS Bollinger Grid Monitor
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m bybit_ws.main
+Restart=always
+RestartSec=10
+Environment=BYBIT_API_KEY=...
+Environment=BYBIT_API_SECRET=...
+Environment=RPC_TOKEN=your-secret-token
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now bybit-ws
+```
+
+### Docker
+
+```bash
+docker-compose up -d
+# Порт 8766 проброшен на хост
+```
+
+### Переменные окружения
+
+| Переменная | Назначение | По умолчанию |
+|-----------|-----------|-------------|
+| BYBIT_API_KEY | Ключ Bybit API | (обязательно) |
+| BYBIT_API_SECRET | Секрет Bybit API | (обязательно) |
+| RPC_TOKEN | Bearer-токен для API | (пусто = без auth) |
+
+---
+
+## 9. Changelog
+
+- **v3.4** (08.06.2026): RPC auth (Bearer), rate limiting, GET /config, GET /signals (LONG+SHORT), risk-лимиты (max_drawdown, max_total_margin), graceful shutdown (SIGTERM → check SL), log rotation, error-формат v1, confirm:true для /enter, документация (scoring, edge cases, deployment)
+- **v3.3:** YAML-конфиг, REST API 8 эндпоинтов, _timed_call, Docker, SDK, OpenAPI
+- **v3.2:** auto_short исправлен (4 бага), SHORT лимитный вход +2%, SL +5%/+7% по Tier
+- **v3.1:** cost_tracker (PnL + комиссии), SL re-entry лесенка
+- **v3.0:** модульная архитектура, watchdog, авто-SL/TP/DCA
+
+---
+
+## 10. Известные ограничения
+
+- Только Bybit USDT фьючерсы (linear perpetual)
+- Один аккаунт на инстанс (мульти-аккаунт в v4.0)
+- Нет бэктестинга (планируется v4.0)
+- Нет spot-поддержки
+- Нет веб-дашборда (планируется v4.0)
+
+---
+
+## 11. Файлы проекта
 
 ```
 ~/.local/
@@ -418,11 +583,15 @@ requests.post('http://localhost:8766/close', json={'symbol': 'WLDUSDT'})
 
 ---
 
-## 8. Pitfalls
+## 12. Pitfalls
 
-1. **Watchdog (180с)** убивает процесс если главный цикл завис. Причина: API-запросы (get_bb_data) внутри цикла по символам. Решение: guard `heavy_ok` (пропускать тяжёлые проверки если цикл >90с).
+1. **Watchdog (180с)** убивает процесс если главный цикл завис. Причина: API-запросы (get_bb_data) внутри цикла по символам. Решение: guard `heavy_ok` (пропускать тяжёлые проверки если цикл >90с) + `_timed_call` с таймаутом 25с.
 2. **positionIdx** зависит от режима аккаунта: one-way mode → idx=0, hedge mode → idx=0/1. Проверять перед входом.
 3. **get_bb_data()** возвращает ключи `upper`/`middle`/`lower` (lowercase), не `Upper Band`.
 4. **BB lower** может быть отрицательным у новых/волатильных монет — это нормально.
 5. **ONE_WAY монеты** — SHORT невозможен (XRP, ONDO, WLFI, ENJ, ESPORTS, AVAX, APT, SUI).
 6. **correlation_stop** (>80% LONG) блокирует LONG-вход, но разрешает SHORT.
+7. **RPC без auth** — если RPC_TOKEN не задан, API открыт для любого процесса на localhost.
+8. **DCA multiplier 2x** — при 3 уровнях: $15 → $30 → $60 = $105 на монету. При 10 монетах = $1050 — весь депозит.
+9. **Фандинг не в PnL** — авто-TP/закрытия не учитывают фандинг. Реальный PnL чуть ниже при долгом держании.
+10. **events.log** ротируется при 50 МБ, но trades.jsonl — нет (следить вручную).

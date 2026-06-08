@@ -99,6 +99,22 @@ _DEFAULT_MONITOR = {
 _DEFAULT_RPC = {
     'port': 8766,
     'bind': '127.0.0.1',      # default to localhost; set 0.0.0.0 for external
+    'auth_token': '${RPC_TOKEN}',  # Bearer token for RPC auth
+    'rate_limit_per_min': 60,  # max requests per minute per IP
+}
+
+_DEFAULT_RISK = {
+    'max_drawdown_pct': 15,       # global stop: -15% of deposit → close all
+    'max_total_margin': 500,      # max $500 total in positions
+    'max_daily_loss': 50,         # stop for the day at -$50
+    'max_long_positions': 12,      # limit LONG entries
+    'emergency_close_all': True,   # close all positions on max_drawdown
+}
+
+_DEFAULT_LOGGING = {
+    'max_size_mb': 50,
+    'max_files': 7,
+    'format': 'json',            # 'json' or 'text'
 }
 
 _DEFAULT_ALERTS = {
@@ -112,6 +128,9 @@ _DEFAULT_API = {
     'key': '${BYBIT_API_KEY}',
     'secret': '${BYBIT_API_SECRET}',
     'base_url': 'https://api.bytick.com',
+    'retry_count': 3,
+    'retry_backoff': [1, 3, 10],   # seconds
+    'timeout': 30,
 }
 
 
@@ -128,6 +147,8 @@ def _default_config() -> dict:
         'tiers': dict(_DEFAULT_TIERS),
         'monitor': dict(_DEFAULT_MONITOR),
         'rpc': dict(_DEFAULT_RPC),
+        'risk': dict(_DEFAULT_RISK),
+        'logging': dict(_DEFAULT_LOGGING),
         'alerts': dict(_DEFAULT_ALERTS),
     }
 
@@ -205,6 +226,20 @@ monitor:
 rpc:
   port: {_DEFAULT_RPC['port']}
   bind: "{_DEFAULT_RPC['bind']}"
+  auth_token: "${{RPC_TOKEN}}"     # Bearer token (empty = no auth)
+  rate_limit_per_min: {_DEFAULT_RPC['rate_limit_per_min']}
+
+risk:
+  max_drawdown_pct: {_DEFAULT_RISK['max_drawdown_pct']}       # -15% от депозита → закрыть всё
+  max_total_margin: {_DEFAULT_RISK['max_total_margin']}        # не более $500 суммарно в позициях
+  max_daily_loss: {_DEFAULT_RISK['max_daily_loss']}            # стоп на день при -$50
+  max_long_positions: {_DEFAULT_RISK['max_long_positions']}     # лимит LONG
+  emergency_close_all: {str(_DEFAULT_RISK['emergency_close_all']).lower()}
+
+logging:
+  max_size_mb: {_DEFAULT_LOGGING['max_size_mb']}
+  max_files: {_DEFAULT_LOGGING['max_files']}
+  format: "{_DEFAULT_LOGGING['format']}"
 
 alerts:
   telegram_enabled: {str(_DEFAULT_ALERTS['telegram_enabled']).lower()}

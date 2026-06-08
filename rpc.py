@@ -2,6 +2,7 @@
 
 Запускается как фоновый поток в main.py.
 Порт: 8766 (рядом с дашбордом 8765).
+Версия API: v1 (доступна через /v1/* и корневые алиасы).
 
 Endpoints:
     GET  /rpc/all         — все данные одним запросом (позиции, ордера, алерты, метрики, трейды)
@@ -11,13 +12,20 @@ Endpoints:
     GET  /rpc/trades      — трейд-лог (trades.jsonl)
     GET  /rpc/alerts      — последние алерты
     GET  /rpc/metrics     — метрики (daily)
+    GET  /rpc/signals     — LONG + SHORT сигналы (скоринг, кандидаты)
+    GET  /rpc/config      — текущая конфигурация (без секретов)
     GET  /health          — алиас на /rpc/health
     GET  /positions       — алиас на /rpc/positions
     GET  /orders          — алиас на /rpc/orders
     GET  /metrics         — алиас на /rpc/metrics
+    GET  /signals         — алиас на /rpc/signals
+    GET  /config          — алиас на /rpc/config
     POST /scan            — запустить GridSignal-сканер
     POST /enter           — ручной вход в позицию
     POST /close           — закрыть позицию
+
+Все ответы содержат api_version: "v1".
+При ошибке: {"error": "...", "detail": "...", "api_version": "v1", "status": код}.
 """
 
 import json
@@ -27,6 +35,7 @@ import threading
 import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from collections import defaultdict
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 HOME = Path.home()
@@ -42,6 +51,11 @@ rpc_state = {
     "cycle_duration": 0.0,
     "paused": False,
 }
+
+# Rate limiting: per-IP token bucket
+_rate_limit_store = defaultdict(lambda: {"tokens": 60, "last": time.time()})
+
+API_VERSION = "v1"
 
 
 def _load_json(path):
@@ -61,6 +75,9 @@ def _read_file(path):
 
 
 def _json_response(handler, data, status=200):
+    """Отправить JSON-ответ с api_version."""
+    if isinstance(data, dict) and "api_version" not in data:
+        data = {"api_version": API_VERSION, **data}
     body = json.dumps(data, ensure_ascii=False, default=str)
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
@@ -68,6 +85,15 @@ def _json_response(handler, data, status=200):
     handler.send_header("Cache-Control", "no-cache")
     handler.end_headers()
     handler.wfile.write(body.encode())
+
+
+def _error(handler, error: str, detail: str = "", status: int = 400):
+    """Стандартный error-ответ."""
+    return _json_response(handler, {
+        "error": error,
+        "detail": detail,
+        "status": status,
+    }, status)
 
 
 def _run_bybit(*args, timeout=30) -> dict:
@@ -89,6 +115,34 @@ def _run_bybit(*args, timeout=30) -> dict:
         return {'retCode': -1, 'retMsg': 'bybit CLI not found'}
     except Exception as e:
         return {'retCode': -1, 'retMsg': str(e)[:200]}
+
+
+def _get_auth_token() -> str:
+    """Получить RPC токен из конфига (если есть). Пустая строка = без auth."""
+    try:
+        from .config import Config
+        cfg = Config()
+        token = cfg.rpc.get('auth_token', '')
+        # Если токен — env-var который не подставился, считаем пустым
+        if token.startswith('${') or token == '':
+            return ''
+        return token
+    except Exception:
+        return ''
+
+
+def _check_rate_limit(client_ip: str, max_per_min: int = 60) -> bool:
+    """Проверить rate limit для IP. Возвращает True если запрос разрешён."""
+    now = time.time()
+    bucket = _rate_limit_store[client_ip]
+    elapsed = now - bucket["last"]
+    bucket["last"] = now
+    # Восстановление токенов: 1 токен в секунду
+    bucket["tokens"] = min(max_per_min, bucket["tokens"] + elapsed)
+    if bucket["tokens"] >= 1:
+        bucket["tokens"] -= 1
+        return True
+    return False
 
 
 def _tick_size(price: float) -> float:
@@ -135,19 +189,43 @@ class RPCHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # тихий режим
 
+    def _check_auth(self) -> bool:
+        """Проверить Bearer-токен (если настроен)."""
+        token = _get_auth_token()
+        if not token:
+            return True  # auth не настроен — пропускаем
+        auth = self.headers.get('Authorization', '')
+        return auth == f'Bearer {token}'
+
+    def _check_ip_rate(self) -> bool:
+        """Проверить rate limit для IP клиента."""
+        try:
+            from .config import Config
+            cfg = Config()
+            max_per_min = cfg.rpc.get('rate_limit_per_min', 60)
+        except Exception:
+            max_per_min = 60
+        client_ip = self.client_address[0]
+        return _check_rate_limit(client_ip, max_per_min)
+
     # ── CORS preflight ──────────────────────────────────────────
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     # ── GET ─────────────────────────────────────────────────────
     def do_GET(self):
+        if not self._check_ip_rate():
+            return _error(self, 'Rate limit exceeded', 'Too many requests', 429)
+        if not self._check_auth():
+            return _error(self, 'Unauthorized', 'Invalid or missing Bearer token', 401)
+
         path = self.path.rstrip("/") or "/"
 
-        # Алиасы (короткие пути из DESIGN.md)
+        # Алиасы (короткие пути)
         if path == "/health":
             return self._handle_health()
         if path == "/positions":
@@ -156,6 +234,10 @@ class RPCHandler(BaseHTTPRequestHandler):
             return self._handle_orders()
         if path == "/metrics":
             return self._handle_metrics()
+        if path == "/signals":
+            return self._handle_signals()
+        if path == "/config":
+            return self._handle_get_config()
 
         if path == "/rpc/all":
             self._handle_all()
@@ -171,15 +253,24 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_alerts()
         elif path == "/rpc/metrics":
             self._handle_metrics()
+        elif path == "/rpc/signals":
+            self._handle_signals()
+        elif path == "/rpc/config":
+            self._handle_get_config()
         elif path == "/rpc" or path == "/":
             self._handle_index()
         else:
             self.send_response(404)
             self.end_headers()
-            self.wfile.write(b'{"error":"not found"}')
+            self.wfile.write(b'{"error":"not found","api_version":"v1"}')
 
     # ── POST ────────────────────────────────────────────────────
     def do_POST(self):
+        if not self._check_ip_rate():
+            return _error(self, 'Rate limit exceeded', 'Too many requests', 429)
+        if not self._check_auth():
+            return _error(self, 'Unauthorized', 'Invalid or missing Bearer token', 401)
+
         path = self.path.rstrip("/") or "/"
 
         # Читаем тело запроса
@@ -189,7 +280,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         try:
             body = json.loads(body_raw) if body_raw else {}
         except json.JSONDecodeError:
-            return _json_response(self, {'error': 'Invalid JSON body'}, 400)
+            return _error(self, 'Invalid JSON body', '', 400)
 
         if path == "/scan":
             self._handle_scan(body)
@@ -208,7 +299,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-            self.wfile.write(b'{"error":"not found"}')
+            self.wfile.write(b'{"error":"not found","api_version":"v1"}')
 
     # ═══════════════════════════════════════════════════════════════
     # GET handlers
@@ -217,14 +308,34 @@ class RPCHandler(BaseHTTPRequestHandler):
     def _handle_index(self):
         _json_response(self, {
             "service": "bybit-ws-rpc",
-            "version": "2.0",
+            "api_version": API_VERSION,
             "endpoints": [
                 "/rpc/all", "/rpc/positions", "/rpc/orders",
                 "/rpc/health", "/rpc/trades", "/rpc/alerts", "/rpc/metrics",
-                "/health", "/positions", "/orders", "/metrics",
+                "/rpc/signals", "/rpc/config",
+                "/health", "/positions", "/orders", "/metrics", "/signals", "/config",
                 "POST /scan", "POST /enter", "POST /close",
+                "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
             ]
         })
+
+    def _handle_get_config(self):
+        """GET /rpc/config — текущая конфигурация без секретов."""
+        try:
+            from .config import get_config
+            cfg = get_config()
+            # Удаляем секреты
+            safe = dict(cfg)
+            if 'api' in safe:
+                safe['api'] = dict(safe['api'])
+                safe['api'].pop('key', None)
+                safe['api'].pop('secret', None)
+            if 'rpc' in safe and 'auth_token' in safe['rpc']:
+                safe['rpc'] = dict(safe['rpc'])
+                safe['rpc']['auth_token'] = '***' if safe['rpc']['auth_token'] else ''
+            _json_response(self, safe)
+        except Exception as e:
+            _error(self, 'Config read error', str(e), 500)
 
     def _handle_all(self):
         """Все данные одним запросом — для дашборда."""
@@ -369,6 +480,48 @@ class RPCHandler(BaseHTTPRequestHandler):
         metrics = _load_json(DATA_DIR / "metrics.json")
         _json_response(self, metrics)
 
+    def _handle_signals(self):
+        """GET /rpc/signals — LONG и SHORT сигналы."""
+        result = {"long": [], "short": []}
+
+        # SHORT сигналы через GridSignal сканер
+        try:
+            short_result = subprocess.run(
+                ['python3', GRIDSIGNAL_SCANNER, '--mode', 'short', '--limit', '10'],
+                capture_output=True, text=True, timeout=60
+            )
+            if short_result.returncode == 0:
+                result["short"] = json.loads(short_result.stdout)
+        except Exception:
+            pass
+
+        # LONG сигналы через auto_entry_scan
+        try:
+            from .auto_entry import auto_entry_scan
+            positions = _load_json(DATA_DIR / "positions.json")
+            if not isinstance(positions, dict):
+                positions = {}
+            long_entries = auto_entry_scan(positions)
+            # Парсим сообщения в структурированные сигналы
+            for msg in long_entries:
+                # Формат: "📌 SYMUSDT score=X.X (Tier X) BB=X% ..."
+                try:
+                    parts = msg.split()
+                    if len(parts) >= 3 and parts[0] == "📌":
+                        sym = parts[1]
+                        signal = {"symbol": sym, "raw": msg}
+                        for p in parts[2:]:
+                            if "=" in p:
+                                k, v = p.split("=", 1)
+                                signal[k] = v
+                        result["long"].append(signal)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        _json_response(self, result)
+
     # ═══════════════════════════════════════════════════════════════
     # POST handlers
     # ═══════════════════════════════════════════════════════════════
@@ -381,25 +534,15 @@ class RPCHandler(BaseHTTPRequestHandler):
         """
         mode = body.get('mode', 'long')
         if mode not in ('long', 'short'):
-            return _json_response(self, {
-                'error': 'Invalid mode',
-                'detail': "mode must be 'long' or 'short'",
-                'received': mode,
-            }, 400)
+            return _error(self, 'Invalid mode', "mode must be 'long' or 'short'", 400)
 
         try:
             limit = int(body.get('limit', 5))
         except (ValueError, TypeError):
-            return _json_response(self, {
-                'error': 'Invalid limit',
-                'detail': 'limit must be an integer',
-            }, 400)
+            return _error(self, 'Invalid limit', 'limit must be an integer', 400)
 
         if limit < 1 or limit > 20:
-            return _json_response(self, {
-                'error': 'Invalid limit',
-                'detail': 'limit must be between 1 and 20',
-            }, 400)
+            return _error(self, 'Invalid limit', 'limit must be between 1 and 20', 400)
 
         try:
             result = subprocess.run(
@@ -408,17 +551,13 @@ class RPCHandler(BaseHTTPRequestHandler):
                 capture_output=True, text=True, timeout=120
             )
             if result.returncode != 0:
-                return _json_response(self, {
-                    'error': 'Scanner failed',
-                    'detail': result.stderr.strip()[:500] or f'exit code {result.returncode}',
-                }, 500)
+                return _error(self, 'Scanner failed',
+                              result.stderr.strip()[:500] or f'exit code {result.returncode}', 500)
 
             signals = json.loads(result.stdout)
             if not isinstance(signals, list):
-                return _json_response(self, {
-                    'error': 'Scanner returned unexpected format',
-                    'detail': str(signals)[:200],
-                }, 500)
+                return _error(self, 'Scanner returned unexpected format',
+                              str(signals)[:200], 500)
 
             return _json_response(self, {
                 'mode': mode,
@@ -427,89 +566,75 @@ class RPCHandler(BaseHTTPRequestHandler):
             })
 
         except subprocess.TimeoutExpired:
-            return _json_response(self, {
-                'error': 'Scanner timed out',
-                'detail': 'Scanner did not complete within 120 seconds',
-            }, 504)
+            return _error(self, 'Scanner timed out',
+                          'Scanner did not complete within 120 seconds', 504)
         except json.JSONDecodeError:
-            return _json_response(self, {
-                'error': 'Scanner output parse error',
-                'detail': result.stdout[:500] if 'result' in dir() else '',
-            }, 500)
+            return _error(self, 'Scanner output parse error',
+                          result.stdout[:500] if 'result' in dir() else '', 500)
         except FileNotFoundError:
-            return _json_response(self, {
-                'error': 'Scanner script not found',
-                'detail': f'Expected at {GRIDSIGNAL_SCANNER}',
-            }, 500)
+            return _error(self, 'Scanner script not found',
+                          f'Expected at {GRIDSIGNAL_SCANNER}', 500)
         except Exception as e:
-            return _json_response(self, {
-                'error': 'Internal scanner error',
-                'detail': str(e)[:500],
-            }, 500)
+            return _error(self, 'Internal scanner error', str(e)[:500], 500)
 
     def _handle_enter(self, body: dict):
         """POST /enter — ручной вход в позицию.
 
         Принимает: {"symbol": "XRPUSDT", "side": "Buy|Sell", "qty": 10,
-                      "sl": 0.50, "tp": 0.55}
+                      "sl": 0.50, "tp": 0.55, "confirm": true}
+        Если confirm: true — исполнение. Если false — только превью.
         """
         # ── Валидация ──
         symbol = body.get('symbol', '').strip().upper()
         if not symbol or not symbol.endswith('USDT'):
-            return _json_response(self, {
-                'error': 'Invalid symbol',
-                'detail': 'symbol must be like XRPUSDT',
-            }, 400)
+            return _error(self, 'Invalid symbol', 'symbol must be like XRPUSDT', 400)
 
         side = body.get('side', '').strip()
         if side not in ('Buy', 'Sell'):
-            return _json_response(self, {
-                'error': 'Invalid side',
-                'detail': "side must be 'Buy' (LONG) or 'Sell' (SHORT)",
-            }, 400)
+            return _error(self, 'Invalid side', "side must be 'Buy' (LONG) or 'Sell' (SHORT)", 400)
 
         try:
             qty = float(body.get('qty', 0))
         except (ValueError, TypeError):
-            return _json_response(self, {
-                'error': 'Invalid qty',
-                'detail': 'qty must be a number',
-            }, 400)
+            return _error(self, 'Invalid qty', 'qty must be a number', 400)
 
         if qty <= 0:
-            return _json_response(self, {
-                'error': 'Invalid qty',
-                'detail': 'qty must be positive',
-            }, 400)
+            return _error(self, 'Invalid qty', 'qty must be positive', 400)
 
         sl = body.get('sl')
         if sl is not None:
             try:
                 sl = float(sl)
             except (ValueError, TypeError):
-                return _json_response(self, {
-                    'error': 'Invalid sl',
-                    'detail': 'sl must be a number',
-                }, 400)
+                return _error(self, 'Invalid sl', 'sl must be a number', 400)
 
         tp = body.get('tp')
         if tp is not None:
             try:
                 tp = float(tp)
             except (ValueError, TypeError):
-                return _json_response(self, {
-                    'error': 'Invalid tp',
-                    'detail': 'tp must be a number',
-                }, 400)
+                return _error(self, 'Invalid tp', 'tp must be a number', 400)
 
         # ── Проверка существующей позиции ──
         existing = _get_position(symbol)
         if existing:
-            return _json_response(self, {
-                'error': 'Position already exists',
-                'detail': f'{symbol} already has an open {existing["side"]} position of size {existing["size"]}',
-                'existing': existing,
-            }, 409)
+            return _error(self, 'Position already exists',
+                          f'{symbol} already has an open {existing["side"]} position of size {existing["size"]}', 409)
+
+        # ── Подтверждение (двухэтапный вход) ──
+        confirm = body.get('confirm', False)
+        if not confirm:
+            # Превью-режим: возвращаем что БУДЕТ сделано
+            preview = {
+                'symbol': symbol,
+                'side': side,
+                'qty': qty,
+                'sl': _round_price(sl) if sl else None,
+                'tp': _round_price(tp) if tp else None,
+                'confirm_required': True,
+                'message': 'Send with confirm: true to execute',
+            }
+            return _json_response(self, preview)
 
         # ── Размещение рыночного ордера ──
         qty_str = str(int(qty)) if qty == int(qty) else str(qty)
@@ -528,20 +653,15 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         if order_result.get('retCode') != 0:
             err_msg = order_result.get('retMsg', 'Unknown error')
-            # Определяем статус по ошибке
             status = 400
             if 'margin' in err_msg.lower() or 'balance' in err_msg.lower() or 'insufficient' in err_msg.lower():
-                status = 402  # Payment Required для маржи
+                status = 402
                 err_msg = f'Insufficient margin: {err_msg}'
             elif '110001' in err_msg:
                 status = 422
             elif 'symbol' in err_msg.lower() or 'not found' in err_msg.lower():
                 status = 404
-            return _json_response(self, {
-                'error': 'Order failed',
-                'detail': err_msg,
-                'bybit_code': order_result.get('retCode'),
-            }, status)
+            return _error(self, 'Order failed', err_msg, status)
 
         order_id = order_result.get('result', {}).get('orderId', 'unknown')
         result = {
@@ -580,7 +700,6 @@ class RPCHandler(BaseHTTPRequestHandler):
         # ── Размещение TP ──
         if tp is not None and tp > 0:
             tp_side = 'Sell' if side == 'Buy' else 'Buy'
-            # Проверка что TP в правильную сторону
             if (side == 'Buy' and tp > sl) or (side == 'Sell' and tp < sl) or sl is None:
                 tp_body = json.dumps({
                     'category': 'linear',
@@ -616,20 +735,13 @@ class RPCHandler(BaseHTTPRequestHandler):
         """
         symbol = body.get('symbol', '').strip().upper()
         if not symbol or not symbol.endswith('USDT'):
-            return _json_response(self, {
-                'error': 'Invalid symbol',
-                'detail': 'symbol must be like XRPUSDT',
-            }, 400)
+            return _error(self, 'Invalid symbol', 'symbol must be like XRPUSDT', 400)
 
-        # ── Получить позицию ──
         pos = _get_position(symbol)
         if not pos:
-            return _json_response(self, {
-                'error': 'No position',
-                'detail': f'No open position found for {symbol}',
-            }, 404)
+            return _error(self, 'No position',
+                          f'No open position found for {symbol}', 404)
 
-        # ── Закрывающий ордер (противоположная сторона) ──
         close_side = 'Sell' if pos['side'] == 'Buy' else 'Buy'
         qty_str = str(int(pos['size'])) if pos['size'] == int(pos['size']) else str(pos['size'])
 
@@ -647,11 +759,8 @@ class RPCHandler(BaseHTTPRequestHandler):
         close_result = _run_bybit('raw', 'POST', '/v5/order/create', close_body)
 
         if close_result.get('retCode') != 0:
-            return _json_response(self, {
-                'error': 'Close failed',
-                'detail': close_result.get('retMsg', 'Unknown error'),
-                'bybit_code': close_result.get('retCode'),
-            }, 400)
+            return _error(self, 'Close failed',
+                          close_result.get('retMsg', 'Unknown error'), 400)
 
         order_id = close_result.get('result', {}).get('orderId', 'unknown')
         return _json_response(self, {
@@ -672,7 +781,7 @@ class RPCHandler(BaseHTTPRequestHandler):
             reload_config()
             _json_response(self, {"status": "ok", "message": "config reloaded"})
         except Exception as e:
-            _json_response(self, {"error": str(e)}, 500)
+            _error(self, 'Config reload error', str(e), 500)
 
     def _handle_pause(self):
         """POST /pause — приостановить торговлю."""
@@ -695,7 +804,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 last = all_lines[-lines:] if len(all_lines) > lines else all_lines
                 _json_response(self, {"lines": len(last), "log": "".join(last)})
         except FileNotFoundError:
-            _json_response(self, {"error": "log file not found"}, 404)
+            _error(self, 'Log file not found', str(log_path), 404)
 
 
 def start_rpc_server(port=8766, bind='127.0.0.1'):

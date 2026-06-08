@@ -52,6 +52,44 @@ from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .auto_short import check_auto_short
 
 
+def _check_risk_limits(positions: dict, risk_cfg) -> list:
+    """Проверить risk-лимиты: max_total_margin, max_daily_loss.
+    Возвращает список алерт-сообщений.
+    """
+    alerts = []
+    if not positions:
+        return alerts
+
+    # Суммарная маржа
+    total_margin = sum(float(p.get('positionIM', p.get('margin', 0))) for p in positions.values())
+    max_margin = risk_cfg.get('max_total_margin', 500)
+    if total_margin > max_margin:
+        alerts.append(f'🚨 Превышена суммарная маржа: ${total_margin:.0f} > ${max_margin}')
+
+    # Дневной убыток (через metrics.json)
+    metrics_file = os.path.join(DATA_DIR, 'metrics.json')
+    daily_loss = 0.0
+    try:
+        import json as _json
+        if os.path.exists(metrics_file):
+            with open(metrics_file) as f:
+                m = _json.load(f)
+            daily_loss = abs(float(m.get('daily_pnl', 0)))
+    except Exception:
+        pass
+    max_loss = risk_cfg.get('max_daily_loss', 50)
+    if daily_loss > max_loss:
+        alerts.append(f'🚨 Дневной убыток превышен: -${daily_loss:.0f} > -${max_loss}')
+
+    # Лимит LONG позиций
+    long_count = sum(1 for p in positions.values() if p.get('side') == 'Buy')
+    max_long = risk_cfg.get('max_long_positions', 12)
+    if long_count > max_long:
+        alerts.append(f'⚠️ Превышен лимит LONG: {long_count} > {max_long}')
+
+    return alerts
+
+
 def main_loop():
     cfg = Config()
     CYCLE_SECONDS = cfg.monitor.cycle_seconds
@@ -214,7 +252,7 @@ def main_loop():
                     for sym, idx, side, qty, price, pos_size in tp_actions:
                         add_alert('INFO', f'🎯 Auto-TP {sym}: @ ${price:.4f}')
 
-            # Ликвидация + просадка
+            # Ликвидация + просадка + risk-лимиты
             if new_positions:
                 for msg in check_liquidation(new_positions):
                     add_alert('STOP', msg)
@@ -222,6 +260,10 @@ def main_loop():
                     dd_msg = check_daily_drawdown(new_positions)
                     if dd_msg:
                         add_alert('STOP', dd_msg)
+                    # Risk limits: max_total_margin + max_daily_loss
+                    risk_msgs = _check_risk_limits(new_positions, cfg.risk)
+                    for msg in risk_msgs:
+                        add_alert('STOP', msg)
 
             # Профит-триггеры
             if new_positions:
@@ -413,8 +455,29 @@ def handle_sigterm(signum, frame):
     log_event('Получен SIGTERM — graceful shutdown')
     import bybit_ws
     bybit_ws.SHUTDOWN_REQUESTED = True
-    # Also update local
     globals()['SHUTDOWN_REQUESTED'] = True
+
+    # Проверить все позиции имеют SL
+    try:
+        from .auto_sl import check_and_fix_sl
+        sl_alerts = check_and_fix_sl()
+        for msg in sl_alerts:
+            log_event(f'  Shutdown SL check: {msg}')
+    except Exception as e:
+        log_event(f'  Shutdown SL check failed: {e}')
+
+    # Сохранить состояние
+    try:
+        new_positions = fetch_positions()
+        new_orders = fetch_orders()
+        if new_positions:
+            save_json(POSITIONS_SNAPSHOT, new_positions)
+        if new_orders:
+            save_json(ORDERS_SNAPSHOT, new_orders)
+        log_event(f'Shutdown: сохранено {len(new_positions) if new_positions else 0} позиций, '
+                  f'{len(new_orders) if new_orders else 0} ордеров')
+    except Exception as e:
+        log_event(f'Shutdown: ошибка сохранения состояния: {e}')
 
 signal.signal(signal.SIGTERM, handle_sigterm)
 
