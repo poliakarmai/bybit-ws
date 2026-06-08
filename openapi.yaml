@@ -1,0 +1,202 @@
+openapi: "3.0.3"
+info:
+  title: Bybit Bollinger Grid Monitor API
+  description: |
+    Автономный трейдинг-монитор для AI-агентов.
+    Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра.
+    
+    ## Быстрый старт
+    ```bash
+    curl http://localhost:8766/health
+    curl -X POST http://localhost:8766/scan -H 'Content-Type: application/json' -d '{"mode":"short","limit":3}'
+    ```
+  version: "3.3.0"
+  contact:
+    name: Alexey Polyakov
+servers:
+  - url: http://localhost:8766
+    description: Локальный инстанс
+tags:
+  - name: Health
+  - name: Trading
+  - name: Signals
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Статус монитора
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /positions:
+    get:
+      tags: [Trading]
+      summary: Текущие позиции
+      responses:
+        "200":
+          description: Список позиций
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Positions"
+  /orders:
+    get:
+      tags: [Trading]
+      summary: Активные ордера
+      responses:
+        "200":
+          description: Список ордеров
+  /metrics:
+    get:
+      tags: [Trading]
+      summary: Метрики за сегодня
+      responses:
+        "200":
+          description: Метрики
+  /signals:
+    get:
+      tags: [Signals]
+      summary: Текущие SHORT-кандидаты
+      responses:
+        "200":
+          description: Список кандидатов
+  /scan:
+    post:
+      tags: [Signals]
+      summary: Запустить скан (GridSignal)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [long, short]
+                  default: short
+                limit:
+                  type: integer
+                  default: 5
+              example: {mode: short, limit: 3}
+      responses:
+        "200":
+          description: Сигналы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResult"
+  /enter:
+    post:
+      tags: [Trading]
+      summary: Войти в позицию
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, side, qty]
+              properties:
+                symbol:
+                  type: string
+                  example: WLDUSDT
+                side:
+                  type: string
+                  enum: [Buy, Sell]
+                qty:
+                  type: number
+                sl:
+                  type: number
+                  description: Цена стоп-лосса
+                tp:
+                  type: number
+                  description: Цена тейк-профита
+      responses:
+        "200":
+          description: Ордер выставлен
+        "400":
+          description: Неверный символ
+        "409":
+          description: Позиция уже существует
+  /close:
+    post:
+      tags: [Trading]
+      summary: Закрыть позицию
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol]
+              properties:
+                symbol:
+                  type: string
+      responses:
+        "200":
+          description: Позиция закрыта
+        "404":
+          description: Позиция не найдена
+components:
+  schemas:
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          example: alive
+        uptime:
+          type: integer
+          example: 36000
+        cycle_count:
+          type: integer
+          example: 12345
+        watchdog_ok:
+          type: boolean
+          example: true
+    Position:
+      type: object
+      properties:
+        symbol: {type: string}
+        side: {type: string, enum: [Buy, Sell]}
+        size: {type: number}
+        entry: {type: number}
+        mark: {type: number}
+        pnl: {type: string}
+        pnl_pct: {type: string}
+        sl: {type: number}
+        tp: {type: number}
+    Positions:
+      type: object
+      properties:
+        count: {type: integer}
+        long: {type: integer}
+        short: {type: integer}
+        total_pnl: {type: string}
+        positions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Position"
+    Signal:
+      type: object
+      properties:
+        symbol: {type: string}
+        score: {type: number}
+        price: {type: number}
+        bb_pos: {type: number}
+        entry: {type: number}
+        sl: {type: number}
+        tp: {type: number}
+    ScanResult:
+      type: object
+      properties:
+        mode: {type: string}
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Signal"
