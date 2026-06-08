@@ -10,7 +10,7 @@ info:
     curl http://localhost:8766/health
     curl -X POST http://localhost:8766/scan -H 'Content-Type: application/json' -d '{"mode":"short","limit":3}'
     ```
-  version: "3.3.0"
+  version: "3.4.0"
   contact:
     name: Alexey Polyakov
 servers:
@@ -60,10 +60,58 @@ paths:
   /signals:
     get:
       tags: [Signals]
-      summary: Текущие SHORT-кандидаты
+      summary: LONG + SHORT сигналы
       responses:
         "200":
-          description: Список кандидатов
+          description: Сигналы long и short
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Signals"
+  /config:
+    get:
+      tags: [Trading]
+      summary: Текущая конфигурация (без секретов)
+      responses:
+        "200":
+          description: Конфигурация
+  /pause:
+    post:
+      tags: [Trading]
+      summary: Приостановить авто-входы
+      responses:
+        "200":
+          description: Торговля приостановлена
+  /resume:
+    post:
+      tags: [Trading]
+      summary: Возобновить авто-входы
+      responses:
+        "200":
+          description: Торговля возобновлена
+  /reload-config:
+    post:
+      tags: [Trading]
+      summary: Перечитать конфиг без рестарта
+      responses:
+        "200":
+          description: Конфиг перечитан
+  /logs:
+    post:
+      tags: [Trading]
+      summary: Последние строки лога
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lines:
+                  type: integer
+                  default: 100
+      responses:
+        "200":
+          description: Строки лога
   /scan:
     post:
       tags: [Signals]
@@ -116,6 +164,10 @@ paths:
                 tp:
                   type: number
                   description: Цена тейк-профита
+                confirm:
+                  type: boolean
+                  default: false
+                  description: true = исполнение, false = превью
       responses:
         "200":
           description: Ордер выставлен
@@ -200,3 +252,29 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Signal"
+    Signals:
+      type: object
+      properties:
+        api_version: {type: string, example: v1}
+        long:
+          type: array
+          items:
+            $ref: "#/components/schemas/Signal"
+        short:
+          type: array
+          items:
+            $ref: "#/components/schemas/Signal"
+    Error:
+      type: object
+      properties:
+        error: {type: string}
+        detail: {type: string}
+        api_version: {type: string, example: v1}
+        status: {type: integer}
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: "Bearer-токен из конфига (RPC_TOKEN)"
+security:
+  - BearerAuth: []
