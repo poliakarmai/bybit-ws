@@ -157,15 +157,17 @@ def check_auto_short(positions):
         tp_price = _round_to_tick(middle, sym)
 
         try:
-            # Ставим SHORT рыночный
+            # Лимитный SHORT: Sell выше рынка на +2% — ждём отскока для входа
+            limit_price = _round_to_tick(price * 1.02, sym)
             order = bybit('POST', '/v5/order/create', {
                 'category': 'linear',
                 'symbol': sym,
                 'side': 'Sell',
-                'orderType': 'Market',
+                'orderType': 'Limit',
                 'qty': str(qty),
+                'price': str(limit_price),
                 'positionIdx': 0,  # SHORT (one-way mode)
-                'timeInForce': 'IOC',
+                'timeInForce': 'GTC',
             })
             if order.get('retCode') != 0:
                 log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?")}')
@@ -207,7 +209,7 @@ def check_auto_short(positions):
             }
             _save_state(state)
 
-            msg = (f'🐻 Auto-SHORT {sym}: ${price:.4f} ×{qty} ({SHORT_LEVERAGE}x), '
+            msg = (f'🐻 Auto-SHORT {sym}: лимитка ${limit_price:.4f} (рынок ${price:.4f}, +2%) ×{qty} ({SHORT_LEVERAGE}x), '
                    f'BB={bb_pct:.0f}%, SL ${sl_price:.4f} (+{sl_pct*100:.0f}%), '
                    f'TP ${tp_price:.4f} (Middle BB)')
             add_alert('ENTRY', msg)
