@@ -1,5 +1,6 @@
 """Главный цикл монитора и точка входа."""
 import os, sys, time, signal, threading
+threading.stack_size(512 * 1024)  # 512KB вместо 8MB — экономия памяти на _timed_call потоках
 from datetime import datetime
 from . import (DATA_DIR, EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
                ORDERS_METADATA, BYBIT_CLI, HERMES_BIN, WATCHDOG_LAST, SHUTDOWN_REQUESTED,
