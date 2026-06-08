@@ -1,0 +1,2 @@
+# Bybit Bollinger Grid Monitor — зависимости
+PyYAML>=6.0
