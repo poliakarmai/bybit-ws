@@ -132,7 +132,7 @@ def check_auto_short(positions):
                   and t['symbol'] not in live_syms]
 
     for t in candidates:
-        if active_shorts + len(actions) >= MAX_SHOTS:
+        if active_shorts + len(actions) >= MAX_SHORTS:
             break
 
         sym = t['symbol']
