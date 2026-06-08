@@ -36,7 +36,8 @@ ONE_WAY = {'XRPUSDT', 'ONDOUSDT', 'WLFIUSDT', 'ENJUSDT', 'ESPORTSUSDT', 'AVAXUSD
 BB_SHORT_THRESHOLD = 85      # BB% выше = кандидат
 SHORT_MARGIN = 10.0           # $10 маржа
 SHORT_LEVERAGE = 3
-SL_PCT = 0.05                 # +5% стоп
+SL_PCT = 0.05                 # +5% стоп для Tier A/B
+SL_PCT_JUNK = 0.07             # +7% стоп для шлака (C/D)
 MAX_SHORTS = 3
 COOLDOWN = 7200               # 2 часа
 
@@ -151,7 +152,8 @@ def check_auto_short(positions):
             continue
 
         price = _round_to_tick(last_price, sym)
-        sl_price = _round_to_tick(price * (1 + SL_PCT), sym)
+        sl_pct = SL_PCT_JUNK if sym not in TIER_AB else SL_PCT
+        sl_price = _round_to_tick(price * (1 + sl_pct), sym)
         tp_price = _round_to_tick(middle, sym)
 
         try:
@@ -206,7 +208,7 @@ def check_auto_short(positions):
             _save_state(state)
 
             msg = (f'🐻 Auto-SHORT {sym}: ${price:.4f} ×{qty} ({SHORT_LEVERAGE}x), '
-                   f'BB={bb_pct:.0f}%, SL ${sl_price:.4f} (+{SL_PCT*100:.0f}%), '
+                   f'BB={bb_pct:.0f}%, SL ${sl_price:.4f} (+{sl_pct*100:.0f}%), '
                    f'TP ${tp_price:.4f} (Middle BB)')
             add_alert('ENTRY', msg)
             actions.append(sym)
