@@ -21,25 +21,18 @@ import time
 
 from .api import bybit, get_bb_data
 from .alerts import log_event, add_alert
+from .config import Config
 
 SHORT_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/short_positions.json')
 
-TIER_AB = {
-    'SOLUSDT', 'LTCUSDT', 'XRPUSDT', 'ADAUSDT', 'DOTUSDT', 'LINKUSDT',
-    'UNIUSDT', 'AVAXUSDT', 'SUIUSDT', 'NEARUSDT', 'APTUSDT',
-    'ARBUSDT', 'OPUSDT', 'AAVEUSDT', 'INJUSDT', 'ONDOUSDT',
-    'ENAUSDT', 'FETUSDT', 'WLDUSDT', 'ATOMUSDT', 'ALGOUSDT', 'RUNEUSDT',
-}
+# Tier sets are built from config.tiers
+def _get_tier_ab(cfg):
+    """Build TIER_AB set from config tiers A + B."""
+    return set(cfg.tiers.A) | set(cfg.tiers.B)
 
-ONE_WAY = {'XRPUSDT', 'ONDOUSDT', 'WLFIUSDT', 'ENJUSDT', 'ESPORTSUSDT', 'AVAXUSDT', 'APTUSDT', 'SUIUSDT'}
-
-BB_SHORT_THRESHOLD = 85      # BB% выше = кандидат
-SHORT_MARGIN = 10.0           # $10 маржа
-SHORT_LEVERAGE = 3
-SL_PCT = 0.05                 # +5% стоп для Tier A/B
-SL_PCT_JUNK = 0.07             # +7% стоп для шлака (C/D)
-MAX_SHORTS = 3
-COOLDOWN = 7200               # 2 часа
+def _get_one_way(cfg):
+    """Build ONE_WAY set from config tiers.one_way."""
+    return set(cfg.tiers.one_way)
 
 
 def _load_state():
@@ -86,6 +79,18 @@ def _round_to_tick(price, sym):
 def check_auto_short(positions):
     """Сканировать перегретые монеты и ставить SHORT.
     Вызывается каждые 10 циклов (5 мин)."""
+    cfg = Config()
+    ONE_WAY = _get_one_way(cfg)
+    TIER_AB = _get_tier_ab(cfg)
+    BB_SHORT_THRESHOLD = cfg.strategy.short.bb_threshold
+    SHORT_MARGIN = cfg.strategy.short.margin
+    SHORT_LEVERAGE = cfg.strategy.short.leverage
+    SL_PCT = cfg.strategy.short.sl_tier_ab
+    SL_PCT_JUNK = cfg.strategy.short.sl_tier_cd
+    MAX_SHORTS = cfg.strategy.short.max_positions
+    COOLDOWN = cfg.strategy.short.cooldown_seconds
+    ENTRY_OFFSET = cfg.strategy.short.entry_offset
+
     state = _load_state()
     now = time.time()
 
@@ -157,8 +162,8 @@ def check_auto_short(positions):
         tp_price = _round_to_tick(middle, sym)
 
         try:
-            # Лимитный SHORT: Sell выше рынка на +2% — ждём отскока для входа
-            limit_price = _round_to_tick(price * 1.02, sym)
+            # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
+            limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
             order = bybit('POST', '/v5/order/create', {
                 'category': 'linear',
                 'symbol': sym,

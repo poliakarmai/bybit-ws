@@ -1,0 +1,350 @@
+"""
+Config module for bybit-ws — reads YAML configuration with ${ENV_VAR} substitution.
+
+Configuration path: ~/.config/bybit-ws/config.yaml
+If no config exists, creates config.example.yaml with defaults.
+"""
+
+import os
+import re
+import shutil
+from pathlib import Path
+
+import yaml
+
+CONFIG_DIR = Path.home() / '.config' / 'bybit-ws'
+CONFIG_PATH = CONFIG_DIR / 'config.yaml'
+EXAMPLE_CONFIG_PATH = CONFIG_DIR / 'config.example.yaml'
+
+# ── Resolved config (singleton) ──────────────────────────────────────────────
+_cfg = None
+
+
+def _env_subst(obj):
+    """Recursively substitute ${ENV_VAR} patterns in strings."""
+    if isinstance(obj, str):
+        # Replace ${VAR} or ${VAR:-default}
+        def _replace(m):
+            expr = m.group(1)
+            if ':-' in expr:
+                var, default = expr.split(':-', 1)
+                return os.environ.get(var.strip(), default.strip())
+            else:
+                return os.environ.get(expr, m.group(0))
+        return re.sub(r'\$\{([^}]+)\}', _replace, obj)
+    elif isinstance(obj, dict):
+        return {k: _env_subst(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_env_subst(v) for v in obj]
+    return obj
+
+
+# ── Default configuration ────────────────────────────────────────────────────
+
+_DEFAULT_STRATEGY_LONG = {
+    'leverage': 3,
+    'margin_tiers': {7: 15, 5.5: 10, 0: 5},
+    'entry_offset': 0.03,
+    'sl_offset': 0.07,
+    'tp_middle_pct': 0.20,
+    'tp_upper_pct': 0.80,
+    'max_positions': 0,       # 0 = unlimited
+}
+
+_DEFAULT_STRATEGY_SHORT = {
+    'leverage': 3,
+    'margin': 10,
+    'entry_offset': 0.02,
+    'sl_tier_ab': 0.05,
+    'sl_tier_cd': 0.07,
+    'bb_threshold': 85,
+    'max_positions': 3,
+    'cooldown_seconds': 7200,
+}
+
+_DEFAULT_STRATEGY_DCA = {
+    'enabled': True,
+    'levels': [0.95, 0.90, 0.85],
+    'multiplier': 2,
+}
+
+_DEFAULT_WATCHLIST = {
+    'mode': 'top',
+    'top_n': 50,
+    'exclude': ['BTCUSDT', 'ETHUSDT'],
+}
+
+_DEFAULT_TIERS = {
+    'S': ['BTCUSDT', 'ETHUSDT'],
+    'A': [
+        'SOLUSDT', 'LTCUSDT', 'XRPUSDT', 'ADAUSDT', 'DOTUSDT', 'LINKUSDT',
+        'UNIUSDT', 'AVAXUSDT', 'SUIUSDT', 'NEARUSDT', 'APTUSDT',
+    ],
+    'B': [
+        'ARBUSDT', 'OPUSDT', 'AAVEUSDT', 'INJUSDT', 'ONDOUSDT',
+        'ENAUSDT', 'FETUSDT', 'WLDUSDT', 'ATOMUSDT', 'ALGOUSDT', 'RUNEUSDT',
+    ],
+    'one_way': [
+        'XRPUSDT', 'ONDOUSDT', 'WLFIUSDT', 'ENJUSDT', 'ESPORTSUSDT',
+        'AVAXUSDT', 'APTUSDT', 'SUIUSDT',
+    ],
+}
+
+_DEFAULT_MONITOR = {
+    'cycle_seconds': 30,
+    'heavy_cycle': 10,
+    'watchdog_seconds': 180,
+}
+
+_DEFAULT_RPC = {
+    'port': 8766,
+    'bind': '127.0.0.1',      # default to localhost; set 0.0.0.0 for external
+}
+
+_DEFAULT_ALERTS = {
+    'telegram_enabled': False,
+    'correlation_threshold': 0.80,
+    'sl_alert': True,
+    'tp_alert': True,
+}
+
+_DEFAULT_API = {
+    'key': '${BYBIT_API_KEY}',
+    'secret': '${BYBIT_API_SECRET}',
+    'base_url': 'https://api.bytick.com',
+}
+
+
+def _default_config() -> dict:
+    """Return the full default configuration dict."""
+    return {
+        'api': dict(_DEFAULT_API),
+        'strategy': {
+            'long': dict(_DEFAULT_STRATEGY_LONG),
+            'short': dict(_DEFAULT_STRATEGY_SHORT),
+            'dca': dict(_DEFAULT_STRATEGY_DCA),
+        },
+        'watchlist': dict(_DEFAULT_WATCHLIST),
+        'tiers': dict(_DEFAULT_TIERS),
+        'monitor': dict(_DEFAULT_MONITOR),
+        'rpc': dict(_DEFAULT_RPC),
+        'alerts': dict(_DEFAULT_ALERTS),
+    }
+
+
+def _generate_example() -> str:
+    """Generate example YAML as a string with comments."""
+    # Use pyyaml to dump, then we'll add comments manually
+    # For simplicity, write the example from a static template
+
+    #  Build tier A list
+    tier_a_str = '\n  '.join(f'- "{s}"' for s in _DEFAULT_TIERS['A'])
+    tier_b_str = '\n  '.join(f'- "{s}"' for s in _DEFAULT_TIERS['B'])
+    one_way_str = '\n  '.join(f'- "{s}"' for s in _DEFAULT_TIERS['one_way'])
+
+    return f"""# bybit-ws configuration
+# Path: ~/.config/bybit-ws/config.yaml
+# Copy this file to config.yaml and fill in your values.
+#
+# Environment variables (${{VAR}}) are substituted at load time.
+# Use ${{VAR:-default}} for fallback values.
+
+api:
+  key: "${{BYBIT_API_KEY}}"
+  secret: "${{BYBIT_API_SECRET}}"
+  base_url: "https://api.bytick.com"
+
+strategy:
+  long:
+    leverage: {_DEFAULT_STRATEGY_LONG['leverage']}
+    margin_tiers:
+      7: {_DEFAULT_STRATEGY_LONG['margin_tiers'][7]}     # score >= 7 → $margin
+      5.5: {_DEFAULT_STRATEGY_LONG['margin_tiers'][5.5]}  # score >= 5.5
+      0: {_DEFAULT_STRATEGY_LONG['margin_tiers'][0]}      # score < 5.5
+    entry_offset: {_DEFAULT_STRATEGY_LONG['entry_offset']}       # -3% below Lower BB
+    sl_offset: {_DEFAULT_STRATEGY_LONG['sl_offset']}          # -7% from Lower BB
+    tp_middle_pct: {_DEFAULT_STRATEGY_LONG['tp_middle_pct']}     # 20% on Middle
+    tp_upper_pct: {_DEFAULT_STRATEGY_LONG['tp_upper_pct']}      # 80% on Upper
+    max_positions: {_DEFAULT_STRATEGY_LONG['max_positions']}       # 0 = unlimited
+
+  short:
+    leverage: {_DEFAULT_STRATEGY_SHORT['leverage']}
+    margin: {_DEFAULT_STRATEGY_SHORT['margin']}
+    entry_offset: {_DEFAULT_STRATEGY_SHORT['entry_offset']}       # +2% above market
+    sl_tier_ab: {_DEFAULT_STRATEGY_SHORT['sl_tier_ab']}         # +5% SL for Tier A/B
+    sl_tier_cd: {_DEFAULT_STRATEGY_SHORT['sl_tier_cd']}         # +7% SL for Tier C/D
+    bb_threshold: {_DEFAULT_STRATEGY_SHORT['bb_threshold']}         # BB% > threshold triggers SHORT
+    max_positions: {_DEFAULT_STRATEGY_SHORT['max_positions']}
+    cooldown_seconds: {_DEFAULT_STRATEGY_SHORT['cooldown_seconds']}
+
+  dca:
+    enabled: {str(_DEFAULT_STRATEGY_DCA['enabled']).lower()}
+    levels: {_DEFAULT_STRATEGY_DCA['levels']}
+    multiplier: {_DEFAULT_STRATEGY_DCA['multiplier']}
+
+watchlist:
+  mode: "{_DEFAULT_WATCHLIST['mode']}"           # top | fixed
+  top_n: {_DEFAULT_WATCHLIST['top_n']}
+  exclude: {_DEFAULT_WATCHLIST['exclude']}
+  # fixed: ["SOLUSDT", "ADAUSDT"]   # if mode=fixed
+
+tiers:
+  S: {_DEFAULT_TIERS['S']}
+  A:
+  {tier_a_str}
+  B:
+  {tier_b_str}
+  one_way:
+  {one_way_str}
+
+monitor:
+  cycle_seconds: {_DEFAULT_MONITOR['cycle_seconds']}
+  heavy_cycle: {_DEFAULT_MONITOR['heavy_cycle']}           # heavy checks every N cycles
+  watchdog_seconds: {_DEFAULT_MONITOR['watchdog_seconds']}
+
+rpc:
+  port: {_DEFAULT_RPC['port']}
+  bind: "{_DEFAULT_RPC['bind']}"
+
+alerts:
+  telegram_enabled: {str(_DEFAULT_ALERTS['telegram_enabled']).lower()}
+  correlation_threshold: {_DEFAULT_ALERTS['correlation_threshold']}
+  sl_alert: {str(_DEFAULT_ALERTS['sl_alert']).lower()}
+  tp_alert: {str(_DEFAULT_ALERTS['tp_alert']).lower()}
+"""
+
+
+# ── Load / initialise ────────────────────────────────────────────────────────
+
+def _load_config() -> dict:
+    """Load YAML config from ~/.config/bybit-ws/config.yaml.
+
+    If config.yaml doesn't exist, writes config.example.yaml and returns defaults.
+    """
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not CONFIG_PATH.exists():
+        # Write example config
+        example_content = _generate_example()
+        with open(EXAMPLE_CONFIG_PATH, 'w') as f:
+            f.write(example_content)
+        print(f'📝 Example config written to {EXAMPLE_CONFIG_PATH}')
+        print(f'   Copy it to {CONFIG_PATH} and fill in your API keys.')
+        return _default_config()
+
+    with open(CONFIG_PATH) as f:
+        raw = yaml.safe_load(f) or {}
+
+    # Deep-merge with defaults (user config overrides defaults)
+    merged = _deep_merge(_default_config(), raw)
+    # Apply env-var substitution
+    merged = _env_subst(merged)
+    return merged
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base. Override wins on conflicts."""
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def get_config() -> dict:
+    """Return the loaded config dict (singleton)."""
+    global _cfg
+    if _cfg is None:
+        _cfg = _load_config()
+    return _cfg
+
+
+def reload_config() -> dict:
+    """Force reload the config from disk."""
+    global _cfg
+    _cfg = None
+    return get_config()
+
+
+# ── Convenience accessors ────────────────────────────────────────────────────
+
+class _ConfigProxy:
+    """Attribute-access proxy for nested dicts."""
+
+    def __init__(self, data: dict):
+        object.__setattr__(self, '_data', data)
+
+    def __getattr__(self, name):
+        data = object.__getattribute__(self, '_data')
+        if name in data:
+            value = data[name]
+            if isinstance(value, dict):
+                return _ConfigProxy(value)
+            return value
+        raise AttributeError(f'No config key: {name}')
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __contains__(self, key):
+        return key in self._data
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __repr__(self):
+        return repr(self._data)
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+    def keys(self):
+        return self._data.keys()
+
+    def values(self):
+        return self._data.values()
+
+    def items(self):
+        return self._data.items()
+
+
+def Config() -> _ConfigProxy:
+    """Return the config as an attribute-accessible proxy.
+
+    Usage:
+        cfg = Config()
+        cfg.strategy.short.leverage     → 3
+        cfg.monitor.cycle_seconds       → 30
+        cfg.tiers.S                     → ['BTCUSDT', 'ETHUSDT']
+        cfg.tiers.one_way              → ['XRPUSDT', ...]
+    """
+    return _ConfigProxy(get_config())
+
+
+# ── Module-level convenience (lazy) ──────────────────────────────────────────
+
+# Deprecated: use Config() instead for explicit access.
+# These exist so existing code can `from .config import config` without changes.
+# But prefer `from .config import Config; cfg = Config()`.
+
+def _lazy_config():
+    return _ConfigProxy(get_config())
+
+
+# Make `config` a module-level attribute that lazily resolves
+import sys as _sys
+_module = _sys.modules[__name__]
+
+
+class _LazyConfig:
+    """Lazy config singleton — resolves at attribute access time."""
+    def __getattr__(self, name):
+        return getattr(Config(), name)
+
+    def __repr__(self):
+        return repr(get_config())
+
+
+_module.config = _LazyConfig()

@@ -4,6 +4,7 @@ from datetime import datetime
 from . import (DATA_DIR, EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
                ORDERS_METADATA, BYBIT_CLI, HERMES_BIN, WATCHDOG_LAST, SHUTDOWN_REQUESTED,
                COVERAGE_CHECK_INTERVAL, TRAIL_CHECK_INTERVAL, METRICS_FILE)
+from .config import Config
 
 # Health-check: файл с timestamp последнего успешного цикла
 HEALTH_FILE = os.path.join(DATA_DIR, 'health.txt')
@@ -33,10 +34,17 @@ from .auto_short import check_auto_short
 
 
 def main_loop():
+    cfg = Config()
+    CYCLE_SECONDS = cfg.monitor.cycle_seconds
+    WATCHDOG_SECONDS = cfg.monitor.watchdog_seconds
+    HEAVY_CYCLE = cfg.monitor.heavy_cycle
+    RPC_PORT = cfg.rpc.port
+    RPC_BIND = cfg.rpc.bind
+
     print(f"🔄 Bybit WS Monitor v2.6 запущен")
     print(f"   Лог: {EVENTS_LOG}")
     print(f"   Алерты: {ALERTS_LOG}")
-    print(f"   Проверка каждые 30 секунд")
+    print(f"   Проверка каждые {CYCLE_SECONDS} секунд")
     print(f"   Нажми Ctrl+C для остановки")
 
     # Инициализация watchlist-ротации
@@ -58,10 +66,10 @@ def main_loop():
 
     log_event(f'Монитор запущен: {len(old_positions)} позиций, {len(old_orders)} ордеров')
 
-    # Запуск RPC-сервера (порт 8766)
+    # Запуск RPC-сервера
     try:
-        rpc_server = start_rpc_server(8766)
-        log_event(f'🌐 RPC-сервер: http://0.0.0.0:8766')
+        rpc_server = start_rpc_server(RPC_PORT, bind=RPC_BIND)
+        log_event(f'🌐 RPC-сервер: http://{RPC_BIND}:{RPC_PORT}')
     except Exception as e:
         log_event(f'⚠️ RPC-сервер не запустился: {e}')
 
@@ -82,9 +90,9 @@ def main_loop():
                 log_event(f'Монитор остановлен (graceful)')
                 sys.exit(0)
 
-            time.sleep(30)
+            time.sleep(CYCLE_SECONDS)
             now_wd = time.time()
-            if now_wd - WATCHDOG_LAST > 180:
+            if now_wd - WATCHDOG_LAST > WATCHDOG_SECONDS:
                 log_event(f'🚨 Watchdog: главный цикл завис ({now_wd - WATCHDOG_LAST:.0f}с) — аварийный выход')
                 os._exit(1)
             WATCHDOG_LAST = now_wd
@@ -191,7 +199,7 @@ def main_loop():
             if new_positions:
                 for msg in check_liquidation(new_positions):
                     add_alert('STOP', msg)
-                if cycle_count % 10 == 0:
+                if cycle_count % HEAVY_CYCLE == 0:
                     dd_msg = check_daily_drawdown(new_positions)
                     if dd_msg:
                         add_alert('STOP', dd_msg)
@@ -244,7 +252,7 @@ def main_loop():
                     apply_recycle(recycle_actions)
 
             # Блок каждые 10 циклов (5 мин)
-            if cycle_count % 10 == 0:
+            if cycle_count % HEAVY_CYCLE == 0:
                 # Защита от перегруза: если цикл уже >90с, пропускаем тяжёлые проверки
                 cycle_elapsed = time.time() - now_ts
                 heavy_ok = cycle_elapsed < 90
@@ -315,7 +323,7 @@ def main_loop():
                         record_auto_entry(placed=True)
 
             # SL re-entry: лесенка после стоп-лосса (каждые 10 циклов = 5 мин)
-            if cycle_count % 10 == 0:
+            if cycle_count % HEAVY_CYCLE == 0:
                 check_sl_reentry(new_positions or {}, correlation_stop)
 
             # Сводка 09:00 и 21:00
@@ -330,7 +338,7 @@ def main_loop():
             old_orders = new_orders or {}
 
             # Статус каждые 5 мин
-            if cycle_count % 10 == 0:
+            if cycle_count % HEAVY_CYCLE == 0:
                 alerts = get_alerts()
                 if alerts:
                     print(f"{'='*60}")
