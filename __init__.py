@@ -1,0 +1,93 @@
+"""
+Bybit WS Monitor v2.6 — модульный монитор позиций и ордеров Bybit.
+
+Модули:
+  api        — запросы к Bybit API
+  alerts     — система алертов + дедупликация
+  snapshot   — снепшоты и сравнение
+  auto_tp    — авто-TP с retry
+  trailing_sl— трейлинг SL
+  overbought — сканер перегретых монет
+  auto_entry — авто-вход по scoring
+  health     — проверки здоровья (ликвидация, squeeze, funding, etc.)
+  cleanup    — авто-снятие просроченных ордеров
+  reporting  — сводки, трейд-журнал, аудит
+  metrics    — метрики успешности
+  main       — главный цикл
+"""
+
+import os
+import sys
+
+HOME = os.path.expanduser('~')
+DATA_DIR = os.path.join(HOME, '.local', 'share', 'bybit-ws')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+EVENTS_LOG = os.path.join(DATA_DIR, 'events.log')
+ALERTS_LOG = os.path.join(DATA_DIR, 'alerts.log')
+POSITIONS_SNAPSHOT = os.path.join(DATA_DIR, 'positions.json')
+ORDERS_SNAPSHOT = os.path.join(DATA_DIR, 'orders.json')
+ORDERS_METADATA = os.path.join(DATA_DIR, 'orders_metadata.json')
+BYBIT_CLI = os.path.join(HOME, '.local', 'bin', 'bybit')
+HERMES_BIN = os.path.join(HOME, '.local', 'bin', 'hermes')
+
+import signal, subprocess
+def safe_run(cmd, timeout=15):
+    """subprocess.run без зомби: Popen + start_new_session + killpg при таймауте."""
+    proc = None
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        if proc:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                proc.kill()
+            proc.wait(timeout=5)
+        raise
+
+# Таймауты
+GRID_TIMEOUTS = {'M5': 7200, 'M3': 1800, 'OTHER': 7200}
+
+# Trailing SL
+TRAIL_SL_PERCENT = 0.15
+TRAIL_CHECK_INTERVAL = 5
+
+# Лимиты и защита
+MAX_POSITION_VALUE = 40
+DAILY_DRAWDOWN_LIMIT = 0.03
+SHORT_ALERT_COOLDOWN = 1800
+SHORT_ALERT_LAST = {}
+
+# Auto-TP failure tracker → retry с backoff
+TP_FAIL_COUNT = {}
+TP_FAIL_BACKOFF = {}       # {sym: next_retry_timestamp}
+TP_FAIL_DELAYS = [30, 60, 120, 300]  # backoff: 30с, 1мин, 2мин, 5мин
+TP_PERM_SKIP = set()        # перманентный скип — монеты где qty < мин. лота
+TP_PERM_SKIP_SIZES = {}     # {sym: size} — размер позиции на момент скипа
+TP_SKIP_FILE = os.path.join(DATA_DIR, 'tp_skip.json')  # персистентность PERM_SKIP
+TP_MAX_FAILS = len(TP_FAIL_DELAYS)
+
+# Дедупликация алертов
+ALERT_DEDUP_FILE = os.path.join(DATA_DIR, 'last_alerts.json')
+ALERT_DEDUP_TTL = 300  # 5 минут
+
+# Watchdog
+WATCHDOG_LAST = 0.0
+
+# Глобальные
+DAILY_START_EQUITY = None
+SHUTDOWN_REQUESTED = False
+ALERTS = []
+
+# Watchlist rotation — обновлять раз в 24ч
+WATCHLIST_UPDATED_FILE = os.path.join(DATA_DIR, 'watchlist_updated.txt')
+
+# TP/SL coverage summary interval (каждые 480 циклов = 4 часа)
+COVERAGE_CHECK_INTERVAL = 480
+
+# Метрики
+METRICS_FILE = os.path.join(DATA_DIR, 'metrics.json')
