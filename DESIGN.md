@@ -1,8 +1,8 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
-> **Версия:** 3.5 | **Дата:** 08.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.6 | **Дата:** 08.06.2026 | **Автор:** Alexey Polyakov
 >
-> Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API для внешнего управления.
+> Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API + MCP для внешнего управления.
 
 ---
 
@@ -13,7 +13,8 @@
                           │      AI Agent (вы)        │
                           │  Claude / GPT / Hermes    │
                           └─────┬────────────────────┘
-                                │ REST API (порт 8766)
+                                │ REST API (:8766)
+                                │ MCP (stdio)
                                 ▼
 ┌───────────────────────────────────────────────────────┐
 │                   bybit-ws monitor                     │
@@ -41,6 +42,12 @@
 │    ├── trades.jsonl    журнал закрытых сделок          │
 │    ├── health.txt      timestamp последнего цикла      │
 │    └── positions.json  снепшот позиций                 │
+│                                                       │
+│  MCP Server: ~/.local/bin/hermes-mcp-server.py        │
+│    ├── scan_market     GridSignal scanner              │
+│    ├── get_positions   позиции + PnL                   │
+│    ├── get_metrics     SL/TP/entries за день           │
+│    └── vpn_status      VPN health + трафик             │
 └──────────────────────┬────────────────────────────────┘
                        │
                        ▼
@@ -298,6 +305,103 @@ GET /status
 GET /report?period=daily|weekly
 → PnL за период, открытые позиции, SL/TP hits, комиссии
 ```
+
+---
+
+## 3b. MCP Server (Model Context Protocol)
+
+> MCP — открытый стандарт от Anthropic для подключения AI-агентов к внешним инструментам.
+> Hermes-совместимые агенты (Claude, Cursor, Copilot, любой MCP-клиент) могут вызывать
+> инструменты монитора без знания внутренних портов и форматов.
+
+### Как подключить
+
+```yaml
+# ~/.hermes/config.yaml
+mcp_servers:
+  bybit-ws:
+    command: python3
+    args:
+      - /home/openclaw/.local/bin/hermes-mcp-server.py
+    timeout: 120
+    connect_timeout: 30
+```
+
+После перезапуска Hermes инструменты доступны как `mcp_bybit_ws_*`.
+
+### Инструменты
+
+#### scan_market
+Скан рынка через GridSignal scanner — LONG/SHORT кандидаты со скорингом.
+
+```json
+// Вход
+{
+  "mode": "long",       // long | short
+  "interval": "D",      // D | W | 4h | 1h | 15m | 5m
+  "limit": 10
+}
+
+// Выход
+Top LONG candidates:
+  AVAXUSDT     Score=7.9  Tier=A  BB=7%  RSI=28  $6.8140 → entry $6.2168
+  ETHUSDT      Score=7.8  Tier=S  BB=16% RSI=25  $1692.19 → entry $1495.37
+```
+
+#### get_positions
+Текущие позиции с PnL, стоп-лоссами и плечом.
+
+```
+🟢 DOGEUSDT     Buy  3.0x  entry=$0.0806  mark=$0.0862  PnL=$+6.95  SL=$0.0833
+🔴 BEATUSDT     Sell 10.0x entry=$4.3170  mark=$4.3089  PnL=$+0.06  SL=$4.6184
+
+Total unrealized PnL: $+21.82
+```
+
+#### get_metrics
+Дневные метрики: срабатывания SL/TP, входы, авто-входы.
+
+```
+Today's metrics:
+  TP: 0  SL: 8
+  Entries: 3  Auto-filled: 0
+  Auto-entry PnL: $0.00
+```
+
+#### vpn_status
+VPN health: статус сервиса, трафик, клиенты.
+
+```
+VPN Status: ✅
+  Service: active  Port: open
+  Traffic: ↓31.4 KB/s  ↑40.8 KB/s
+  Errors: 0
+  Clients: 4
+```
+
+### Архитектура MCP
+
+```
+AI Agent (Claude/GPT/Hermes)
+    │
+    │ MCP Protocol (stdio)
+    ▼
+hermes-mcp-server.py
+    ├── curl → bybit-ws RPC (:8766)
+    ├── python3 → gridSignal_scanner.py
+    └── read → /opt/vpn-core/conf/vpn-watch-status.json
+```
+
+### Отличие от REST API
+
+| Характеристика | REST API (:8766) | MCP Server |
+|----------------|-------------------|------------|
+| Транспорт | HTTP | stdio (подпроцесс) |
+| Для кого | Любой HTTP-клиент | AI-агенты (MCP-совместимые) |
+| Discovery | Ручной (документация) | Авто (list_tools) |
+| Безопасность | Bearer-токен | Только localhost (подпроцесс) |
+| Формат ответа | JSON | Текст (форматированный) |
+| Деплой | Отдельный порт | Встроен в Hermes |
 
 ---
 
@@ -630,6 +734,7 @@ docker-compose up -d
 
 ## 9. Changelog
 
+- **v3.6** (08.06.2026): 🚀 MCP Server — инструменты scan_market/get_positions/get_metrics/vpn_status для AI-агентов. Шлак-режим SHORT (рост ≥80%, без SL, DCA-лесенка +100%/+120%). threading.stack_size(512KB) — экономия памяти на потоках.
 - **v3.5** (08.06.2026): 🔥 DCA-лимиты ($80/монету, 2 добавки), защита от каскадных ликвидаций, LONG cooldown 4ч после SL, SHORT max_hold 72ч, max_positions: 15, секторные лимиты, TP через trading-stop, drawdown_mode: peak, trades.jsonl ротация, EnvironmentFile, скоринг-нормализация, partial failure handling, канонические пути
 - **v3.4** (08.06.2026): RPC auth (Bearer), rate limiting, GET /config, GET /signals (LONG+SHORT), risk-лимиты (max_drawdown, max_total_margin), graceful shutdown (SIGTERM → check SL), log rotation, error-формат v1, confirm:true для /enter, документация (scoring, edge cases, deployment)
 - **v3.3:** YAML-конфиг, REST API 8 эндпоинтов, _timed_call, Docker, SDK, OpenAPI
@@ -645,7 +750,7 @@ docker-compose up -d
 - Один аккаунт на инстанс (мульти-аккаунт в v4.0)
 - Нет бэктестинга (планируется v4.0)
 - Нет spot-поддержки
-- Нет веб-дашборда (планируется v4.0)
+- Нет веб-дашборда (частично решено: MCP даёт внешний доступ для AI-агентов)
 
 ## 10b. Roadmap v4.0+
 
@@ -670,7 +775,8 @@ docker-compose up -d
 ~/.local/
 ├── bin/
 │   ├── bybit-ws              точка входа (CLI)
-│   └── bybit-cli             низкоуровневый API-клиент
+│   ├── bybit-cli             низкоуровневый API-клиент
+│   └── hermes-mcp-server.py  MCP-сервер для AI-агентов
 ├── lib/
 │   └── bybit_ws/
 │       ├── main.py           главный цикл (481 строк)
