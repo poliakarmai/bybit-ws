@@ -90,7 +90,7 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Плечо | 3x |
 | Маржа | $15 (score ≥7), $10 (≥5.5), $5 (<5.5) |
 | Скоринг | 9 метрик: Tier, BB%, объём, дни падения, Weekly/Monthly BB, фандинг, RSI |
-| Макс позиций | 15 (безопасный дефолт v3.5) |
+| Макс позиций | 12 (настраивается в risk.max_long_positions) |
 | Cooldown SL | 4 часа после SL перед повторным входом |
 | Приоритет проверок | margin_available → max_positions → sector_limit → correlation_stop → scoring ≥ threshold |
 
@@ -105,8 +105,49 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Порог BB | >85% (перегрев) |
 | Макс позиций | 3 |
 | Макс удержание | 72 часа (авто-закрытие, защита от фандинга) |
-| ONE_WAY фильтр | XRP\*, ONDO, WLFI, ENJ, ESPORTS, AVAX\*, APT\*, SUI\* — исключены |
+| ONE_WAY фильтр | XRP\\*, ONDO, WLFI, ENJ, ESPORTS, AVAX\\*, APT\\*, SUI\\* — исключены |
 | DCA-шорт | На аномальных пампах (>120% за 24ч) |
+
+### SHORT Шлак-режим (экспериментальный) 🦨
+
+> ⚠️ **Экспериментальный режим.** Включён только через `strategy.short.junk.enabled: true`.
+> Без SL — шлак слишком волатильный для стоп-лоссов. Вместо этого: жёсткий лимит убытка.
+
+| Параметр | Значение |
+|----------|---------|
+| Вход | Лимитный Sell на +2% выше рынка |
+| Триггер | Дневной рост ≥80% **И** BB Daily ≥70% |
+| SL | **Нет** — шлак-монеты могут сделать +30% за час |
+| TP | Middle BB (отдельный reduceOnly ордер) |
+| Max убыток | **-$30 на позицию** (hard limit, market-close) |
+| DCA-уровни | +100% и +120% от входа (лимитные Sell того же размера) |
+| Плечо | 3x |
+| Маржа | $10 |
+| Макс позиций | 2 шлак-шорта одновременно |
+| Кулдаун | 2 часа на монету |
+
+Конфиг:
+```yaml
+strategy:
+  short:
+    junk:
+      enabled: false          # ← выключен по умолчанию!
+      min_pump_pct: 80        # вход при росте ≥80%
+      dca_levels: [1.0, 1.2]  # +100%, +120%
+      max_loss_per_position: 30  # hard stop $30
+      max_positions: 2        # не более 2 шлак-шортов
+```
+
+### SL Re-entry (лесенка)
+
+| Параметр | Значение |
+|----------|---------|
+| Триггер | SL сработал на монете с текущим score ≥ 6 |
+| Задержка | cooldown_after_sl (4 часа) |
+| Новый вход | На текущем Lower BB Daily (пересчитывается) |
+| Маржа | ×0.5 от предыдущей (уменьшается) |
+| Максимум | 2 re-entry за 24 часа на одну монету |
+| SL | Пересчитывается от нового входа (-7%) |
 
 ### Tier-классификация
 ```
@@ -120,8 +161,8 @@ Tier C/D: всё остальное (шлак)
 ### DCA (лесенка)
 | Параметр | Значение |
 |----------|---------|
-| Уровни | -10%, -20%, -30% от входа |
-| Множитель маржи | 1.5x, 2.0x, 2.5x от базы $10 |
+| Уровни | -5%, -10%, -15% от входа |
+| Множитель маржи | ×2 на каждом уровне ($10 → $20 → $40) |
 | max_margin_per_symbol | $80 (не более $80 суммарной маржи на монету) |
 | max_dca_count | 2 (максимум 2 добавки, не 3) |
 
@@ -303,7 +344,28 @@ GET /status
 
 ```
 GET /report?period=daily|weekly
-→ PnL за период, открытые позиции, SL/TP hits, комиссии
+```
+
+```json
+{
+  "api_version": "v1",
+  "period": "daily",
+  "date": "2026-06-08",
+  "pnl": {
+    "realized": "+12.50",
+    "unrealized": "+8.30",
+    "fees": "-2.10",
+    "funding": "-1.80",
+    "net": "+16.90"
+  },
+  "trades": {
+    "entries": 3,
+    "tp_hits": 1,
+    "sl_hits": 2,
+    "manual_closes": 0
+  },
+  "positions_open": 7
+}
 ```
 
 ---
@@ -368,16 +430,47 @@ Today's metrics:
   Auto-entry PnL: $0.00
 ```
 
-#### vpn_status
-VPN health: статус сервиса, трафик, клиенты.
+#### health_check
+Проверка здоровья: bybit-ws RPC, свежесть цикла, ошибки.
 
 ```
-VPN Status: ✅
-  Service: active  Port: open
-  Traffic: ↓31.4 KB/s  ↑40.8 KB/s
-  Errors: 0
-  Clients: 4
+Health Check:
+  bybit-ws RPC: ✅
+  Last cycle: 12s ago
+  Errors (5 min): 0
 ```
+
+### MCP: Read-only по дизайну
+
+MCP-сервер намеренно предоставляет только **read-only** инструменты. Причины:
+- **Безопасность:** MCP-клиент не должен случайно открыть/закрыть позицию
+- **Аудит:** Все торговые операции — через REST API с Bearer-токеном
+- **Ответственность:** Только оператор-человек (или авторизованный агент) управляет позициями
+
+Для управления позициями используйте [REST API](#3-rest-api-порт-8766) (`POST /enter`, `POST /close`).
+
+### MCP: Аутентификация
+
+MCP-сервер запускается как подпроцесс Hermes → наследует доступ к localhost RPC. Если `RPC_TOKEN` задан, MCP-сервер читает его из переменной окружения:
+
+```yaml
+mcp_servers:
+  bybit-ws:
+    command: python3
+    args: [/home/openclaw/.local/bin/hermes-mcp-server.py]
+    env:
+      RPC_TOKEN: "${RPC_TOKEN}"    # ← передать токен
+    timeout: 120
+```
+
+### MCP: Error Handling
+
+| Ситуация | MCP-ответ |
+|----------|-----------|
+| RPC недоступен | `Error: bybit-ws monitor is not responding` |
+| Сканер таймаут (>120с) | `Error: scan timed out after 120s` |
+| Невалидный mode | `Error: mode must be 'long' or 'short'` |
+| Bybit API недоступен | `Error: no data from Bybit API` |
 
 ### Архитектура MCP
 
@@ -387,9 +480,9 @@ AI Agent (Claude/GPT/Hermes)
     │ MCP Protocol (stdio)
     ▼
 hermes-mcp-server.py
-    ├── curl → bybit-ws RPC (:8766)
+    ├── curl → bybit-ws RPC (:8766)   [с Bearer-токеном если задан]
     ├── python3 → gridSignal_scanner.py
-    └── read → /opt/vpn-core/conf/vpn-watch-status.json
+    └── systemctl → vpn-core-xray
 ```
 
 ### Отличие от REST API
@@ -398,8 +491,9 @@ hermes-mcp-server.py
 |----------------|-------------------|------------|
 | Транспорт | HTTP | stdio (подпроцесс) |
 | Для кого | Любой HTTP-клиент | AI-агенты (MCP-совместимые) |
+| Операции | Read + Write | **Read-only** |
 | Discovery | Ручной (документация) | Авто (list_tools) |
-| Безопасность | Bearer-токен | Только localhost (подпроцесс) |
+| Безопасность | Bearer-токен | Наследует RPC_TOKEN из env |
 | Формат ответа | JSON | Текст (форматированный) |
 | Деплой | Отдельный порт | Встроен в Hermes |
 
@@ -478,6 +572,7 @@ risk:
   drawdown_reset_hours: 24                      # авто-сброс паузы через 24ч
   max_per_sector: 3                             # не более 3 позиций в одном секторе
   sectors:
+    Major: [BTCUSDT, ETHUSDT]                     # Tier S — отдельный сектор
     L1: [SOL, SUI, APT, NEAR, AVAX, ADA, DOT]
     DeFi: [AAVE, UNI, INJ, RUNE]
     AI: [FET, WLD]
@@ -645,10 +740,7 @@ GET-запросы (positions, orders): backoff [1, 3, 5] секунд.
 - **Flash crash -20%:** BB расширяются, lower уходит глубоко вниз. DCA включается (с лимитом $80/монету). SL защищает каждую позицию.
 - **Памп +50%:** SHORT не входит на пике (entry_offset +2% даёт буфер). BB% зашкаливает — сигнал пропускается.
 - **Фандинг раз в 8 часов:** при 3x может сжирать 0.3-1% на шорте в бычий рынок. Защита: max_hold_hours=72 (авто-закрытие). Учитывается в PnL через cost_tracker.
-- **Пустой API-ответ:** fetch_positions возвращает {} — цикл продолжается с последним снепшотом.
-- **Множественные SL за цикл:** check_and_fix_sl обрабатывает все позиции без дублирования.
-- **Каскадная ликвидация:** при резком движении SL может не исполниться (gap). Защита: каждый цикл проверяется dist(mark, liq) < dist(mark, SL) × 0.5 → market-close немедленно.
-- **Пустой API-ответ:** fetch_positions возвращает {} → повтор через 5с, 3 попытки. Если 3 раза пусто — принять.
+- **Пустой API-ответ:** fetch_positions возвращает {} → повтор через 5с, 3 попытки. Если 3 раза пусто — принять и продолжить с последним снепшотом.
 
 ### Partial failure handling
 | Сбой | Поведение |
@@ -675,9 +767,8 @@ ExecStart=/usr/bin/python3 -m bybit_ws.main
 Restart=always
 RestartSec=10
 EnvironmentFile=%h/.config/bybit-ws/.env
-# Файл .env (chmod 600):
-#   BYBIT_API_KEY=***   BYBIT_API_SECRET=***   RPC_TOKEN=your-secret-token
-Environment=RPC_TOKEN=your-secret-token
+# Все секреты — только в .env (chmod 600):
+#   BYBIT_API_KEY=***   BYBIT_API_SECRET=***   RPC_TOKEN=***
 
 [Install]
 WantedBy=default.target
@@ -805,12 +896,50 @@ docker-compose up -d
         ├── events.log        основной лог
         ├── trades.jsonl      журнал сделок
         ├── health.txt        последний ping
-        └── positions.json    снепшот
+        ├── positions.json    снепшот
+        └── cooldown.json     таймстемпы SL/TP для cooldown
 ```
 
 ---
 
-## 12. Pitfalls
+## 12. Security Model
+
+| Уровень | Механизм |
+|---------|----------|
+| RPC API | Bearer-токен (обязателен при bind ≠ 127.0.0.1) |
+| API-ключи | `.env` файл (chmod 600), не в unit-файле |
+| MCP | Только localhost (stdio подпроцесс), наследует RPC_TOKEN |
+| Bybit API | IP-whitelist на стороне биржи (рекомендуется) |
+| Принцип | Монитор не хранит приватные ключи кошельков — только API read/trade |
+
+## 12b. Monitoring & Alerting
+
+Встроенные механизмы оповещения оператора:
+
+| Событие | Канал |
+|---------|-------|
+| SL/TP сработал | Лог (events.log) + алерт в Telegram (если включён) |
+| Emergency stop (drawdown) | Лог + Telegram (критический) |
+| Watchdog перезапуск | Лог + systemd |
+| SHORT > лимит | Лог (дедуплицирован, раз в 24ч) |
+| Ошибки API | Лог (events.log) |
+
+Конфиг алертов:
+```yaml
+alerts:
+  telegram_enabled: true          # включить Telegram-алерты
+  telegram_chat_id: "319665243"
+  alert_on: [sl_hit, tp_hit, emergency_stop, watchdog_restart, drawdown_trigger]
+```
+
+Внешний мониторинг:
+- **Canary (cron, раз в 12ч):** проверка всех сервисов (gateway, bybit-ws, VPN)
+- **Еженедельный аудит (вс 10:00):** полный отчёт — система, трейдинг, VPN, ошибки
+- **REST /health:** `curl localhost:8766/health` для интеграции с внешними мониторами
+
+---
+
+## 13. Pitfalls
 
 1. **Watchdog (180с)** убивает процесс если главный цикл завис. Причина: API-запросы (get_bb_data) внутри цикла по символам. Решение: guard `heavy_ok` (пропускать тяжёлые проверки если цикл >90с) + `_timed_call` с таймаутом 25с.
 2. **positionIdx** зависит от режима аккаунта: one-way mode → idx=0, hedge mode → idx=0/1. Проверять перед входом.
