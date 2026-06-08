@@ -1,5 +1,5 @@
 """Главный цикл монитора и точка входа."""
-import os, sys, time, signal
+import os, sys, time, signal, threading
 from datetime import datetime
 from . import (DATA_DIR, EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
                ORDERS_METADATA, BYBIT_CLI, HERMES_BIN, WATCHDOG_LAST, SHUTDOWN_REQUESTED,
@@ -8,6 +8,25 @@ from .config import Config
 
 # Health-check: файл с timestamp последнего успешного цикла
 HEALTH_FILE = os.path.join(DATA_DIR, 'health.txt')
+
+HEAVY_CHECK_TIMEOUT = 25
+
+def _timed_call(fn, *args, timeout=HEAVY_CHECK_TIMEOUT):
+    """Вызвать fn(*args) в отдельном потоке с таймаутом. Возвращает (result, None) или ([], error_name)."""
+    result = []
+    def _target():
+        try:
+            result.append(fn(*args))
+        except Exception as e:
+            result.append(e)
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        return [], fn.__name__
+    if result and isinstance(result[0], Exception):
+        return [], f'{fn.__name__}({result[0]})'
+    return result[0] if result else [], None
 from .api import fetch_positions, fetch_orders
 from .snapshot import load_json, save_json, check_position_changes, check_order_changes
 from .alerts import log_event, add_alert, get_alerts, send_telegram_alert, _is_duplicate
@@ -251,41 +270,46 @@ def main_loop():
                 if recycle_actions:
                     apply_recycle(recycle_actions)
 
-            # Блок каждые 10 циклов (5 мин)
+            # Блок каждые HEAVY_CYCLE циклов — тяжёлые проверки с таймаутом
             if cycle_count % HEAVY_CYCLE == 0:
-                # Защита от перегруза: если цикл уже >90с, пропускаем тяжёлые проверки
                 cycle_elapsed = time.time() - now_ts
                 heavy_ok = cycle_elapsed < 90
                 if not heavy_ok:
                     log_event(f'⏭️ Цикл перегружен ({cycle_elapsed:.0f}с) — тяжёлые проверки пропущены')
                 
-                # overbought только если есть позиции (хеждирование) и цикл не перегружен
+                # Каждая тяжёлая проверка в отдельном потоке с таймаутом 25с
+                _a = lambda fn, *a: _timed_call(fn, *a)
+                
                 if heavy_ok and new_positions:
-                    for msg in check_overbought(new_positions):
-                        add_alert('INFO', msg)
+                    msgs, err = _a(check_overbought, new_positions)
+                    if err: log_event(f'⏱️ check_overbought: таймаут/ошибка — {err}')
+                    else:
+                        for msg in msgs: add_alert('INFO', msg)
+                
                 if heavy_ok:
-                    for msg in check_pumps(new_positions or {}):
-                        add_alert('STOP', msg)
-                    for msg in check_rsi_divergence():
-                        add_alert('STOP', msg)
-                    for msg in check_squeeze():
-                        add_alert('INFO', msg)
-                    for msg in check_funding_pump():
-                        add_alert('STOP', msg)
+                    for fn, alert_type in [(check_pumps, 'STOP'), (check_rsi_divergence, 'STOP'),
+                                            (check_squeeze, 'INFO'), (check_funding_pump, 'STOP')]:
+                        msgs, err = _a(fn, new_positions if fn == check_pumps else None) if fn == check_pumps else _a(fn)
+                        if err: log_event(f'⏱️ {err}: таймаут')
+                        else:
+                            for msg in (msgs or []): add_alert(alert_type, msg)
+                
+                # Лёгкие проверки — без таймаута
                 for msg in check_dca():
                     add_alert('ENTRY', msg)
-                # Auto-SHORT: перегретые монеты (BB > 85%)
                 if heavy_ok:
-                    for msg in check_auto_short(new_positions or {}):
-                        pass  # алерты уже внутри
+                    msgs, err = _a(check_auto_short, new_positions or {})
+                    if err: log_event(f'⏱️ check_auto_short: таймаут — {err}')
                 for msg in check_bb_squeeze():
                     add_alert('INFO', msg)
                 if new_orders and new_positions is not None:
                     for msg in clean_stale_orders(new_positions, new_orders):
                         add_alert('INFO', msg)
                 if heavy_ok:
-                    for msg in check_funding_flip():
-                        add_alert('INFO', msg)
+                    msgs, err = _a(check_funding_flip)
+                    if err: log_event(f'⏱️ check_funding_flip: таймаут — {err}')
+                    else:
+                        for msg in (msgs or []): add_alert('INFO', msg)
                 corr_msg = check_correlation_risk(new_positions)
                 if corr_msg:
                     add_alert('INFO', corr_msg)
