@@ -1,4 +1,4 @@
-"""Авто-SHORT по перегреву (BB Daily > 85%).
+"""Авто-SHORT по перегреву (BB Daily > 85%) + шлак-режим (дневной рост ≥80%).
 
 Зеркало LONG-стратегии: когда цена перегрета — шорт с возвратом к Middle BB.
 
@@ -6,9 +6,19 @@
 - BB Daily > 85% (цена у Upper или выше)
 - Все Tier'ы (S/A/B/C/D) — шортим любой перегрев
 - One-way монеты исключены (там нельзя SHORT)
-- Плечо 3x, маржа $10 → $5 для Tier C/D
-- SL: +5% от входа (stop-buy выше)
-- TP: Middle BB (reduceOnly лимитный buy)
+
+Tier A/B (обычный режим):
+- Плечо 3x, маржа $10
+- SL: +5% от входа (через trading-stop)
+- TP: Middle BB (через takeProfit в trading-stop)
+
+Tier C/D — шлак-режим (NEW):
+- Дневной рост ≥ 80% — обязательный фильтр
+- БЕЗ стоп-лосса (шлак слишком волатильный, SL только жрёт маржу)
+- DCA-лесенка: +100% и +120% от входа (лимитные Sell)
+- TP: Middle BB (reduceOnly limit Buy)
+
+Общие:
 - Макс 3 одновременных SHORT
 - Кулдаун 2 часа на монету
 - Блок при >80% SHORT (корреляция)
@@ -90,6 +100,8 @@ def check_auto_short(positions):
     MAX_SHORTS = cfg.strategy.short.max_positions
     COOLDOWN = cfg.strategy.short.cooldown_seconds
     ENTRY_OFFSET = cfg.strategy.short.entry_offset
+    JUNK_PUMP_THRESHOLD = getattr(cfg.strategy.short, 'junk_daily_pump_threshold', 0.80)
+    JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
 
     state = _load_state()
     now = time.time()
@@ -120,7 +132,7 @@ def check_auto_short(positions):
                   and t['symbol'] not in live_syms]
 
     for t in candidates:
-        if active_shorts + len(actions) >= MAX_SHORTS:
+        if active_shorts + len(actions) >= MAX_SHOTS:
             break
 
         sym = t['symbol']
@@ -131,6 +143,8 @@ def check_auto_short(positions):
         # Проверка кулдауна
         if sym in state and now - state[sym].get('last_short_ts', 0) < COOLDOWN:
             continue
+
+        is_junk = sym not in TIER_AB  # Tier C/D = шлак
 
         # Проверка BB
         try:
@@ -146,8 +160,18 @@ def check_auto_short(positions):
         except:
             continue
 
-        if bb_pct < BB_SHORT_THRESHOLD:
-            continue
+        # ── Шлак-режим: дневной рост ≥ 80% ──
+        if is_junk:
+            chg_pct = float(t.get('price24hPcnt', 0) or 0)
+            if chg_pct < JUNK_PUMP_THRESHOLD:
+                continue
+            # BB тоже должен быть перегрет (но порог мягче — 70% вместо 85%)
+            if bb_pct < 70:
+                continue
+        else:
+            # Tier A/B — обычный фильтр BB
+            if bb_pct < BB_SHORT_THRESHOLD:
+                continue
 
         # Шорт! Рассчитываем параметры
         usdt_qty = SHORT_MARGIN * SHORT_LEVERAGE  # $30
@@ -157,8 +181,6 @@ def check_auto_short(positions):
             continue
 
         price = _round_to_tick(last_price, sym)
-        sl_pct = SL_PCT_JUNK if sym not in TIER_AB else SL_PCT
-        sl_price = _round_to_tick(price * (1 + sl_pct), sym)
         tp_price = _round_to_tick(middle, sym)
 
         try:
@@ -178,37 +200,177 @@ def check_auto_short(positions):
                 log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?")}')
                 continue
 
-            # SL + TP через trading-stop (единым вызовом — надёжнее отдельных ордеров)
-            ts_body = {
-                'category': 'linear',
-                'symbol': sym,
-                'positionIdx': 0,
-                'stopLoss': str(sl_price),
-                'slTriggerBy': 'MarkPrice',
-            }
-            if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
-                ts_body['takeProfit'] = str(tp_price)
-                ts_body['tpTriggerBy'] = 'MarkPrice'
-            bybit('POST', '/v5/position/trading-stop', ts_body)
-
-            state[sym] = {
+            state_entry = {
                 'last_short_ts': now,
                 'entry_price': price,
-                'sl': sl_price,
-                'tp': tp_price,
                 'qty': qty,
                 'bb_pct': round(bb_pct, 1),
+                'is_junk': is_junk,
             }
-            _save_state(state)
 
-            msg = (f'🐻 Auto-SHORT {sym}: лимитка ${limit_price:.4f} (рынок ${price:.4f}, +2%) ×{qty} ({SHORT_LEVERAGE}x), '
-                   f'BB={bb_pct:.0f}%, SL ${sl_price:.4f} (+{sl_pct*100:.0f}%), '
-                   f'TP ${tp_price:.4f} (Middle BB)')
-            add_alert('ENTRY', msg)
-            actions.append(sym)
-            log_event(msg)
+            if is_junk:
+                # ── Шлак: без SL, с DCA-лесенкой ──
+                chg_pct = float(t.get('price24hPcnt', 0) or 0)
+
+                # TP отдельным reduceOnly лимитным Buy
+                if tp_price < price:
+                    bybit('POST', '/v5/order/create', {
+                        'category': 'linear',
+                        'symbol': sym,
+                        'side': 'Buy',
+                        'orderType': 'Limit',
+                        'qty': str(qty),
+                        'price': str(tp_price),
+                        'positionIdx': 0,
+                        'timeInForce': 'GTC',
+                        'reduceOnly': True,
+                    })
+
+                # DCA-лимитки: Sell на +100% и +120% от входа
+                dca_placed = []
+                for dca_mult in JUNK_DCA_LEVELS:
+                    dca_price = _round_to_tick(price * (1 + dca_mult), sym)
+                    dca_qty = qty  # такой же размер
+                    dca_order = bybit('POST', '/v5/order/create', {
+                        'category': 'linear',
+                        'symbol': sym,
+                        'side': 'Sell',
+                        'orderType': 'Limit',
+                        'qty': str(dca_qty),
+                        'price': str(dca_price),
+                        'positionIdx': 0,
+                        'timeInForce': 'GTC',
+                    })
+                    if dca_order.get('retCode') == 0:
+                        dca_placed.append({'mult': dca_mult, 'price': dca_price, 'qty': dca_qty})
+
+                state_entry['no_sl'] = True
+                state_entry['tp'] = tp_price
+                state_entry['dca_levels'] = JUNK_DCA_LEVELS
+                state_entry['dca_placed'] = dca_placed
+                state_entry['pump_pct'] = round(chg_pct * 100, 1)
+
+                state[sym] = state_entry
+                _save_state(state)
+
+                dca_str = ', '.join(f'+{d["mult"]*100:.0f}% @ ${d["price"]:.4f}' for d in dca_placed)
+                msg = (f'🐻🦨 Auto-SHORT ШЛАК {sym}: лимитка ${limit_price:.4f} (рынок ${price:.4f}, +2%) ×{qty} ({SHORT_LEVERAGE}x), '
+                       f'рост +{chg_pct*100:.0f}% за 24ч, BB={bb_pct:.0f}%, БЕЗ SL, '
+                       f'TP ${tp_price:.4f} (Middle BB), DCA: {dca_str}')
+                add_alert('ENTRY', msg)
+                actions.append(sym)
+                log_event(msg)
+
+            else:
+                # ── Tier A/B: обычный режим с SL + TP ──
+                sl_pct = SL_PCT_JUNK if sym not in TIER_AB else SL_PCT
+                sl_price = _round_to_tick(price * (1 + sl_pct), sym)
+
+                # SL + TP через trading-stop (единым вызовом)
+                ts_body = {
+                    'category': 'linear',
+                    'symbol': sym,
+                    'positionIdx': 0,
+                    'stopLoss': str(sl_price),
+                    'slTriggerBy': 'MarkPrice',
+                }
+                if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
+                    ts_body['takeProfit'] = str(tp_price)
+                    ts_body['tpTriggerBy'] = 'MarkPrice'
+                bybit('POST', '/v5/position/trading-stop', ts_body)
+
+                state_entry['sl'] = sl_price
+                state_entry['tp'] = tp_price
+                state_entry['no_sl'] = False
+
+                state[sym] = state_entry
+                _save_state(state)
+
+                msg = (f'🐻 Auto-SHORT {sym}: лимитка ${limit_price:.4f} (рынок ${price:.4f}, +2%) ×{qty} ({SHORT_LEVERAGE}x), '
+                       f'BB={bb_pct:.0f}%, SL ${sl_price:.4f} (+{sl_pct*100:.0f}%), '
+                       f'TP ${tp_price:.4f} (Middle BB)')
+                add_alert('ENTRY', msg)
+                actions.append(sym)
+                log_event(msg)
 
         except Exception as e:
             log_event(f'⚠️ Auto-SHORT {sym}: исключение — {e}')
+
+    return actions
+
+
+def check_junk_dca(positions):
+    """Проверить открытые шлак-шорты и доставить DCA-уровни если пампа продолжается.
+
+    Вызывается каждые 10 циклов вместе с check_auto_short."""
+    cfg = Config()
+    JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
+    SHORT_LEVERAGE = cfg.strategy.short.leverage
+
+    state = _load_state()
+    now = time.time()
+    actions = []
+
+    for sym, entry in state.items():
+        if not entry.get('is_junk'):
+            continue
+        if sym not in positions:
+            continue  # позиция ещё не открыта (лимитка ждёт)
+
+        pos = positions[sym]
+        if not isinstance(pos, dict) or pos.get('side') != 'Sell':
+            continue
+
+        entry_price = entry.get('entry_price', 0)
+        if entry_price <= 0:
+            continue
+
+        mark_price = float(pos.get('mark', 0) or 0)
+        if mark_price <= 0:
+            continue
+
+        dca_placed = entry.get('dca_placed', [])
+        placed_multipliers = {d['mult'] for d in dca_placed}
+
+        for dca_mult in JUNK_DCA_LEVELS:
+            if dca_mult in placed_multipliers:
+                continue  # уже поставили
+
+            dca_trigger = entry_price * (1 + dca_mult)
+            if mark_price < dca_trigger:
+                continue  # ещё не достигли уровня
+
+            # DCA-докуп: добавляем шорт на этом уровне
+            SHORT_MARGIN = cfg.strategy.short.margin
+            usdt_qty = SHORT_MARGIN * SHORT_LEVERAGE
+            qty_step = _get_lot_step(sym)
+            dca_qty = math.ceil(usdt_qty / mark_price / qty_step) * qty_step
+            if dca_qty <= 0:
+                continue
+
+            dca_price = _round_to_tick(mark_price, sym)
+            try:
+                dca_order = bybit('POST', '/v5/order/create', {
+                    'category': 'linear',
+                    'symbol': sym,
+                    'side': 'Sell',
+                    'orderType': 'Limit',
+                    'qty': str(dca_qty),
+                    'price': str(dca_price),
+                    'positionIdx': 0,
+                    'timeInForce': 'GTC',
+                })
+                if dca_order.get('retCode') == 0:
+                    dca_placed.append({'mult': dca_mult, 'price': dca_price, 'qty': dca_qty, 'ts': now})
+                    entry['dca_placed'] = dca_placed
+                    _save_state(state)
+
+                    msg = (f'🐻🦨 DCA ШЛАК {sym}: +{dca_mult*100:.0f}% уровень @ ${dca_price:.4f} ×{dca_qty} '
+                           f'(вход был ${entry_price:.4f}, сейчас ${mark_price:.4f})')
+                    add_alert('ENTRY', msg)
+                    actions.append(sym)
+                    log_event(msg)
+            except Exception as e:
+                log_event(f'⚠️ Junk-DCA {sym}: исключение — {e}')
 
     return actions

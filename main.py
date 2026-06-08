@@ -49,7 +49,7 @@ from .recycle import handle_tp_recycle, apply_recycle
 from .cost_tracker import check_cycle as cost_tracker_check
 from .rpc import start_rpc_server, update_health as rpc_update_health, rpc_state
 from .sl_reentry import notify_sl_hit, check_sl_reentry
-from .auto_short import check_auto_short
+from .auto_short import check_auto_short, check_junk_dca
 
 
 def _check_risk_limits(positions: dict, risk_cfg) -> list:
@@ -424,6 +424,11 @@ def main_loop():
                 if heavy_ok and not rpc_state.get("paused"):
                     msgs, err = _a(check_auto_short, new_positions or {})
                     if err: log_event(f'⏱️ check_auto_short: таймаут — {err}')
+                    # Шлак DCA — проверяем уровни после auto_short
+                    junk_msgs, junk_err = _a(check_junk_dca, new_positions or {})
+                    if junk_err: log_event(f'⏱️ check_junk_dca: таймаут — {junk_err}')
+                    else:
+                        for msg in (junk_msgs or []): add_alert('ENTRY', msg)
                 for msg in check_bb_squeeze():
                     add_alert('INFO', msg)
                 if new_orders and new_positions is not None:
