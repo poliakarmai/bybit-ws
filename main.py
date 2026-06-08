@@ -47,7 +47,7 @@ from .reporting import (should_send_summary, send_summary, check_profit_triggers
 from .metrics import record_alert, record_auto_entry
 from .recycle import handle_tp_recycle, apply_recycle
 from .cost_tracker import check_cycle as cost_tracker_check
-from .rpc import start_rpc_server, update_health as rpc_update_health
+from .rpc import start_rpc_server, update_health as rpc_update_health, rpc_state
 from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .auto_short import check_auto_short
 
@@ -295,9 +295,10 @@ def main_loop():
                             for msg in (msgs or []): add_alert(alert_type, msg)
                 
                 # Лёгкие проверки — без таймаута
-                for msg in check_dca():
-                    add_alert('ENTRY', msg)
-                if heavy_ok:
+                if not rpc_state.get("paused"):
+                    for msg in check_dca():
+                        add_alert("ENTRY", msg)
+                if heavy_ok and not rpc_state.get("paused"):
                     msgs, err = _a(check_auto_short, new_positions or {})
                     if err: log_event(f'⏱️ check_auto_short: таймаут — {err}')
                 for msg in check_bb_squeeze():

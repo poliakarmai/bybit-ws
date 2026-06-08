@@ -40,6 +40,7 @@ rpc_state = {
     "cycle_count": 0,
     "last_cycle": 0.0,
     "cycle_duration": 0.0,
+    "paused": False,
 }
 
 
@@ -196,6 +197,14 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_enter(body)
         elif path == "/close":
             self._handle_close(body)
+        elif path == "/reload-config":
+            self._handle_reload_config()
+        elif path == "/pause":
+            self._handle_pause()
+        elif path == "/resume":
+            self._handle_resume()
+        elif path == "/logs":
+            self._handle_logs(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -278,6 +287,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 "alive": rpc_state["alive"],
                 "uptime": int(time.time() - rpc_state["started_at"]),
                 "cycle_count": rpc_state["cycle_count"],
+                "paused": rpc_state["paused"],
             },
         })
 
@@ -320,6 +330,7 @@ class RPCHandler(BaseHTTPRequestHandler):
             "cycle_count": rpc_state["cycle_count"],
             "last_cycle": rpc_state["last_cycle"],
             "cycle_duration": rpc_state["cycle_duration"],
+            "paused": rpc_state["paused"],
         })
 
     def _handle_trades(self):
@@ -653,6 +664,38 @@ class RPCHandler(BaseHTTPRequestHandler):
             'close_side': close_side,
             'order_id': order_id,
         })
+
+    def _handle_reload_config(self):
+        """POST /reload-config — перечитать config.yaml без рестарта."""
+        try:
+            from .config import reload_config
+            reload_config()
+            _json_response(self, {"status": "ok", "message": "config reloaded"})
+        except Exception as e:
+            _json_response(self, {"error": str(e)}, 500)
+
+    def _handle_pause(self):
+        """POST /pause — приостановить торговлю."""
+        rpc_state["paused"] = True
+        _json_response(self, {"status": "ok", "paused": True})
+
+    def _handle_resume(self):
+        """POST /resume — возобновить торговлю."""
+        rpc_state["paused"] = False
+        _json_response(self, {"status": "ok", "paused": False})
+
+    def _handle_logs(self, body: dict):
+        """GET /logs?lines=100 — последние строки events.log."""
+        import os
+        lines = int(body.get("lines", 100)) if body else 100
+        log_path = os.path.expanduser("~/.local/share/bybit-ws/events.log")
+        try:
+            with open(log_path) as f:
+                all_lines = f.readlines()
+                last = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                _json_response(self, {"lines": len(last), "log": "".join(last)})
+        except FileNotFoundError:
+            _json_response(self, {"error": "log file not found"}, 404)
 
 
 def start_rpc_server(port=8766, bind='127.0.0.1'):
