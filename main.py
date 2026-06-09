@@ -479,6 +479,8 @@ def main_loop():
                 if corr_err:
                     log_event(f'⏱️ check_correlation: таймаут — {corr_err}')
                 elif corr_result:
+                    msgs = corr_result.get('messages', []) if isinstance(corr_result, dict) else []
+                    log_event(f'🔬 CORR: result_truthy=True, type={type(corr_result).__name__}, msgs={len(msgs)}, flagged={len(corr_result.get("flagged",[])) if isinstance(corr_result, dict) else "N/A"}')
                     # Корреляции: dedup 24ч через хеш пары (без _is_duplicate у которого TTL 5 мин)
                     corr_dedup = load_json(CORR_DEDUP_FILE)
                     now_ts = time.time()
