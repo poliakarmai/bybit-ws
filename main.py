@@ -1,5 +1,5 @@
 """Главный цикл монитора и точка входа."""
-import os, sys, time, signal, threading, hashlib
+import os, sys, time, signal, threading, hashlib, re
 threading.stack_size(2048 * 1024)  # 2MB вместо 8MB — безопасный минимум для Python + requests + ssl
 from datetime import datetime
 from . import (DATA_DIR, EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
@@ -483,7 +483,10 @@ def main_loop():
                     corr_dedup = load_json(CORR_DEDUP_FILE)
                     now_ts = time.time()
                     for msg in corr_result.get('messages', []):
-                        pair_hash = hashlib.md5(msg.encode()).hexdigest()[:16]
+                        # Извлекаем только пару (DOTUSDT↔XRPUSDT), без r=+0.867
+                        pair_match = re.search(r'(\w+↔\w+)', msg)
+                        pair_key = pair_match.group(1) if pair_match else msg
+                        pair_hash = hashlib.md5(pair_key.encode()).hexdigest()[:16]
                         last = corr_dedup.get(pair_hash, 0)
                         if now_ts - last > 86400:  # 24 часа
                             add_alert('STOP', msg)
