@@ -1,8 +1,10 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
-> **Версия:** 3.7 | **Дата:** 09.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.9 | **Дата:** 09.06.2026 | **Автор:** Alexey Polyakov
 >
 > Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API + MCP для внешнего управления.
+>
+> **Код-ревью Manus AI (v3.9):** исправлены все критические и важные замечания — retry для POST, BB-based SL, CORS localhost, RPC_TOKEN обязателен, qty-валидация, polling вместо sleep.
 
 ---
 
@@ -21,6 +23,7 @@
 │                                                       │
 │  main.py ──► главный цикл (30 сек)                    │
 │    ├── api.py          bybit-cli wrapper               │
+│    ├── utils.py         общие утилиты (tier, lot, tick) │
 │    ├── auto_entry.py   LONG вход по scoring            │
 │    ├── auto_short.py   SHORT вход при перегреве        │
 │    ├── auto_tp.py      авто-TP при профите             │
