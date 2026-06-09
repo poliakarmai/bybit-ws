@@ -10,7 +10,7 @@ from .api import bybit, get_bb_data
 
 RSI_PERIOD = 14
 DIVERGENCE_STATE_FILE = os.path.join(DATA_DIR, 'rsi_divergence.json')
-ALERT_COOLDOWN = 7200  # не чаще раза в 2 часа на монету
+ALERT_COOLDOWN = 86400  # не чаще раза в сутки на монету
 
 
 def _load_state():
