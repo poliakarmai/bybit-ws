@@ -98,7 +98,8 @@ def calculate_margin(score: float, risk_pct: float | None = None,
     margin = max(margin, MIN_MARGIN)
 
     # Потолок
-    cap = risk_budget * MAX_POSITION_SHARE
+    # Потолок (но не ниже пола)
+    cap = max(MIN_MARGIN, risk_budget * MAX_POSITION_SHARE)
     margin = min(margin, cap)
 
     return margin
