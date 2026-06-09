@@ -37,7 +37,8 @@ from .overbought import check_overbought, rotate_watchlist
 from .pump_detect import check_pumps
 from .auto_entry import auto_entry_scan, record_sl_hit
 from .health import (check_liquidation, check_bb_squeeze, check_funding_flip,
-                      check_daily_drawdown, check_correlation_risk, check_funding_pump)
+                      check_daily_drawdown, check_funding_pump)
+from .correlation import check_correlation
 from .rsi import check_rsi_divergence
 from .squeeze import check_squeeze
 from .auto_sl import check_and_fix_sl
@@ -48,9 +49,13 @@ from .reporting import (should_send_summary, send_summary, check_profit_triggers
 from .metrics import record_alert, record_auto_entry
 from .recycle import handle_tp_recycle, apply_recycle
 from .cost_tracker import check_cycle as cost_tracker_check
+from .funding_tracker import check_cycle as funding_tracker_check
+from .margin_alerts import check_margin_utilization, get_margin_stats
 from .rpc import start_rpc_server, update_health as rpc_update_health, rpc_state
 from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .auto_short import check_auto_short, check_junk_dca
+from .regime import check_regime
+from .correlation import check_correlation, load_correlation_snapshot
 
 
 def _check_risk_limits(positions: dict, risk_cfg) -> list:
@@ -309,6 +314,11 @@ def main_loop():
                     risk_msgs = _check_risk_limits(new_positions, cfg.risk)
                     for msg in risk_msgs:
                         add_alert('STOP', msg)
+                    # Margin utilization alerts (80%/95% thresholds)
+                    margin_msgs = check_margin_utilization(new_positions)
+                    for msg in margin_msgs:
+                        add_alert('STOP', msg)
+                        send_telegram_alert(msg, level='STOP')
                 # Instant TP: закрыть указанные символы при любом профите
                 instant_syms = set(cfg.strategy.short.get('instant_tp_symbols', []))
                 if instant_syms:
@@ -403,6 +413,25 @@ def main_loop():
                 
                 # Каждая тяжёлая проверка в отдельном потоке с таймаутом 25с
                 _a = lambda fn, *a: _timed_call(fn, *a)
+
+                # Market regime detection (lightweight — 3 API calls, no heavy compute)
+                if heavy_ok:
+                    try:
+                        regime_result = check_regime(force=True)
+                        regime_label = regime_result.get("regime", "UNKNOWN")
+                        regime_conf = regime_result.get("confidence", 0)
+                        rlog = f'📊 Режим рынка: {regime_label} (conf: {regime_conf}%)'
+                        # Print to stdout (visible in terminal)
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] {rlog}")
+                        # Log to file (less frequently — every 3rd heavy cycle)
+                        if cycle_count % (HEAVY_CYCLE * 3) == 0:
+                            details = regime_result.get("details", {})
+                            if details:
+                                btc_chg = details.get("btc_change_pct", 0)
+                                eth_chg = details.get("eth_change_pct", 0)
+                                log_event(f'{rlog} | BTC {btc_chg:+.1f}% ETH {eth_chg:+.1f}%')
+                    except Exception as e:
+                        log_event(f'⚠️ check_regime failed: {e}')
                 
                 if heavy_ok and new_positions:
                     msgs, err = _a(check_overbought, new_positions)
@@ -440,9 +469,12 @@ def main_loop():
                     if err: log_event(f'⏱️ check_funding_flip: таймаут — {err}')
                     else:
                         for msg in (msgs or []): add_alert('INFO', msg)
-                corr_msg = check_correlation_risk(new_positions)
-                if corr_msg:
-                    add_alert('INFO', corr_msg)
+                corr_result, corr_err = _a(check_correlation, new_positions)
+                if corr_err:
+                    log_event(f'⏱️ check_correlation: таймаут — {corr_err}')
+                elif corr_result:
+                    for msg in corr_result.get('messages', []):
+                        add_alert('STOP', msg)
 
             # Сводка TP/SL покрытия раз в 4 часа
             if cycle_count % COVERAGE_CHECK_INTERVAL == 0 and new_positions and new_orders:
@@ -453,6 +485,11 @@ def main_loop():
 
             # Cost tracking: логирование комиссий (раз в час, с внутренним троттлингом)
             cost_tracker_check()
+
+            # Funding tracker: поиск экстремальных ставок (раз в час, с внутренним троттлингом)
+            funding_alerts = funding_tracker_check()
+            for msg in funding_alerts:
+                add_alert('INFO', msg)
 
             # Корреляция → блок авто-входа
             correlation_stop = False
@@ -503,7 +540,10 @@ def main_loop():
                 else:
                     pos_count = len(new_positions) if new_positions else 0
                     ord_count = len(new_orders) if new_orders else 0
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] {pos_count} поз, {ord_count} орд, всё штатно")
+                    margin_stats = get_margin_stats(new_positions or {})
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] {pos_count} поз, {ord_count} орд, "
+                          f"маржа ${margin_stats['total_margin']:.0f}/{margin_stats['max_margin']:.0f} "
+                          f"({margin_stats['utilization_pct']:.0f}%), всё штатно")
 
             # Алерты для bybit-monitor
             if cycle_count % 2 == 0:

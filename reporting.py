@@ -67,6 +67,14 @@ def check_profit_triggers(positions):
 # ── Трейд-журнал ──
 
 def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref=''):
+    # Дедупликация: та же позиция может приходить несколько циклов в closedPnL
+    dedup_key = f"{sym}|{float(entry):.4f}|{float(exit_price):.4f}|{float(pnl):+.4f}"
+    if hasattr(log_trade, '_seen') and dedup_key in log_trade._seen:
+        return
+    if not hasattr(log_trade, '_seen'):
+        log_trade._seen = set()
+    log_trade._seen.add(dedup_key)
+
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
     now_iso = datetime.now().isoformat()
     ref_str = f' [{alert_ref}]' if alert_ref else ''

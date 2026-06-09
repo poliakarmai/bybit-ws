@@ -79,6 +79,7 @@ def fetch_positions():
         if size > 0:
             stop = p.get('stopLoss')
             liq = p.get('liqPrice', '')
+            position_im = float(p.get('positionIM', 0))
             positions[sym] = {
                 'size': size,
                 'entry': float(p['avgPrice']),
@@ -89,6 +90,7 @@ def fetch_positions():
                 'positionIdx': int(p.get('positionIdx', 0)),
                 'liqPrice': float(liq) if liq and liq != '' else None,
                 'leverage': float(p.get('leverage', '1')),
+                'positionIM': position_im,
             }
     return positions
 

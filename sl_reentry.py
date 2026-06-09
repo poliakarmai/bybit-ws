@@ -147,8 +147,6 @@ def check_sl_reentry(positions, correlation_stop=False):
 
         # Формируем 3 лимитки
         qty_step = _get_lot_step(sym)
-        pos_idx = 0 if sym in ONE_WAY else 1
-
         orders_placed = 0
         for level_pct in REENTRY_LEVELS:
             price = round(sl_price * level_pct, 4)
@@ -166,24 +164,31 @@ def check_sl_reentry(positions, correlation_stop=False):
             if price >= current * 0.995:
                 continue  # слишком близко к текущей — пропускаем этот уровень
 
-            try:
-                order = bybit('POST', '/v5/order/create', {
-                    'category': 'linear',
-                    'symbol': sym,
-                    'side': 'Buy',
-                    'orderType': 'Limit',
-                    'qty': str(qty),
-                    'price': str(price),
-                    'positionIdx': pos_idx,
-                    'timeInForce': 'GTC',
-                })
-                if order.get('retCode') == 0:
-                    orders_placed += 1
-                    log_event(f'📌 SL re-entry {sym}: лимитка ${price:.4f} ×{qty} (ур.{REENTRY_LEVELS.index(level_pct)+1}/3)')
-                else:
-                    log_event(f'⚠️ SL re-entry {sym}: ошибка ${price:.4f} — {order.get("retMsg","?")}')
-            except Exception as e:
-                log_event(f'⚠️ SL re-entry {sym}: исключение — {e}')
+            # Пробуем idx=0 первым, при 10001 → idx=1 (питфол #17)
+            for pos_idx in (0, 1):
+                try:
+                    order = bybit('POST', '/v5/order/create', {
+                        'category': 'linear',
+                        'symbol': sym,
+                        'side': 'Buy',
+                        'orderType': 'Limit',
+                        'qty': str(qty),
+                        'price': str(price),
+                        'positionIdx': pos_idx,
+                        'timeInForce': 'GTC',
+                    })
+                    if order.get('retCode') == 0:
+                        orders_placed += 1
+                        log_event(f'📌 SL re-entry {sym}: лимитка ${price:.4f} ×{qty} (ур.{REENTRY_LEVELS.index(level_pct)+1}/3, idx={pos_idx})')
+                        break
+                    elif order.get('retCode') == 10001:
+                        continue  # пробуем другой idx
+                    else:
+                        log_event(f'⚠️ SL re-entry {sym}: ошибка ${price:.4f} — {order.get("retMsg","?")}')
+                        break
+                except Exception as e:
+                    log_event(f'⚠️ SL re-entry {sym}: исключение — {e}')
+                    break
 
         if orders_placed > 0:
             add_alert('ENTRY', f'📌 SL re-entry {sym}: {orders_placed} лимиток ниже SL (падение {drop_from_entry:.0f}% от входа)')
