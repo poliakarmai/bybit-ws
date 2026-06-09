@@ -152,6 +152,9 @@ def _is_duplicate(msg, level="INFO"):
 
 def send_telegram_alert(msg, level="INFO"):
     """Отправить алерт в Telegram с дедупликацией."""
+    # Корреляции NEVER шлём юзеру — только в логи
+    if 'концентрационный риск' in msg:
+        return
     if _is_duplicate(msg, level):
         log_event(f'🔇 Дедупликация [{level}]: пропущен алерт')
         return
