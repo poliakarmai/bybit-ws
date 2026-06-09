@@ -81,7 +81,7 @@ def _json_response(handler, data, status=200):
     body = json.dumps(data, ensure_ascii=False, default=str)
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Origin", "http://localhost, http://127.0.0.1")
     handler.send_header("Cache-Control", "no-cache")
     handler.end_headers()
     handler.wfile.write(body.encode())
@@ -190,10 +190,19 @@ class RPCHandler(BaseHTTPRequestHandler):
         pass  # тихий режим
 
     def _check_auth(self) -> bool:
-        """Проверить Bearer-токен (если настроен)."""
+        """Проверить Bearer-токен (обязателен при bind=0.0.0.0)."""
         token = _get_auth_token()
         if not token:
-            return True  # auth не настроен — пропускаем
+            # Проверяем bind — если 0.0.0.0, отказ в обслуживании
+            try:
+                from .config import Config
+                cfg = Config()
+                bind = cfg.rpc.get('bind', '127.0.0.1')
+                if bind == '0.0.0.0':
+                    return False  # внешний доступ без токена запрещён
+            except Exception:
+                pass
+            return True  # localhost — ок
         auth = self.headers.get('Authorization', '')
         return auth == f'Bearer {token}'
 
@@ -211,7 +220,7 @@ class RPCHandler(BaseHTTPRequestHandler):
     # ── CORS preflight ──────────────────────────────────────────
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", "http://localhost, http://127.0.0.1")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
@@ -637,7 +646,14 @@ class RPCHandler(BaseHTTPRequestHandler):
             return _json_response(self, preview)
 
         # ── Размещение рыночного ордера ──
-        qty_str = str(int(qty)) if qty == int(qty) else str(qty)
+        # Валидация qty: должно быть положительным числом
+        if not isinstance(qty, (int, float)) or qty <= 0:
+            return _error(self, 'Invalid qty', 'qty must be a positive number')
+        try:
+            qty_int = int(qty)
+            qty_str = str(qty_int) if qty == qty_int else str(qty)
+        except (ValueError, TypeError):
+            qty_str = str(qty)
 
         order_body = json.dumps({
             'category': 'linear',
@@ -672,8 +688,12 @@ class RPCHandler(BaseHTTPRequestHandler):
             'order_id': order_id,
         }
 
-        # ── Пауза чтобы позиция появилась ──
-        time.sleep(0.5)
+        # ── Ожидание появления позиции (polling) ──
+        for _ in range(6):  # до 3 секунд
+            time.sleep(0.5)
+            pos = _get_position(symbol)
+            if pos is not None:
+                break
 
         # ── Размещение SL ──
         if sl is not None and sl > 0:

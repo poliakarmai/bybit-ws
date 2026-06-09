@@ -104,8 +104,16 @@ def check_auto_short(positions):
     MAX_SHORTS = cfg.strategy.short.max_positions
     COOLDOWN = cfg.strategy.short.cooldown_seconds
     ENTRY_OFFSET = cfg.strategy.short.entry_offset
-    JUNK_PUMP_THRESHOLD = getattr(cfg.strategy.short, 'junk_daily_pump_threshold', 0.80)
-    JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
+    JUNK_PUMP_THRESHOLD = getattr(cfg.strategy, 'junk', None)
+    if JUNK_PUMP_THRESHOLD is not None:
+        JUNK_PUMP_THRESHOLD = getattr(JUNK_PUMP_THRESHOLD, 'daily_pump_threshold', 0.80)
+    else:
+        JUNK_PUMP_THRESHOLD = getattr(cfg.strategy.short, 'junk_daily_pump_threshold', 0.80)
+    JUNK_DCA_LEVELS = getattr(cfg.strategy, 'junk', None)
+    if JUNK_DCA_LEVELS is not None:
+        JUNK_DCA_LEVELS = getattr(JUNK_DCA_LEVELS, 'dca_levels', [1.0, 1.2])
+    else:
+        JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
 
     state = _load_state()
     now = time.time()
@@ -312,13 +320,15 @@ def check_junk_dca(positions):
 
     Вызывается каждые 10 циклов вместе с check_auto_short."""
     cfg = Config()
-    JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
     SHORT_LEVERAGE = cfg.strategy.short.leverage
     # Динамическая маржа для DCA (шлак — score 5.5)
     short_margin = margin_for_strategy('short', score=5.5)
-
-    # Читаем junk-параметры из нового раздела strategy.junk (с фоллбеком на старые ключи)
-    junk_cfg = getattr(cfg.strategy, 'junk', {})
+    # Читаем junk-параметры из strategy.junk (с фоллбеком на старые ключи strategy.short)
+    junk_cfg = getattr(cfg.strategy, 'junk', None)
+    if junk_cfg is not None:
+        JUNK_DCA_LEVELS = getattr(junk_cfg, 'dca_levels', [1.0, 1.2])
+    else:
+        JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
     MAX_LOSS_PCT = junk_cfg.get('max_loss_pct', 15) / 100  # 15% → 0.15
     MAX_HOLD_HOURS = junk_cfg.get('max_hold_hours', 48)
 

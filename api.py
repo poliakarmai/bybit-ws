@@ -7,7 +7,8 @@ MAX_RETRIES = len(RETRY_DELAYS)
 
 def bybit(method, path, body=None, retries=None):
     if retries is None:
-        retries = MAX_RETRIES if method == 'GET' else 0
+        # POST-запросы тоже с retry — ордера критичны (фикс код-ревью Manus AI)
+        retries = MAX_RETRIES
     for attempt in range(retries + 1):
         cmd = [BYBIT_CLI, 'raw', method, path]
         if body:
@@ -80,6 +81,9 @@ def fetch_positions():
             stop = p.get('stopLoss')
             liq = p.get('liqPrice', '')
             position_im = float(p.get('positionIM', 0))
+            cum_rpnl = float(p.get('cumRealisedPnl', 0))
+            open_time = p.get('openTime', '')
+            margin = float(p.get('margin', 0))
             positions[sym] = {
                 'size': size,
                 'entry': float(p['avgPrice']),
@@ -91,6 +95,9 @@ def fetch_positions():
                 'liqPrice': float(liq) if liq and liq != '' else None,
                 'leverage': float(p.get('leverage', '1')),
                 'positionIM': position_im,
+                'cumRealisedPnl': cum_rpnl,
+                'openTime': open_time,
+                'margin': margin,
             }
     return positions
 

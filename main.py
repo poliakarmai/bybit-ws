@@ -182,7 +182,15 @@ def main_loop():
             now_wd = time.time()
             if now_wd - WATCHDOG_LAST > WATCHDOG_SECONDS:
                 log_event(f'🚨 Watchdog: главный цикл завис ({now_wd - WATCHDOG_LAST:.0f}с) — аварийный выход')
-                os._exit(1)
+                # Сохранить снепшоты перед выходом
+                try:
+                    if new_positions:
+                        save_json(POSITIONS_SNAPSHOT, new_positions)
+                    if new_orders:
+                        save_json(ORDERS_SNAPSHOT, new_orders)
+                except Exception:
+                    pass
+                sys.exit(1)
             WATCHDOG_LAST = now_wd
             cycle_count += 1
             now_ts = time.time()

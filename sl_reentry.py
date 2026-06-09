@@ -1,21 +1,10 @@
 """SL Re-entry — лесенка лимиток после стоп-лосса.
 
-Когда позиция закрывается по SL, монета часто продолжает падать.
-Ставим 3 лимитки НИЖЕ уровня SL для ре-входа по лучшей цене.
-
-Правила:
-- Все Tier'ы (S/A/B/C/D) — автоперезаход после SL
-- 3 лимитки: −5%, −10%, −15% от SL-цены
-- Маржа: $10 каждая, плечо ×3
-- Кулдаун: 4 часа на монету
-- Не ставить при correlation_stop (>80% LONG)
-- Только если монета не в позиции
+v2: режимы simple (DESIGN.md: один re-entry на Lower BB) и ladder (3 уровня).
+Конфигурируемые параметры (фикс код-ревью Manus AI).
 """
 
-import json
-import math
-import os
-import time
+import json, math, os, time
 from datetime import datetime
 
 from .api import bybit, get_bb_data
@@ -23,27 +12,26 @@ from .alerts import log_event, add_alert, _is_duplicate
 from .config import Config
 from .position_sizing import margin_for_strategy
 
-SL_REENTRY_FILE = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.local', 'share', 'bybit-ws', 'sl_reentry.json')
-# Fix path
 SL_REENTRY_FILE = os.path.expanduser('~/.local/share/bybit-ws/sl_reentry.json')
 
-# Tier A/B монеты (из scoring-system.md)
-TIER_AB = {
-    'SOLUSDT', 'LTCUSDT', 'XRPUSDT', 'ADAUSDT', 'DOTUSDT', 'LINKUSDT',
-    'UNIUSDT', 'AVAXUSDT', 'SUIUSDT', 'NEARUSDT', 'APTUSDT',  # Tier A
-    'ARBUSDT', 'OPUSDT', 'AAVEUSDT', 'INJUSDT', 'ONDOUSDT',
-    'ENAUSDT', 'FETUSDT', 'WLDUSDT', 'ATOMUSDT', 'ALGOUSDT', 'RUNEUSDT',  # Tier B
-}
 
-# Параметры лесенки
-REENTRY_LEVELS = [0.95, 0.90, 0.85]   # −5%, −10%, −15% от SL-цены
-REENTRY_MARGIN = 10.0                   # $10 на лимитку
-REENTRY_LEVERAGE = 3
-REENTRY_COOLDOWN = 14400               # 4 часа
-MAX_REENTRIES_PER_COIN = 2             # макс 2 лесенки на монету (после повторных SL)
-
-# Известные one-way монеты
-ONE_WAY = {'XRPUSDT', 'ONDOUSDT', 'WLFIUSDT', 'ENJUSDT', 'ESPORTSUSDT', 'AVAXUSDT', 'APTUSDT', 'SUIUSDT'}
+def _get_reentry_config(cfg):
+    """Параметры SL re-entry из конфига (стратегия + tiers)."""
+    re = getattr(cfg.strategy, 'reentry', None)
+    mode = getattr(re, 'mode', 'ladder') if re is not None else 'ladder'
+    return {
+        'mode': mode,
+        'levels': (
+            [float(x) for x in re.get('levels', [0.95, 0.90, 0.85])]
+            if re is not None and hasattr(re, 'get') else [0.95, 0.90, 0.85]
+        ),
+        'margin': float(re.get('margin', 10)) if re is not None and hasattr(re, 'get') else 10,
+        'leverage': int(re.get('leverage', 3)) if re is not None and hasattr(re, 'get') else 3,
+        'cooldown': int(re.get('cooldown', 14400)) if re is not None and hasattr(re, 'get') else 14400,
+        'max_reentries': int(re.get('max_reentries', 2)) if re is not None and hasattr(re, 'get') else 2,
+        'tier_ab': set(cfg.tiers.A) | set(cfg.tiers.B),
+        'one_way': set(getattr(cfg.tiers, 'one_way', [])),
+    }
 
 
 def _load_state():
@@ -63,20 +51,20 @@ def _save_state(state):
 
 
 def notify_sl_hit(symbol, sl_price, entry_price):
-    """Вызывается из main.py когда позиция закрыта по SL.
-    Записывает монету в очередь на ре-вход."""
+    """Вызывается из main.py когда позиция закрыта по SL."""
+    cfg = Config()
+    rc = _get_reentry_config(cfg)
     state = _load_state()
     now = time.time()
 
-    # Проверка кулдауна
     if symbol in state:
         last_ts = state[symbol].get('last_reentry_ts', 0)
         count = state[symbol].get('reentry_count', 0)
-        if now - last_ts < REENTRY_COOLDOWN:
-            log_event(f'🔕 SL re-entry: {symbol} кулдаун ({int((now - last_ts)/60)}мин из {REENTRY_COOLDOWN//60}мин)')
+        if now - last_ts < rc['cooldown']:
+            log_event(f'🔕 SL re-entry: {symbol} кулдаун')
             return
-        if count >= MAX_REENTRIES_PER_COIN:
-            log_event(f'🔕 SL re-entry: {symbol} исчерпан лимит ({count}/{MAX_REENTRIES_PER_COIN})')
+        if count >= rc['max_reentries']:
+            log_event(f'🔕 SL re-entry: {symbol} исчерпан лимит')
             return
 
     state[symbol] = {
@@ -89,13 +77,12 @@ def notify_sl_hit(symbol, sl_price, entry_price):
         'reentry_count': state.get(symbol, {}).get('reentry_count', 0),
     }
     _save_state(state)
-    log_event(f'📌 SL re-entry: {symbol} в очереди (SL=${sl_price:.4f}, Tier A/B)')
+    log_event(f'📌 SL re-entry: {symbol} в очереди (SL=${sl_price:.4f})')
 
 
 def check_sl_reentry(positions, correlation_stop=False):
-    """Проверить очередь и выставить лимитки. Вызывается каждые 10 циклов."""
+    """Проверить очередь и выставить лимитки."""
     if correlation_stop:
-        # Rate-limit: не спамить каждый цикл
         if not _is_duplicate('SL re-entry blocked by correlation', 'STOP'):
             log_event('🔕 SL re-entry: correlation_stop активен')
         return []
@@ -104,13 +91,13 @@ def check_sl_reentry(positions, correlation_stop=False):
     if not state:
         return []
 
+    cfg = Config()
+    rc = _get_reentry_config(cfg)
     actions = []
     now = time.time()
     active_syms = set(positions.keys()) if isinstance(positions, dict) else set()
 
-    # Бан-лист из конфига
     try:
-        cfg = Config()
         banned = set(cfg.risk.get('banned_symbols', []))
     except Exception:
         banned = set()
@@ -119,25 +106,20 @@ def check_sl_reentry(positions, correlation_stop=False):
         if sym in banned:
             info['pending'] = False
             state[sym] = info
-            log_event(f'🚫 SL re-entry: {sym} в бане, пропущена')
             continue
         if not info.get('pending'):
             continue
         if sym in active_syms:
-            # Монета уже в позиции — сбрасываем pending
             info['pending'] = False
             state[sym] = info
-            log_event(f'🔕 SL re-entry: {sym} уже в позиции, пропущена')
             continue
 
         sl_price = info['sl_price']
         entry_price = info['entry_price']
 
-        # Получаем текущую цену
         try:
             ticker_data = bybit('GET', f'/v5/market/tickers?category=linear&symbol={sym}')
-            result = ticker_data.get('result', {})
-            tickers = result.get('list', [])
+            tickers = ticker_data.get('result', {}).get('list', [])
             if not tickers:
                 continue
             current = float(tickers[0].get('lastPrice', 0))
@@ -148,65 +130,74 @@ def check_sl_reentry(positions, correlation_stop=False):
         if current <= 0:
             continue
 
-        # Проверяем что цена реально ушла ниже SL (иначе не ставим)
         if current > sl_price * 1.02:
-            # Цена выше SL + 2% — отскок, неинтересно
             info['pending'] = False
             state[sym] = info
             log_event(f'🔕 SL re-entry: {sym} отскочила (${current:.4f} > SL ${sl_price:.4f})')
             continue
 
-        # Считаем падение от входа для информации
         drop_from_entry = (1 - current / entry_price) * 100 if entry_price else 0
-
-        # Формируем 3 лимитки
         qty_step = _get_lot_step(sym)
         orders_placed = 0
-        for level_pct in REENTRY_LEVELS:
-            price = round(sl_price * level_pct, 4)
-            if price < 0.0001:
-                continue
+
+        if rc['mode'] == 'simple':
+            # DESIGN.md: один re-entry на Lower BB Daily, маржа x0.5 от предыдущей
+            bb = get_bb_data(sym, 'D')
+            price = bb['lower'] if bb and bb.get('lower', 0) > 0 else current * 0.95
+            price = round(price, 4)
             price = _round_to_tick(price, sym)
-            # Динамическая маржа для SL re-entry (score 6.5 — средняя уверенность после стопа)
-            reentry_margin = margin_for_strategy('reentry', score=6.5)
-            if reentry_margin <= 0:
-                continue
-            usdt_qty = reentry_margin * REENTRY_LEVERAGE
-            qty = math.ceil(usdt_qty / price / qty_step) * qty_step
-            qty = round(qty, _get_precision(qty_step))
+            margin = margin_for_strategy('reentry', score=6.5)
+            if margin > 0 and price < current:
+                usdt_qty = margin * rc['leverage']
+                qty = round(usdt_qty / price / qty_step) * qty_step
+                if qty > 0:
+                    for pos_idx in (0, 1):
+                        order = bybit('POST', '/v5/order/create', {
+                            'category': 'linear', 'symbol': sym, 'side': 'Buy',
+                            'orderType': 'Limit', 'qty': str(qty),
+                            'price': str(price), 'positionIdx': pos_idx,
+                            'timeInForce': 'GTC',
+                        })
+                        if order.get('retCode') == 0:
+                            orders_placed += 1
+                            log_event(f'📌 SL re-entry {sym}: simple @ ${price:.4f} ×{qty}')
+                            break
+                        elif order.get('retCode') == 10001:
+                            continue
+                        else:
+                            break
+        else:
+            # Ladder-режим: уровни от SL-цены
+            for level_pct in rc['levels']:
+                price = round(sl_price * level_pct, 4)
+                if price < 0.0001:
+                    continue
+                price = _round_to_tick(price, sym)
+                margin = margin_for_strategy('reentry', score=6.5)
+                if margin <= 0:
+                    continue
+                usdt_qty = margin * rc['leverage']
+                qty = round(usdt_qty / price / qty_step) * qty_step
+                qty = round(qty, _get_precision(qty_step))
+                if qty <= 0 or price >= current * 0.995:
+                    continue
 
-            if qty <= 0:
-                continue
-
-            # Проверяем что лимитка реально ниже текущей цены
-            if price >= current * 0.995:
-                continue  # слишком близко к текущей — пропускаем этот уровень
-
-            # Пробуем idx=0 первым, при 10001 → idx=1 (питфол #17)
-            for pos_idx in (0, 1):
-                try:
+                for pos_idx in (0, 1):
                     order = bybit('POST', '/v5/order/create', {
-                        'category': 'linear',
-                        'symbol': sym,
-                        'side': 'Buy',
-                        'orderType': 'Limit',
-                        'qty': str(qty),
-                        'price': str(price),
-                        'positionIdx': pos_idx,
+                        'category': 'linear', 'symbol': sym, 'side': 'Buy',
+                        'orderType': 'Limit', 'qty': str(qty),
+                        'price': str(price), 'positionIdx': pos_idx,
                         'timeInForce': 'GTC',
                     })
                     if order.get('retCode') == 0:
                         orders_placed += 1
-                        log_event(f'📌 SL re-entry {sym}: лимитка ${price:.4f} ×{qty} (ур.{REENTRY_LEVELS.index(level_pct)+1}/3, idx={pos_idx})')
+                        log_event(f'📌 SL re-entry {sym}: лимитка ${price:.4f} ×{qty} (ур.{rc["levels"].index(level_pct)+1}/{len(rc["levels"])}, idx={pos_idx})')
                         break
                     elif order.get('retCode') == 10001:
-                        continue  # пробуем другой idx
+                        continue
                     else:
                         log_event(f'⚠️ SL re-entry {sym}: ошибка ${price:.4f} — {order.get("retMsg","?")}')
                         break
-                except Exception as e:
-                    log_event(f'⚠️ SL re-entry {sym}: исключение — {e}')
-                    break
 
         if orders_placed > 0:
             add_alert('ENTRY', f'📌 SL re-entry {sym}: {orders_placed} лимиток ниже SL (падение {drop_from_entry:.0f}% от входа)')
@@ -216,7 +207,6 @@ def check_sl_reentry(positions, correlation_stop=False):
             state[sym] = info
             actions.append(sym)
         else:
-            # Не смогли поставить — оставляем в очереди до следующего цикла
             log_event(f'⏳ SL re-entry {sym}: не удалось поставить лимитки, ждём')
 
     _save_state(state)
@@ -224,7 +214,6 @@ def check_sl_reentry(positions, correlation_stop=False):
 
 
 def _get_lot_step(sym):
-    """Шаг лота для монеты."""
     try:
         data = bybit('GET', f'/v5/market/instruments-info?category=linear&symbol={sym}')
         instruments = data.get('result', {}).get('list', [])
@@ -236,7 +225,6 @@ def _get_lot_step(sym):
 
 
 def _round_to_tick(price, sym):
-    """Округлить до шага тика."""
     tick_size = 0.01
     if price < 1:
         tick_size = 0.0001
@@ -252,7 +240,6 @@ def _round_to_tick(price, sym):
 
 
 def _get_precision(step):
-    """Количество знаков после запятой для шага."""
     if step >= 1:
         return 0
     s = str(step)
