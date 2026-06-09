@@ -117,6 +117,7 @@ def check_auto_short(positions):
 
     state = _load_state()
     now = time.time()
+    deadline = now + 20  # time budget — не дольше 20с на все BB-запросы
 
     # Считаем текущие SHORT (в позиции + в стейте)
     active_shorts = sum(1 for p in positions.values()
@@ -173,6 +174,11 @@ def check_auto_short(positions):
         except:
             continue
 
+        # Early exit: если time budget исчерпан — не тратим время на threshold-проверки
+        if time.time() > deadline:
+            log_event(f'⏱️ check_auto_short: budget исчерпан на {sym} (кандидатов проверено, actions={len(actions)})')
+            break
+
         # ── Шлак-режим: дневной рост ≥ 80% ──
         if is_junk:
             chg_pct = float(t.get('price24hPcnt', 0) or 0)
@@ -185,6 +191,11 @@ def check_auto_short(positions):
             # Tier A/B — обычный фильтр BB
             if bb_pct < BB_SHORT_THRESHOLD:
                 continue
+
+        # Проверка time budget — останавливаемся если подходим к таймауту
+        if time.time() > deadline:
+            log_event(f'⏱️ check_auto_short: budget исчерпан (обработано {len(actions)} входов)')
+            break
 
         # Шорт! Рассчитываем параметры
         short_margin = margin_for_strategy('short', score=7.0)
