@@ -43,6 +43,7 @@
 │    ├── funding_entry.py ⚡ Funding Momentum x10        │
 │    ├── atr_sizer.py   ⚡ ATR Risk Sizing               │
 │    ├── x10_limits.py  ⚡ X10 daily loss stop           │
+│    ├── position_sizing.py 📐 динамическая маржа v3.8   │
 │    ├── rpc.py          HTTP-RPC сервер (:8766)         │
 │    ├── cost_tracker.py учёт комиссий и PnL             │
 │    └── reporting.py    сводки и трейд-журнал           │
