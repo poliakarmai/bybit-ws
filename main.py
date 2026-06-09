@@ -1,5 +1,5 @@
 """Главный цикл монитора и точка входа."""
-import os, sys, time, signal, threading
+import os, sys, time, signal, threading, hashlib
 threading.stack_size(2048 * 1024)  # 2MB вместо 8MB — безопасный минимум для Python + requests + ssl
 from datetime import datetime
 from . import (DATA_DIR, EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
@@ -9,6 +9,8 @@ from .config import Config
 
 # Health-check: файл с timestamp последнего успешного цикла
 HEALTH_FILE = os.path.join(DATA_DIR, 'health.txt')
+# Дедупликация корреляционных алертов (24ч TTL, не как _is_duplicate с 5 мин)
+CORR_DEDUP_FILE = os.path.join(DATA_DIR, 'corr_dedup.json')
 
 HEAVY_CHECK_TIMEOUT = 25
 
@@ -473,9 +475,16 @@ def main_loop():
                 if corr_err:
                     log_event(f'⏱️ check_correlation: таймаут — {corr_err}')
                 elif corr_result:
+                    # Корреляции: dedup 24ч через хеш пары (без _is_duplicate у которого TTL 5 мин)
+                    corr_dedup = load_json(CORR_DEDUP_FILE)
+                    now_ts = time.time()
                     for msg in corr_result.get('messages', []):
-                        if not _is_duplicate(msg, 'STOP'):
+                        pair_hash = hashlib.md5(msg.encode()).hexdigest()[:16]
+                        last = corr_dedup.get(pair_hash, 0)
+                        if now_ts - last > 86400:  # 24 часа
                             add_alert('STOP', msg)
+                            corr_dedup[pair_hash] = now_ts
+                    save_json(CORR_DEDUP_FILE, corr_dedup)
 
             # Сводка TP/SL покрытия раз в 4 часа
             if cycle_count % COVERAGE_CHECK_INTERVAL == 0 and new_positions and new_orders:
