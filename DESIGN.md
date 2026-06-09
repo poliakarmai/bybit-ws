@@ -635,7 +635,7 @@ alerts:
 
 ### 1. Клонировать и настроить
 ```bash
-git clone https://github.com/poliakarm/bybit-ws.git ~/.local/lib/bybit_ws
+git clone https://github.com/poliakarmai/bybit-ws.git ~/.local/lib/bybit_ws
 cd ~/.local/lib/bybit_ws
 pip install -r requirements.txt
 cp config.example.yaml ~/.config/bybit-ws/config.yaml

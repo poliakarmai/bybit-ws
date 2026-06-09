@@ -16,7 +16,7 @@ A production-grade trading monitor for Bybit that runs 24/7, scans for opportuni
 ## Quick Start (for AI Agents)
 
 ```bash
-git clone https://github.com/poliakarm/bybit-ws.git
+git clone https://github.com/poliakarmai/bybit-ws.git
 cd bybit-ws
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
 # Set BYBIT_API_KEY and BYBIT_API_SECRET

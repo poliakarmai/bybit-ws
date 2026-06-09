@@ -20,7 +20,7 @@
 ### Option A: Docker (recommended)
 
 ```bash
-git clone https://github.com/poliakarm/bybit-ws.git
+git clone https://github.com/poliakarmai/bybit-ws.git
 cd bybit-ws
 cp config.example.yaml config.yaml
 # Edit config.yaml → set api.key, api.secret, rpc.auth_token
@@ -30,7 +30,7 @@ docker-compose up -d
 ### Option B: Bare metal
 
 ```bash
-git clone https://github.com/poliakarm/bybit-ws.git ~/.local/lib/bybit_ws
+git clone https://github.com/poliakarmai/bybit-ws.git ~/.local/lib/bybit_ws
 cd ~/.local/lib/bybit_ws
 python3 -m pip install -r requirements.txt
 mkdir -p ~/.config/bybit-ws
