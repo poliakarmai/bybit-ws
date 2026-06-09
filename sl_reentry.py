@@ -20,6 +20,8 @@ from datetime import datetime
 
 from .api import bybit, get_bb_data
 from .alerts import log_event, add_alert, _is_duplicate
+from .config import Config
+from .position_sizing import margin_for_strategy
 
 SL_REENTRY_FILE = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.local', 'share', 'bybit-ws', 'sl_reentry.json')
 # Fix path
@@ -106,7 +108,19 @@ def check_sl_reentry(positions, correlation_stop=False):
     now = time.time()
     active_syms = set(positions.keys()) if isinstance(positions, dict) else set()
 
+    # Бан-лист из конфига
+    try:
+        cfg = Config()
+        banned = set(cfg.risk.get('banned_symbols', []))
+    except Exception:
+        banned = set()
+
     for sym, info in list(state.items()):
+        if sym in banned:
+            info['pending'] = False
+            state[sym] = info
+            log_event(f'🚫 SL re-entry: {sym} в бане, пропущена')
+            continue
         if not info.get('pending'):
             continue
         if sym in active_syms:
@@ -153,7 +167,11 @@ def check_sl_reentry(positions, correlation_stop=False):
             if price < 0.0001:
                 continue
             price = _round_to_tick(price, sym)
-            usdt_qty = REENTRY_MARGIN * REENTRY_LEVERAGE
+            # Динамическая маржа для SL re-entry (score 6.5 — средняя уверенность после стопа)
+            reentry_margin = margin_for_strategy('reentry', score=6.5)
+            if reentry_margin <= 0:
+                continue
+            usdt_qty = reentry_margin * REENTRY_LEVERAGE
             qty = math.ceil(usdt_qty / price / qty_step) * qty_step
             qty = round(qty, _get_precision(qty_step))
 

@@ -34,6 +34,7 @@ import time
 from .api import bybit, get_bb_data
 from .alerts import log_event, add_alert
 from .config import Config
+from .position_sizing import margin_for_strategy
 
 SHORT_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/short_positions.json')
 
@@ -94,6 +95,7 @@ def check_auto_short(positions):
     cfg = Config()
     ONE_WAY = _get_one_way(cfg)
     TIER_AB = _get_tier_ab(cfg)
+    BANNED = set(cfg.risk.get('banned_symbols', []))
     BB_SHORT_THRESHOLD = cfg.strategy.short.bb_threshold
     SHORT_MARGIN = cfg.strategy.short.margin
     SHORT_LEVERAGE = cfg.strategy.short.leverage
@@ -131,7 +133,8 @@ def check_auto_short(positions):
     tickers.sort(key=lambda t: float(t.get('turnover24h', 0) or 0), reverse=True)
     candidates = [t for t in tickers[:80]
                   if t['symbol'] not in ONE_WAY
-                  and t['symbol'] not in live_syms]
+                  and t['symbol'] not in live_syms
+                  and t['symbol'] not in BANNED]
 
     for t in candidates:
         if active_shorts + len(actions) >= MAX_SHORTS:
@@ -176,7 +179,10 @@ def check_auto_short(positions):
                 continue
 
         # Шорт! Рассчитываем параметры
-        usdt_qty = SHORT_MARGIN * SHORT_LEVERAGE  # $30
+        short_margin = margin_for_strategy('short', score=7.0)
+        if short_margin <= 0:
+            continue
+        usdt_qty = short_margin * SHORT_LEVERAGE
         qty_step = _get_lot_step(sym)
         qty = math.ceil(usdt_qty / last_price / qty_step) * qty_step
         if qty <= 0:
@@ -308,7 +314,8 @@ def check_junk_dca(positions):
     cfg = Config()
     JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
     SHORT_LEVERAGE = cfg.strategy.short.leverage
-    SHORT_MARGIN = cfg.strategy.short.margin
+    # Динамическая маржа для DCA (шлак — score 5.5)
+    short_margin = margin_for_strategy('short', score=5.5)
 
     # Читаем junk-параметры из нового раздела strategy.junk (с фоллбеком на старые ключи)
     junk_cfg = getattr(cfg.strategy, 'junk', {})
@@ -396,7 +403,7 @@ def check_junk_dca(positions):
             if mark_price < dca_trigger:
                 continue
 
-            usdt_qty = SHORT_MARGIN * SHORT_LEVERAGE
+            usdt_qty = short_margin * SHORT_LEVERAGE
             qty_step = _get_lot_step(sym)
             dca_qty = math.ceil(usdt_qty / mark_price / qty_step) * qty_step
             if dca_qty <= 0:

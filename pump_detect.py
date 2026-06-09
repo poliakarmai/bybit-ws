@@ -18,6 +18,7 @@ import time
 from . import DATA_DIR, BYBIT_CLI
 from .api import bybit
 from .alerts import log_event, add_alert
+from .position_sizing import margin_for_strategy
 
 PUMP_STATE_FILE = os.path.join(DATA_DIR, 'pumps.json')
 PUMP_THRESHOLD = 1.20
@@ -95,7 +96,10 @@ def _place_pump_short(sym, price, level_label, state, peak_price):
         log_event(f'🔕 Pump-SHORT {sym}: one-way, нельзя шортить')
         return False
 
-    usdt_qty = PUMP_SHORT_MARGIN * PUMP_SHORT_LEV
+    pump_margin = margin_for_strategy('pump', score=5.5)
+    if pump_margin <= 0:
+        return False
+    usdt_qty = pump_margin * PUMP_SHORT_LEV
     qty_step = _get_lot_step(sym)
     qty = math.ceil(usdt_qty / price / qty_step) * qty_step
     if qty <= 0:

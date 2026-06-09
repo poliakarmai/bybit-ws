@@ -18,6 +18,7 @@ from datetime import datetime
 
 from .api import bybit
 from .alerts import log_event, add_alert, _is_duplicate
+from .position_sizing import margin_for_strategy
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 MEAN_STATE_FILE = os.path.join(DATA_DIR, 'mean_revert_state.json')
@@ -124,7 +125,10 @@ def check_mean_revert(positions):
             continue
 
         price = lower if direction == 'LONG' else upper
-        qty = math.ceil(MEAN_MARGIN * MEAN_LEVERAGE / max(price, 0.0001) * 100) / 100
+        mean_margin = margin_for_strategy('mean_revert', score=5.5)
+        if mean_margin <= 0:
+            continue
+        qty = math.ceil(mean_margin * MEAN_LEVERAGE / max(price, 0.0001) * 100) / 100
         if qty <= 0:
             continue
 
@@ -136,7 +140,7 @@ def check_mean_revert(positions):
             entries.append({
                 'symbol': sym, 'side': side, 'direction': direction,
                 'entry': price, 'sl': sl_price, 'tp': tp_price,
-                'qty': qty, 'leverage': MEAN_LEVERAGE, 'margin': MEAN_MARGIN,
+                'qty': qty, 'leverage': MEAN_LEVERAGE, 'margin': mean_margin,
                 'bb_pct': bb_pct, 'strategy': 'mean_revert',
             })
             state[sym] = {'last_mean': now}

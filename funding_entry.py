@@ -16,6 +16,7 @@ from datetime import datetime
 
 from .api import bybit
 from .alerts import log_event, add_alert, _is_duplicate
+from .position_sizing import margin_for_strategy
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 FUNDING_STATE_FILE = os.path.join(DATA_DIR, 'funding_entry_state.json')
@@ -153,7 +154,10 @@ def check_funding_signals(positions):
         else:
             continue
 
-        qty = math.ceil(FUNDING_MARGIN * FUNDING_LEVERAGE / entry_price * 100) / 100
+        funding_margin = margin_for_strategy('funding', score=5.5)
+        if funding_margin <= 0:
+            continue
+        qty = math.ceil(funding_margin * FUNDING_LEVERAGE / entry_price * 100) / 100
         if qty <= 0:
             continue
 
@@ -165,7 +169,7 @@ def check_funding_signals(positions):
             entries.append({
                 'symbol': sym, 'side': side, 'direction': direction,
                 'entry': entry_price, 'sl': sl_price, 'tp': tp_price,
-                'qty': qty, 'leverage': FUNDING_LEVERAGE, 'margin': FUNDING_MARGIN,
+                'qty': qty, 'leverage': FUNDING_LEVERAGE, 'margin': funding_margin,
                 'funding_rate': data['funding_rate'],
                 'strategy': 'funding_momentum',
             })

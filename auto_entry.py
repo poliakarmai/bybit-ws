@@ -5,6 +5,7 @@ from . import safe_run
 from .api import bybit, get_bb_data
 from .alerts import log_event
 from .config import Config
+from .position_sizing import margin_for_strategy
 
 AUTO_ENTRY_WATCH = [
     'BTCUSDT','ETHUSDT','SOLUSDT','LTCUSDT','XRPUSDT','ADAUSDT','DOGEUSDT',
@@ -57,6 +58,14 @@ def auto_entry_scan(positions):
             custom = [l.strip() for l in f if l.strip() and l.strip().endswith('USDT')]
             all_watch.extend([s for s in custom if s not in all_watch])
 
+    # Фильтр banned_symbols из конфига
+    try:
+        cfg = Config()
+        banned = set(cfg.risk.get('banned_symbols', []))
+        all_watch = [s for s in all_watch if s not in banned]
+    except Exception:
+        pass
+
     try:
         r = safe_run([BYBIT_CLI, 'tickers'], timeout=15)
         if r.returncode != 0:
@@ -95,7 +104,11 @@ def auto_entry_scan(positions):
 
             if bb_pos < 25 and bb_pos > 0:
                 price = round(lower, 4)
-                qty = math.ceil(10 / price * 3)
+                # Динамическая маржа от % депозита (авто-вход = score 7.0)
+                margin = margin_for_strategy('long', score=7.0)
+                if margin <= 0:
+                    continue
+                qty = math.ceil(margin * 3 / price)
                 if qty < 1:
                     continue
                 if sym in positions:

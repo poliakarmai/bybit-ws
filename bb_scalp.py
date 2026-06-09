@@ -18,6 +18,7 @@ from datetime import datetime
 
 from .api import bybit
 from .alerts import log_event, add_alert, _is_duplicate
+from .position_sizing import margin_for_strategy
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 SCALP_STATE_FILE = os.path.join(DATA_DIR, 'scalp_state.json')
@@ -153,10 +154,11 @@ def check_scalp_signals(positions, balance_usdt):
             continue
 
         # Проверка free margin
-        if free_margin < SCALP_MARGIN * 1.5:
+        scalp_margin = margin_for_strategy('scalp', score=5.5)
+        if scalp_margin <= 0 or free_margin < scalp_margin * 1.5:
             continue
 
-        qty = math.ceil(SCALP_MARGIN * SCALP_LEVERAGE / entry_price * 100) / 100
+        qty = math.ceil(scalp_margin * SCALP_LEVERAGE / entry_price * 100) / 100
         if qty <= 0:
             continue
 
