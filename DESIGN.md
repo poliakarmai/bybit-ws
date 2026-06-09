@@ -872,14 +872,9 @@ docker-compose up -d
 
 ## 9. Changelog
 
+- **v3.9** (09.06.2026): 🔧 Код-ревью Manus AI — retry для POST-запросов, BB-based SL (Lower BB * 0.93), CORS ограничен localhost, RPC_TOKEN обязателен при bind=0.0.0.0, qty-валидация, polling вместо sleep(0.5) для появления позиции. junk-конфиг из strategy.junk, DCA-параметры из конфига, SL reentry: режимы simple/ladder, конфигурируемые уровни. utils.py: общие tier/lot_step/round_to_tick. os._exit→sys.exit с сохранением снепшотов. Логирование: единый log_event вместо разрозненных _log.
+- **v3.8** (09.06.2026): Position sizing от % депозита, X10 стратегии (BB Scalp, Mean Revert, Funding), pump_detect, banned_symbols
 - **v3.7** (09.06.2026): 🛡 X10 risk limits (max 3 daily losses → 24h cooldown), junk hard stop (15% loss + 48h max hold), correlation check для x10, funding trend filter (3-дневный тренд), strategy tag в трейд-журнале. Security: fail-fast при bind ≠ localhost без auth_token. Partial failure: унифицировано правило для пустого ответа API.
-- **v3.6** (08.06.2026): 🚀 MCP Server — инструменты scan_market/get_positions/get_metrics/vpn_status для AI-агентов. Шлак-режим SHORT (рост ≥80%, без SL, DCA-лесенка +100%/+120%). threading.stack_size(512KB) — экономия памяти на потоках.
-- **v3.5** (08.06.2026): 🔥 DCA-лимиты ($80/монету, 2 добавки), защита от каскадных ликвидаций, LONG cooldown 4ч после SL, SHORT max_hold 72ч, max_positions: 15, секторные лимиты, TP через trading-stop, drawdown_mode: peak, trades.jsonl ротация, EnvironmentFile, скоринг-нормализация, partial failure handling, канонические пути
-- **v3.4** (08.06.2026): RPC auth (Bearer), rate limiting, GET /config, GET /signals (LONG+SHORT), risk-лимиты (max_drawdown, max_total_margin), graceful shutdown (SIGTERM → check SL), log rotation, error-формат v1, confirm:true для /enter, документация (scoring, edge cases, deployment)
-- **v3.3:** YAML-конфиг, REST API 8 эндпоинтов, _timed_call, Docker, SDK, OpenAPI
-- **v3.2:** auto_short исправлен (4 бага), SHORT лимитный вход +2%, SL +5%/+7% по Tier
-- **v3.1:** cost_tracker (PnL + комиссии), SL re-entry лесенка
-- **v3.0:** модульная архитектура, watchdog, авто-SL/TP/DCA
 
 ---
 
@@ -971,6 +966,10 @@ docker-compose up -d
 | Принцип | Монитор не хранит приватные ключи кошельков — только API read/trade |
 
 **Fail-fast при старте:** RPC-сервер при инициализации проверяет `bind` и `auth_token`. Если `bind` не localhost (≠ 127.0.0.1, ≠ ::1) и `auth_token` пуст — процесс завершается с ошибкой и понятным сообщением в лог.
+
+**CORS (v3.9+):** `Access-Control-Allow-Origin` ограничен `http://localhost, http://127.0.0.1`. Запросы с внешних доменов блокируются.
+
+**RPC_TOKEN (v3.9+):** Обязателен при `bind: 0.0.0.0`. `_check_auth` возвращает `False` если внешний доступ без токена — отказ в обслуживании.
 
 ## 12b. Monitoring & Alerting
 

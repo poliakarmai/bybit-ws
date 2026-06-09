@@ -1,6 +1,7 @@
 """API-запросы к Bybit v2 — с process-group таймаутом."""
 import json, os, signal, subprocess, time
 from . import BYBIT_CLI, EVENTS_LOG
+from .alerts import log_event  # единое логирование
 
 RETRY_DELAYS = [1, 3, 5]
 MAX_RETRIES = len(RETRY_DELAYS)
@@ -25,14 +26,14 @@ def bybit(method, path, body=None, retries=None):
                 err = stderr.strip()[:100]
                 if attempt < retries:
                     delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS)-1)]
-                    _log(f'bybit retry {attempt+1}/{retries} in {delay}s: {err}')
+                    log_event(f'bybit retry {attempt+1}/{retries} in {delay}s: {err}')
                     time.sleep(delay)
                     continue
-                _log(f'bybit error (final): {err}')
+                log_event(f'bybit error (final): {err}')
                 return None
             return json.loads(stdout)
         except json.JSONDecodeError as e:
-            _log(f'bybit json error: {e}')
+            log_event(f'bybit json error: {e}')
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS)-1)])
                 continue
@@ -45,7 +46,7 @@ def bybit(method, path, body=None, retries=None):
                 except Exception:
                     proc.kill()
                 proc.wait(timeout=5)
-            _log(f'bybit timeout after 15s: {method} {path[:60]}')
+            log_event(f'bybit timeout after 15s: {method} {path[:60]}')
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS)-1)])
                 continue
@@ -56,14 +57,14 @@ def bybit(method, path, body=None, retries=None):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 except Exception:
                     pass
-            _log(f'bybit exception: {e}')
+            log_event(f'bybit exception: {e}')
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS)-1)])
                 continue
             return None
     return None
 
-def _log(msg):
+def log_event(msg):
     from datetime import datetime
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(EVENTS_LOG, 'a') as f:
@@ -150,11 +151,11 @@ def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
             'stopLoss': str(stop_price), 'triggerBy': 'LastPrice', 'slTriggerBy': 'MarkPrice'}
     data = bybit('POST', '/v5/position/trading-stop', body)
     if data and data.get('retCode') == 0:
-        _log(f'✅ SL поставлен {symbol} @ ${stop_price:.4f}')
+        log_event(f'✅ SL поставлен {symbol} @ ${stop_price:.4f}')
         return True
     else:
         err = data.get('retMsg', '?') if data else 'no response'
-        _log(f'❌ SL ошибка {symbol}: {err}')
+        log_event(f'❌ SL ошибка {symbol}: {err}')
         return False
 
 def place_take_profit(symbol, positionIdx, side, qty, tp_price):
@@ -165,21 +166,21 @@ def place_take_profit(symbol, positionIdx, side, qty, tp_price):
             'price': str(tp_price), 'reduceOnly': True, 'timeInForce': 'GTC'}
     data = bybit('POST', '/v5/order/create', body)
     if data and data.get('retCode') == 0:
-        _log(f'✅ TP поставлен {symbol} @ ${tp_price:.4f}')
+        log_event(f'✅ TP поставлен {symbol} @ ${tp_price:.4f}')
         return True
     else:
         err = data.get('retMsg', '?') if data else 'no response'
         if '110043' in str(err):
-            _log(f'ℹ️ TP уже существует {symbol}')
+            log_event(f'ℹ️ TP уже существует {symbol}')
             return True
-        _log(f'❌ TP ошибка {symbol}: {err}')
+        log_event(f'❌ TP ошибка {symbol}: {err}')
         return False
 
 def cancel_order(symbol, order_id):
     body = {'category': 'linear', 'symbol': symbol, 'orderId': order_id}
     data = bybit('POST', '/v5/order/cancel', body)
     if data and data.get('retCode') == 0:
-        _log(f'🗑️ Отменён ордер {symbol}/{order_id[:8]}')
+        log_event(f'🗑️ Отменён ордер {symbol}/{order_id[:8]}')
         return True
     return False
 
