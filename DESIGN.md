@@ -628,55 +628,70 @@ alerts:
 
 ## 5. Быстрый старт (для AI-агента)
 
-### 1. Клонировать
-```bash
-git clone <repo> /opt/bybit-ws
-cd /opt/bybit-ws
-pip install -r requirements.txt
-```
+> **Полный гайд:** [`QUICKSTART.md`](./QUICKSTART.md) — установка за 5 минут.
+> **Справочник ошибок:** [`ERRORS.md`](./ERRORS.md) — как обрабатывать каждую ошибку Bybit.
+> **Формат алертов:** [`WEBHOOKS.md`](./WEBHOOKS.md) — payload'ы SL/TP/входов.
+> **SDK:** [`bybit_ws_sdk.py`](./bybit_ws_sdk.py) — Python-клиент с классами `Monitor` + `WebhookHandler`.
 
-### 2. Настроить
+### 1. Клонировать и настроить
 ```bash
+git clone https://github.com/poliakarm/bybit-ws.git ~/.local/lib/bybit_ws
+cd ~/.local/lib/bybit_ws
+pip install -r requirements.txt
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
 # Прописать BYBIT_API_KEY и BYBIT_API_SECRET
 ```
 
-### 3. Запустить
+### 2. Запустить
 ```bash
-# Через systemd
-cp bybit-ws.service ~/.config/systemd/user/
-systemctl --user enable --now bybit-ws
-
-# Или вручную
 python3 -m bybit_ws.main
+# или через Docker: docker-compose up -d
 ```
 
-### 4. Проверить
+### 3. Проверить
 ```bash
 curl http://localhost:8766/health
-# {"status": "alive", ...}
+# → {"status":"ok","cycle_seconds":30,"uptime_seconds":123}
 ```
 
-### 5. Использовать из AI-агента
+### 4. Использовать из AI-агента
+
 ```python
-import requests
+from bybit_ws_sdk import Monitor
 
-# Получить позиции
-r = requests.get('http://localhost:8766/positions')
-positions = r.json()
+m = Monitor("http://localhost:8766", token="your-rpc-token")
 
-# Войти в SHORT
-requests.post('http://localhost:8766/enter', json={
-    'symbol': 'WLDUSDT',
-    'side': 'Sell',
-    'qty': 50,
-    'sl': 0.52,
-    'tp': 0.35
-})
+# Сканировать SHORT-сигналы
+signals = m.scan(mode="short", limit=5)
+
+# Войти в позицию (монитор авто-выставит SL/TP)
+for s in signals.get("signals", []):
+    if s["score"] >= 7.0:
+        m.enter(s["symbol"], "Sell", s["qty"])
+
+# Проверить позиции
+positions = m.positions()
+print(f"PnL: ${sum(p['unrealisedPnl'] for p in positions):+.2f}")
 
 # Закрыть
-requests.post('http://localhost:8766/close', json={'symbol': 'WLDUSDT'})
+m.close("ADAUSDT")
 ```
+
+### 5. Интеграция через MCP
+
+```json
+// mcp.json — подключить как MCP-сервер
+{
+  "mcpServers": {
+    "bybit-ws": {
+      "command": "python3",
+      "args": ["~/.local/bin/hermes-mcp-server.py"]
+    }
+  }
+}
+```
+
+Доступные MCP-инструменты: `scan_market`, `get_positions`, `get_metrics`, `health_check`.
 
 ---
 
