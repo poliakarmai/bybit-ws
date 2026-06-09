@@ -412,6 +412,7 @@ def main_loop():
 
             # Блок каждые HEAVY_CYCLE циклов — тяжёлые проверки с таймаутом
             if cycle_count % HEAVY_CYCLE == 0:
+                log_event(f'🔬 HEAVY cycle_count={cycle_count}')
                 cycle_elapsed = time.time() - now_ts
                 heavy_ok = cycle_elapsed < 90
                 if not heavy_ok:
