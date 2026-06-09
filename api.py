@@ -133,11 +133,13 @@ def fetch_orders():
                 kind = 'LIMIT_ENTRY'
             else:
                 kind = 'OTHER'
+            cum_exec = float(o.get('cumExecQty', 0) or 0)
             key = f'{sym}_{oid}'
             orders[key] = {
                 'symbol': sym, 'orderId': oid, 'status': o['orderStatus'],
                 'kind': kind, 'price': price, 'trigger': trigger,
                 'qty': qty, 'side': side, 'createdTime': create_time,
+                'cumExecQty': cum_exec,
             }
         cursor = data['result'].get('nextPageCursor', '')
         if not cursor:

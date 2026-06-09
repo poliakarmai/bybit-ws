@@ -56,6 +56,11 @@ def check_order_changes(old_orders, new_orders):
                 changes.append(('TP_HIT', sym,
                     f'🎯 **Take Profit сработал!** {sym} @ ${o["price"]:.4f}. Прибыль зафиксирована ✅'))
             elif o['kind'] == 'LIMIT_ENTRY':
-                changes.append(('ENTRY_HIT', sym,
-                    f'📌 **Лимитка сработала!** {sym} @ ${o["price"]:.4f}'))
+                cum = o.get('cumExecQty', 0)
+                if cum > 0:
+                    changes.append(('ENTRY_HIT', sym,
+                        f'📌 **Лимитка сработала!** {sym} @ ${o["price"]:.4f} (исполнено {cum:.0f}/{o.get("qty",0):.0f})'))
+                else:
+                    changes.append(('CANCELLED', sym,
+                        f'🗑️ **Лимитка отменена** {sym} @ ${o["price"]:.4f} (без исполнения)'))
     return changes
