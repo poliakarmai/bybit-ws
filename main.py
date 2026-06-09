@@ -491,6 +491,9 @@ def main_loop():
                         if now_ts - last > 86400:  # 24 часа
                             add_alert('STOP', msg)
                             corr_dedup[pair_hash] = now_ts
+                            log_event(f'🔕 Корреляция {pair_key}: новый алерт (hash={pair_hash})')
+                        else:
+                            log_event(f'🔇 Корреляция {pair_key}: dedup (hash={pair_hash}, age={(now_ts-last)/3600:.1f}ч)')
                     save_json(CORR_DEDUP_FILE, corr_dedup)
 
             # Сводка TP/SL покрытия раз в 4 часа
