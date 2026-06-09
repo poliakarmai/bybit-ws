@@ -4,6 +4,15 @@ All notable changes to bybit-ws.
 
 ---
 
+## [3.9.1] — 2026-06-09
+
+### Fixed
+- **False «Лимитка сработала»:** `snapshot.py` теперь различает заполнение и отмену по `cumExecQty`. Отменённые без исполнения → «🗑️ Лимитка отменена»
+- **Time budget в `check_auto_short`:** deadline 20с, early exit при исчерпании — устранены таймауты `_timed_call`
+
+### Changed
+- `api.py:fetch_orders()` сохраняет `cumExecQty` в снапшот ордера
+
 ## [3.8.0] — 2026-06-09
 
 ### Added
