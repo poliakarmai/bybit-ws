@@ -474,7 +474,8 @@ def main_loop():
                     log_event(f'⏱️ check_correlation: таймаут — {corr_err}')
                 elif corr_result:
                     for msg in corr_result.get('messages', []):
-                        add_alert('STOP', msg)
+                        if not _is_duplicate(msg, 'STOP'):
+                            add_alert('STOP', msg)
 
             # Сводка TP/SL покрытия раз в 4 часа
             if cycle_count % COVERAGE_CHECK_INTERVAL == 0 and new_positions and new_orders:
