@@ -1,6 +1,6 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
-> **Версия:** 3.6 | **Дата:** 08.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.7 | **Дата:** 09.06.2026 | **Автор:** Alexey Polyakov
 >
 > Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API + MCP для внешнего управления.
 
@@ -33,6 +33,16 @@
 │    ├── rsi.py          RSI-дивергенции                 │
 │    ├── squeeze.py      BB-сжатие (squeeze)             │
 │    ├── health.py       ликвидация, корреляция, фандинг │
+│    ├── correlation.py  корреляционная матрица          │
+│    ├── regime.py       классификация рыночного режима  │
+│    ├── funding_tracker.py  экстремальные ставки        │
+│    ├── margin_alerts.py    контроль маржи              │
+│    ├── dashboard.py        SVG-дашборд                 │
+│    ├── bb_scalp.py    ⚡ BB Scalping M5 x10            │
+│    ├── mean_revert.py ⚡ Mean Reversion x10            │
+│    ├── funding_entry.py ⚡ Funding Momentum x10        │
+│    ├── atr_sizer.py   ⚡ ATR Risk Sizing               │
+│    ├── x10_limits.py  ⚡ X10 daily loss stop           │
 │    ├── rpc.py          HTTP-RPC сервер (:8766)         │
 │    ├── cost_tracker.py учёт комиссий и PnL             │
 │    └── reporting.py    сводки и трейд-журнал           │
@@ -71,10 +81,17 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
               каждые 10 циклов (5 мин):
               ├── check_overbought()    → SHORT-кандидаты
               ├── check_auto_short()    → вход в SHORT
+              ├── check_junk_dca()      → шлак: max_loss + max_hold + DCA
               ├── check_pumps()         → детектор пампов
               ├── check_rsi_divergence()→ медвежьи сигналы
               ├── check_squeeze()       → BB-сжатие
-              └── check_funding_flip()  → разворот фандинга
+              ├── check_funding_flip()  → разворот фандинга
+              └── check_correlation()   → матрица + dedup 24ч
+
+              каждые 20 циклов (10 мин):
+              └── x10 strategies        → scalp / mean_revert / funding
+                   └── validate_entry() → ATR risk check
+                   └── correlation_filter → не >2 связанных позиций
 ```
 
 ---
@@ -108,18 +125,18 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | ONE_WAY фильтр | XRP\\*, ONDO, WLFI, ENJ, ESPORTS, AVAX\\*, APT\\*, SUI\\* — исключены |
 | DCA-шорт | На аномальных пампах (>120% за 24ч) |
 
-### SHORT Шлак-режим (экспериментальный) 🦨
+### SHORT Шлак-режим (v3.7) 🦨
 
-> ⚠️ **Экспериментальный режим.** Включён только через `strategy.short.junk.enabled: true`.
-> Без SL — шлак слишком волатильный для стоп-лоссов. Вместо этого: жёсткий лимит убытка.
+> ⚠️ **Экспериментальный режим.** Включён только через `strategy.junk.enabled: true`.
+> Вместо SL: жёсткий лимит убытка + авто-закрытие по времени.
 
 | Параметр | Значение |
 |----------|---------|
 | Вход | Лимитный Sell на +2% выше рынка |
 | Триггер | Дневной рост ≥80% **И** BB Daily ≥70% |
-| SL | **Нет** — шлак-монеты могут сделать +30% за час |
+| Hard stop | **−15% убытка по марже** — market-close (best-effort, при гэпе убыток может быть больше) |
+| Max hold | **48 часов** — авто-закрытие при убытке |
 | TP | Middle BB (отдельный reduceOnly ордер) |
-| Max убыток | **-$30 на позицию** (hard limit, market-close) |
 | DCA-уровни | +100% и +120% от входа (лимитные Sell того же размера) |
 | Плечо | 3x |
 | Маржа | $10 |
@@ -129,13 +146,13 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 Конфиг:
 ```yaml
 strategy:
-  short:
-    junk:
-      enabled: false          # ← выключен по умолчанию!
-      min_pump_pct: 80        # вход при росте ≥80%
-      dca_levels: [1.0, 1.2]  # +100%, +120%
-      max_loss_per_position: 30  # hard stop $30
-      max_positions: 2        # не более 2 шлак-шортов
+  junk:
+    enabled: false           # ← выключен по умолчанию!
+    min_pump_pct: 80         # вход при росте ≥80%
+    dca_levels: [1.0, 1.2]   # +100%, +120%
+    max_loss_pct: 15         # hard stop: -15% убытка по марже (best-effort)
+    max_hold_hours: 48       # авто-закрытие через 48ч
+    max_positions: 2         # не более 2 шлак-шортов
 ```
 
 ### SL Re-entry (лесенка)
@@ -499,7 +516,7 @@ hermes-mcp-server.py
 
 ---
 
-## 4. Конфиг-схема (план)
+## 4. Конфиг-схема
 
 ```yaml
 # bybit-ws-config.yaml — внешний конфиг (MVP)
@@ -532,6 +549,20 @@ strategy:
     max_positions: 3
     cooldown_seconds: 7200
     max_hold_hours: 72                          # авто-закрытие SHORT через 72ч
+
+  x10:                                         # NEW v3.7
+    max_daily_losses: 3                        # стоп x10 после 3 убытков
+    cooldown_after_stop_hours: 24              # пауза на сутки
+    require_atr_validation: true               # обязательная ATR-проверка
+    max_position_risk_pct: 2.0                 # макс риск на позицию
+
+  junk:                                        # NEW v3.7
+    enabled: false                             # выключен по умолчанию
+    min_pump_pct: 80                           # вход при росте ≥80%
+    dca_levels: [1.0, 1.2]                     # +100%, +120%
+    max_loss_pct: 15                           # hard stop: -15% убытка
+    max_hold_hours: 48                         # авто-закрытие через 48ч
+    max_positions: 2
 
   dca:
     enabled: true
@@ -746,8 +777,8 @@ GET-запросы (positions, orders): backoff [1, 3, 5] секунд.
 | Сбой | Поведение |
 |------|-----------|
 | fetch_positions() OK, fetch_orders() failed | Продолжить без check_auto_tp, check_auto_sl работает |
-| fetch_positions() пустой массив, был снепшот | НЕ считать что позиций нет. Повторить через 5с × 3 |
-| Bybit API возвращает пустой массив (не ошибка) | Считать данные потерянными, использовать снепшот |
+| fetch_positions() пустой массив (не ошибка API) | Не считать что позиций нет. Повторить через 5с × 3. Если 3 раза пусто — использовать последний снепшот |
+| Bybit API возвращает ошибку (retCode ≠ 0) | Retry с backoff до 3 попыток, затем пропуск цикла |
 
 ---
 
@@ -825,6 +856,7 @@ docker-compose up -d
 
 ## 9. Changelog
 
+- **v3.7** (09.06.2026): 🛡 X10 risk limits (max 3 daily losses → 24h cooldown), junk hard stop (15% loss + 48h max hold), correlation check для x10, funding trend filter (3-дневный тренд), strategy tag в трейд-журнале. Security: fail-fast при bind ≠ localhost без auth_token. Partial failure: унифицировано правило для пустого ответа API.
 - **v3.6** (08.06.2026): 🚀 MCP Server — инструменты scan_market/get_positions/get_metrics/vpn_status для AI-агентов. Шлак-режим SHORT (рост ≥80%, без SL, DCA-лесенка +100%/+120%). threading.stack_size(512KB) — экономия памяти на потоках.
 - **v3.5** (08.06.2026): 🔥 DCA-лимиты ($80/монету, 2 добавки), защита от каскадных ликвидаций, LONG cooldown 4ч после SL, SHORT max_hold 72ч, max_positions: 15, секторные лимиты, TP через trading-stop, drawdown_mode: peak, trades.jsonl ротация, EnvironmentFile, скоринг-нормализация, partial failure handling, канонические пути
 - **v3.4** (08.06.2026): RPC auth (Bearer), rate limiting, GET /config, GET /signals (LONG+SHORT), risk-лимиты (max_drawdown, max_total_margin), graceful shutdown (SIGTERM → check SL), log rotation, error-формат v1, confirm:true для /enter, документация (scoring, edge cases, deployment)
@@ -884,6 +916,16 @@ docker-compose up -d
 │       ├── rsi.py            RSI-дивергенции
 │       ├── squeeze.py        BB-сжатие
 │       ├── health.py         ликвидация/корреляция/фандинг
+│       ├── correlation.py    корреляционная матрица
+│       ├── regime.py         рыночный режим
+│       ├── funding_tracker.py экстремальный фандинг
+│       ├── margin_alerts.py  контроль маржи
+│       ├── dashboard.py      SVG-дашборд
+│       ├── bb_scalp.py       ⚡ BB Scalping M5 x10
+│       ├── mean_revert.py    ⚡ Mean Reversion x10
+│       ├── funding_entry.py  ⚡ Funding Momentum x10
+│       ├── atr_sizer.py      ⚡ ATR Risk Sizing
+│       ├── x10_limits.py     ⚡ X10 daily loss stop
 │       ├── rpc.py            HTTP-RPC
 │       ├── cost_tracker.py   учёт комиссий
 │       ├── cleanup.py        очистка ордеров
@@ -906,11 +948,13 @@ docker-compose up -d
 
 | Уровень | Механизм |
 |---------|----------|
-| RPC API | Bearer-токен (обязателен при bind ≠ 127.0.0.1) |
+| RPC API | Bearer-токен. При `bind: 0.0.0.0` и пустом `auth_token` — сервис **отказывается запускаться** (fail-fast). При `bind: 127.0.0.1` без токена — OK, только localhost |
 | API-ключи | `.env` файл (chmod 600), не в unit-файле |
 | MCP | Только localhost (stdio подпроцесс), наследует RPC_TOKEN |
 | Bybit API | IP-whitelist на стороне биржи (рекомендуется) |
 | Принцип | Монитор не хранит приватные ключи кошельков — только API read/trade |
+
+**Fail-fast при старте:** RPC-сервер при инициализации проверяет `bind` и `auth_token`. Если `bind` не localhost (≠ 127.0.0.1, ≠ ::1) и `auth_token` пуст — процесс завершается с ошибкой и понятным сообщением в лог.
 
 ## 12b. Monitoring & Alerting
 
