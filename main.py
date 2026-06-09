@@ -475,27 +475,26 @@ def main_loop():
                     if err: log_event(f'⏱️ check_funding_flip: таймаут — {err}')
                     else:
                         for msg in (msgs or []): add_alert('INFO', msg)
+                log_event(f'🔬 CORR: before _a, positions={len(new_positions) if new_positions else 0}')
                 corr_result, corr_err = _a(check_correlation, new_positions)
+                log_event(f'🔬 CORR: after _a, err={corr_err}, result_truthy={bool(corr_result)}, type={type(corr_result).__name__}')
                 if corr_err:
                     log_event(f'⏱️ check_correlation: таймаут — {corr_err}')
                 elif corr_result:
-                    msgs = corr_result.get('messages', []) if isinstance(corr_result, dict) else []
-                    log_event(f'🔬 CORR: result_truthy=True, type={type(corr_result).__name__}, msgs={len(msgs)}, flagged={len(corr_result.get("flagged",[])) if isinstance(corr_result, dict) else "N/A"}')
-                    # Корреляции: dedup 24ч через хеш пары (без _is_duplicate у которого TTL 5 мин)
+                    # Корреляции: dedup 24ч через хеш пары
                     corr_dedup = load_json(CORR_DEDUP_FILE)
                     now_ts = time.time()
                     for msg in corr_result.get('messages', []):
-                        # Извлекаем только пару (DOTUSDT↔XRPUSDT), без r=+0.867
                         pair_match = re.search(r'(\w+↔\w+)', msg)
                         pair_key = pair_match.group(1) if pair_match else msg
                         pair_hash = hashlib.md5(pair_key.encode()).hexdigest()[:16]
                         last = corr_dedup.get(pair_hash, 0)
-                        if now_ts - last > 86400:  # 24 часа
+                        if now_ts - last > 86400:
                             add_alert('STOP', msg)
                             corr_dedup[pair_hash] = now_ts
-                            log_event(f'🔕 Корреляция {pair_key}: новый алерт (hash={pair_hash})')
+                            log_event(f'🔕 CORR dedup: {pair_key} — новый алерт')
                         else:
-                            log_event(f'🔇 Корреляция {pair_key}: dedup (hash={pair_hash}, age={(now_ts-last)/3600:.1f}ч)')
+                            log_event(f'🔇 CORR dedup: {pair_key} — пропущен (age={(now_ts-last)/3600:.1f}ч)')
                     save_json(CORR_DEDUP_FILE, corr_dedup)
 
             # Сводка TP/SL покрытия раз в 4 часа
