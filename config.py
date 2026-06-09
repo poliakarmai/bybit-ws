@@ -161,6 +161,19 @@ _DEFAULT_ALERTS = {
     'tp_alert': True,
 }
 
+_DEFAULT_POSITION_SIZING = {
+    'enabled': True,
+    'long_risk_pct': 0.20,
+    'x10_risk_pct': 0.05,
+    'dca_risk_pct': 0.10,
+    'pump_risk_pct': 0.06,
+    'max_positions': 5,
+    'min_margin': 5.0,
+    'max_position_share': 0.40,
+    'min_deposit': 30.0,
+    'score_multipliers': {8.5: 1.4, 7.5: 1.15, 6.5: 1.0, 5.5: 0.75},
+}
+
 _DEFAULT_API = {
     'key': '${BYBIT_API_KEY}',
     'secret': '${BYBIT_API_SECRET}',
@@ -189,6 +202,7 @@ def _default_config() -> dict:
         'risk': dict(_DEFAULT_RISK),
         'logging': dict(_DEFAULT_LOGGING),
         'alerts': dict(_DEFAULT_ALERTS),
+        'position_sizing': dict(_DEFAULT_POSITION_SIZING),
     }
 
 
@@ -246,6 +260,36 @@ strategy:
     multiplier: {_DEFAULT_STRATEGY_DCA['multiplier']}
     max_margin_per_symbol: {_DEFAULT_STRATEGY_DCA['max_margin_per_symbol']}   # не более $80 на монету
     max_dca_count: {_DEFAULT_STRATEGY_DCA['max_dca_count']}            # максимум 2 добавки
+
+  x10:
+    max_daily_losses: {_DEFAULT_STRATEGY_X10['max_daily_losses']}         # стоп x10 после N убыточных сделок
+    cooldown_after_stop_hours: {_DEFAULT_STRATEGY_X10['cooldown_after_stop_hours']}  # пауза на сутки
+    require_atr_validation: {str(_DEFAULT_STRATEGY_X10['require_atr_validation']).lower()}
+    max_position_risk_pct: {_DEFAULT_STRATEGY_X10['max_position_risk_pct']}
+
+  junk:
+    enabled: {str(_DEFAULT_STRATEGY_JUNK['enabled']).lower()}
+    min_pump_pct: {_DEFAULT_STRATEGY_JUNK['min_pump_pct']}
+    dca_levels: {_DEFAULT_STRATEGY_JUNK['dca_levels']}
+    max_loss_pct: {_DEFAULT_STRATEGY_JUNK['max_loss_pct']}
+    max_hold_hours: {_DEFAULT_STRATEGY_JUNK['max_hold_hours']}
+    max_positions: {_DEFAULT_STRATEGY_JUNK['max_positions']}
+
+position_sizing:
+  enabled: {str(_DEFAULT_POSITION_SIZING['enabled']).lower()}
+  long_risk_pct: {_DEFAULT_POSITION_SIZING['long_risk_pct']}
+  x10_risk_pct: {_DEFAULT_POSITION_SIZING['x10_risk_pct']}
+  dca_risk_pct: {_DEFAULT_POSITION_SIZING['dca_risk_pct']}
+  pump_risk_pct: {_DEFAULT_POSITION_SIZING['pump_risk_pct']}
+  max_positions: {_DEFAULT_POSITION_SIZING['max_positions']}
+  min_margin: {_DEFAULT_POSITION_SIZING['min_margin']}
+  max_position_share: {_DEFAULT_POSITION_SIZING['max_position_share']}
+  min_deposit: {_DEFAULT_POSITION_SIZING['min_deposit']}
+  score_multipliers:
+    8.5: 1.4
+    7.5: 1.15
+    6.5: 1.0
+    5.5: 0.75
 
 watchlist:
   mode: "{_DEFAULT_WATCHLIST['mode']}"           # top | fixed
