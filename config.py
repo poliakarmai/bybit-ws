@@ -77,6 +77,22 @@ _DEFAULT_STRATEGY_DCA = {
     'max_dca_count': 2,            # максимум 2 DCA-добавки (не 3)
 }
 
+_DEFAULT_STRATEGY_X10 = {
+    'max_daily_losses': 3,         # стоп x10 после N убыточных сделок за день
+    'cooldown_after_stop_hours': 24,  # пауза всех x10 после стопа
+    'require_atr_validation': True,   # обязательная ATR-проверка
+    'max_position_risk_pct': 2.0,     # макс риск на позицию (% от баланса)
+}
+
+_DEFAULT_STRATEGY_JUNK = {
+    'enabled': False,                  # выключен по умолчанию
+    'min_pump_pct': 80,               # вход при росте ≥80%
+    'dca_levels': [1.0, 1.2],         # +100%, +120%
+    'max_loss_pct': 15,               # hard stop: -15% убытка по марже
+    'max_hold_hours': 48,             # авто-закрытие шлак-шорта через 48ч
+    'max_positions': 2,               # не более 2 шлак-шортов
+}
+
 _DEFAULT_WATCHLIST = {
     'mode': 'top',
     'top_n': 50,
@@ -162,6 +178,8 @@ def _default_config() -> dict:
             'long': dict(_DEFAULT_STRATEGY_LONG),
             'short': dict(_DEFAULT_STRATEGY_SHORT),
             'dca': dict(_DEFAULT_STRATEGY_DCA),
+            'x10': dict(_DEFAULT_STRATEGY_X10),
+            'junk': dict(_DEFAULT_STRATEGY_JUNK),
         },
         'watchlist': dict(_DEFAULT_WATCHLIST),
         'tiers': dict(_DEFAULT_TIERS),

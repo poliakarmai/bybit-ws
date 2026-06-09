@@ -66,7 +66,7 @@ def check_profit_triggers(positions):
 
 # ── Трейд-журнал ──
 
-def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref=''):
+def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref='', strategy=''):
     # Дедупликация: та же позиция может приходить несколько циклов в closedPnL
     dedup_key = f"{sym}|{float(entry):.4f}|{float(exit_price):.4f}|{float(pnl):+.4f}"
     if hasattr(log_trade, '_seen') and dedup_key in log_trade._seen:
@@ -78,12 +78,13 @@ def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref=''):
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
     now_iso = datetime.now().isoformat()
     ref_str = f' [{alert_ref}]' if alert_ref else ''
-    line = f'| {now} | {sym} | {side} | ${entry:.4f} | ${exit_price:.4f} | ${pnl:+.2f} | {reason}{ref_str} |'
+    strat_str = f' | {strategy}' if strategy else ''
+    line = f'| {now} | {sym} | {side} | ${entry:.4f} | ${exit_price:.4f} | ${pnl:+.2f} | {reason}{ref_str}{strat_str} |'
     if not os.path.exists(TRADE_LOG):
         with open(TRADE_LOG, 'w') as f:
             f.write('# Трейд-журнал\n\n')
-            f.write('| Дата | Монета | Сторона | Вход | Выход | PnL | Причина |\n')
-            f.write('|------|--------|---------|------|-------|-----|--------|\n')
+            f.write('| Дата | Монета | Сторона | Вход | Выход | PnL | Причина | Стратегия |\n')
+            f.write('|------|--------|---------|------|-------|-----|--------|----------|\n')
     with open(TRADE_LOG, 'a') as f:
         f.write(line + '\n')
 
@@ -98,6 +99,7 @@ def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref=''):
         'pnl': float(pnl),
         'reason': reason,
         'alert_ref': alert_ref,
+        'strategy': strategy,
     }
     with open(TRADE_JSONL, 'a') as f:
         f.write(_json.dumps(trade_record) + '\n')

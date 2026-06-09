@@ -15,6 +15,8 @@ Tier A/B (обычный режим):
 Tier C/D — шлак-режим (NEW):
 - Дневной рост ≥ 80% — обязательный фильтр
 - БЕЗ стоп-лосса (шлак слишком волатильный, SL только жрёт маржу)
+- max_loss_pct: 15% — hard market-close при убытке >15% маржи
+- max_hold_hours: 48 — авто-закрытие через 48ч
 - DCA-лесенка: +100% и +120% от входа (лимитные Sell)
 - TP: Middle BB (reduceOnly limit Buy)
 
@@ -300,22 +302,36 @@ def check_auto_short(positions):
 
 
 def check_junk_dca(positions):
-    """Проверить открытые шлак-шорты и доставить DCA-уровни если пампа продолжается.
+    """Проверить открытые шлак-шорты: DCA-уровни + max_loss + max_hold.
 
     Вызывается каждые 10 циклов вместе с check_auto_short."""
     cfg = Config()
     JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
     SHORT_LEVERAGE = cfg.strategy.short.leverage
+    SHORT_MARGIN = cfg.strategy.short.margin
+
+    # Читаем junk-параметры из нового раздела strategy.junk (с фоллбеком на старые ключи)
+    junk_cfg = getattr(cfg.strategy, 'junk', {})
+    MAX_LOSS_PCT = junk_cfg.get('max_loss_pct', 15) / 100  # 15% → 0.15
+    MAX_HOLD_HOURS = junk_cfg.get('max_hold_hours', 48)
 
     state = _load_state()
     now = time.time()
     actions = []
 
-    for sym, entry in state.items():
+    for sym, entry in list(state.items()):
         if not entry.get('is_junk'):
             continue
+
+        # Если позиция закрылась — пропускаем
         if sym not in positions:
-            continue  # позиция ещё не открыта (лимитка ждёт)
+            # Но может быть лимитка ещё не сработала
+            if not entry.get('entered', False):
+                continue
+            # Позиция закрылась — очищаем стейт
+            del state[sym]
+            _save_state(state)
+            continue
 
         pos = positions[sym]
         if not isinstance(pos, dict) or pos.get('side') != 'Sell':
@@ -329,19 +345,57 @@ def check_junk_dca(positions):
         if mark_price <= 0:
             continue
 
+        # ── Max loss check (hard stop) ──
+        margin_used = float(pos.get('positionIM', pos.get('margin', 0)) or 0)
+        unrealised_pnl = float(pos.get('unrealisedPnl', pos.get('upnl', 0)) or 0)
+
+        if margin_used > 0 and unrealised_pnl < 0:
+            loss_pct = abs(unrealised_pnl) / (margin_used * SHORT_LEVERAGE)
+            if loss_pct > MAX_LOSS_PCT:
+                # Hard stop — закрываем по рынку
+                try:
+                    _close_junk_position(sym, pos)
+                    msg = (f'🛑 ШЛАК-STOP {sym}: убыток {loss_pct*100:.1f}% > {MAX_LOSS_PCT*100:.0f}% лимит, '
+                           f'закрыт @ ${mark_price:.4f} (вход ${entry_price:.4f}, PnL ${unrealised_pnl:+.2f})')
+                    add_alert('STOP', msg)
+                    log_event(msg)
+                    actions.append(sym)
+                    del state[sym]
+                    _save_state(state)
+                except Exception as e:
+                    log_event(f'⚠️ Junk-STOP {sym}: ошибка — {e}')
+                continue
+
+        # ── Max hold hours check ──
+        entry_ts = entry.get('last_short_ts', entry.get('entered_ts', 0))
+        if entry_ts > 0:
+            held_hours = (now - entry_ts) / 3600
+            if held_hours > MAX_HOLD_HOURS and unrealised_pnl <= 0:
+                try:
+                    _close_junk_position(sym, pos)
+                    msg = (f'⏰ ШЛАК-TIMEOUT {sym}: удержание {held_hours:.0f}ч > {MAX_HOLD_HOURS}ч, '
+                           f'закрыт @ ${mark_price:.4f} (PnL ${unrealised_pnl:+.2f})')
+                    add_alert('STOP', msg)
+                    log_event(msg)
+                    actions.append(sym)
+                    del state[sym]
+                    _save_state(state)
+                except Exception as e:
+                    log_event(f'⚠️ Junk-Timeout {sym}: ошибка — {e}')
+                continue
+
+        # ── DCA levels ──
         dca_placed = entry.get('dca_placed', [])
         placed_multipliers = {d['mult'] for d in dca_placed}
 
         for dca_mult in JUNK_DCA_LEVELS:
             if dca_mult in placed_multipliers:
-                continue  # уже поставили
+                continue
 
             dca_trigger = entry_price * (1 + dca_mult)
             if mark_price < dca_trigger:
-                continue  # ещё не достигли уровня
+                continue
 
-            # DCA-докуп: добавляем шорт на этом уровне
-            SHORT_MARGIN = cfg.strategy.short.margin
             usdt_qty = SHORT_MARGIN * SHORT_LEVERAGE
             qty_step = _get_lot_step(sym)
             dca_qty = math.ceil(usdt_qty / mark_price / qty_step) * qty_step
@@ -374,3 +428,24 @@ def check_junk_dca(positions):
                 log_event(f'⚠️ Junk-DCA {sym}: исключение — {e}')
 
     return actions
+
+
+def _close_junk_position(sym, pos):
+    """Закрыть шлак-позицию по рынку."""
+    size = float(pos.get('size', 0))
+    if size <= 0:
+        return
+    for idx in (0, 1):
+        try:
+            order = bybit('POST', '/v5/order/create', {
+                'category': 'linear', 'symbol': sym, 'side': 'Buy',
+                'orderType': 'Market', 'qty': str(size),
+                'positionIdx': idx, 'timeInForce': 'IOC',
+                'reduceOnly': True,
+            })
+            if order.get('retCode') == 0:
+                return
+            if order.get('retCode') == 10001:
+                continue
+        except Exception:
+            continue

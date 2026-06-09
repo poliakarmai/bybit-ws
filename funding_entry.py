@@ -64,7 +64,7 @@ def _save_state(state):
 
 
 def _get_bb_and_funding(sym):
-    """Получить Daily BB% и ставку фондинга."""
+    """Получить Daily BB%, ставку фондинга и тренд (3-дневное изменение)."""
     try:
         # BB Daily
         kline = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=20')
@@ -78,6 +78,11 @@ def _get_bb_and_funding(sym):
         upper = sma + 2 * std
         bb_pct = (closes[0] - lower) / (upper - lower) * 100 if upper != lower else 50
 
+        # 3-дневный тренд: изменение за последние 3 дня
+        trend_3d = 0.0
+        if len(closes) >= 4:
+            trend_3d = (closes[0] - closes[3]) / closes[3]  # сегодня vs 3 дня назад
+
         # Funding rate
         ticker = bybit('GET', f'/v5/market/tickers?category=linear&symbol={sym}')
         funding_rate = float(ticker.get('result', {}).get('list', [{}])[0].get('fundingRate', 0))
@@ -89,6 +94,7 @@ def _get_bb_and_funding(sym):
             'bb_pct': round(bb_pct, 1),
             'funding_rate': round(funding_rate, 6),
             'price': closes[0],
+            'trend_3d': round(trend_3d, 4),
         }
     except Exception:
         return None
@@ -133,10 +139,11 @@ def check_funding_signals(positions):
             tp_price = data['middle']
             trigger = f'funding={data["funding_rate"]*100:.2f}% BB%={data["bb_pct"]}%'
 
-        # SHORT: фондинг положительный + цена у Upper BB (не ONE_WAY)
+        # SHORT: фондинг положительный + цена у Upper BB + тренд падает (не ONE_WAY)
         elif (data['funding_rate'] > FUNDING_SHORT_THRESHOLD and
               data['bb_pct'] > BB_SHORT_MIN and
-              sym not in ONE_WAY):
+              sym not in ONE_WAY and
+              data.get('trend_3d', 0) < 0):  # цена падает 3 дня — подтверждение тренда
             direction = 'SHORT'
             side = 'Sell'
             entry_price = data['price']

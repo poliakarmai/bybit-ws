@@ -62,6 +62,7 @@ from .bb_scalp import check_scalp_signals, execute_scalp
 from .mean_revert import check_mean_revert, execute_mean_revert
 from .funding_entry import check_funding_signals, execute_funding_entry
 from .atr_sizer import check_position_risk, validate_entry
+from .x10_limits import record_x10_trade, x10_entry_allowed, get_x10_stats, track_x10_entry, get_x10_strategy, clear_x10_position
 
 
 def _check_risk_limits(positions: dict, risk_cfg) -> list:
@@ -239,6 +240,12 @@ def main_loop():
                         entry = old_pos.get('entry', 0)
                         sign = '+' if pnl >= 0 else '−'
                         add_alert('INFO', f'📋 {sym} закрыта {sign}${abs(pnl):.2f} (вход ${entry:.4f})')
+                        # Записать в x10-трекер если позиция с плечом ≥10
+                        leverage = float(old_pos.get('leverage', 0) or 0)
+                        if leverage >= 10:
+                            strat = get_x10_strategy(sym) or 'scalp'
+                            record_x10_trade(strat, float(pnl))
+                            clear_x10_position(sym)
                         continue
                     if change_type in ('SL_HIT', 'TP_HIT') and sym in closed_syms:
                         continue
@@ -378,17 +385,25 @@ def main_loop():
                     side = p.get('side', 'Buy')
                     reason = 'закрыта'
                     alert_ref = ''
-                    # Приоритет: SL важнее TP (если позиция закрыта по стопу, а TP просто отменился)
+                    # Определяем стратегию
+                    strategy_tag = p.get('strategy', '')
+                    leverage = float(p.get('leverage', 0) or 0)
+                    # Для x10 позиций — получаем стратегию из трекера
+                    if leverage >= 10:
+                        x10_strat = get_x10_strategy(sym)
+                        if x10_strat:
+                            strategy_tag = x10_strat
+                    # Приоритет: SL важнее TP
                     for ct2, sym2, msg2 in ord_changes:
                         if sym2 == sym:
                             if ct2 == 'SL_HIT':
                                 reason = 'SL'
                                 alert_ref = 'SL_HIT'
-                                break  # SL — окончательный вердикт
+                                break
                             elif ct2 == 'TP_HIT' and reason != 'SL':
                                 reason = 'TP'
                                 alert_ref = 'TP_HIT'
-                    log_trade(sym, entry, mark, pnl, side, reason, alert_ref)
+                    log_trade(sym, entry, mark, pnl, side, reason, alert_ref, strategy_tag)
 
             # Очистка DCA-стейта для закрытых позиций
             if closed_syms:
@@ -535,6 +550,15 @@ def main_loop():
 
             # X10 стратегии (каждые 20 циклов = 10 мин) — BB Scalp + Mean Revert + Funding
             if cycle_count % (HEAVY_CYCLE * 2) == 0 and new_positions is not None:
+                # Проверка x10-стопа (дневной лимит убытков)
+                x10_ok, x10_reason = x10_entry_allowed(cfg)
+                if not x10_ok:
+                    if not _is_duplicate(f'x10_stop_{x10_reason[:20]}', 'STOP'):
+                        log_event(f'🛑 X10 блок: {x10_reason}')
+                    x10_blocked = True
+                else:
+                    x10_blocked = False
+
                 # Получаем баланс для риск-проверок
                 try:
                     bal = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT')
@@ -543,46 +567,78 @@ def main_loop():
                 except Exception:
                     balance_usdt = 100.0
 
+                # Строим список коррелирующих монет для x10-проверок
+                correlated_x10 = set()
+                if new_positions and len(new_positions) >= 3:
+                    corr_snapshot = load_correlation_snapshot()
+                    if corr_snapshot:
+                        corr_threshold = cfg.alerts.get('correlation_threshold', 0.80)
+                        for pair_str, data in corr_snapshot.get('pairs', {}).items():
+                            if abs(data.get('r', 0)) > corr_threshold:
+                                s1, s2 = pair_str.split('↔')
+                                correlated_x10.add(s1)
+                                correlated_x10.add(s2)
+
                 # 1. BB Scalping M5 x10
-                if not correlation_stop:
+                if not correlation_stop and not x10_blocked:
                     scalp_alerts, scalp_entries = check_scalp_signals(new_positions, balance_usdt)
                     for msg in scalp_alerts:
+                        # Проверка корреляции: не более 2 связанных позиций
+                        sym = msg.split()[1]  # «⚡ СКАЛЬП SYMUSDT ...»
+                        open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
+                        if open_corr >= 2:
+                            log_event(f'⏭️ СКАЛЬП {sym}: корреляция ({open_corr} связанных позиций)')
+                            continue
                         add_alert('ENTRY', msg)
                         send_telegram_alert(msg)
                     for entry in scalp_entries:
                         # ATR риск-проверка
                         passed, reason = validate_entry(entry, balance_usdt)
                         if passed:
-                            execute_scalp(entry)
+                            if execute_scalp(entry):
+                                track_x10_entry(entry['symbol'], 'scalp')
                             record_auto_entry(placed=True)
                         else:
                             sym = entry['symbol']
                             log_event(f'⏭️ СКАЛЬП {sym}: {reason}')
 
                 # 2. Mean Reversion x10
-                if not correlation_stop:
+                if not correlation_stop and not x10_blocked:
                     mean_alerts, mean_entries = check_mean_revert(new_positions)
                     for msg in mean_alerts:
+                        sym = msg.split()[1]  # «🔄 MEAN-REVERT SYMUSDT ...»
+                        open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
+                        if open_corr >= 2:
+                            log_event(f'⏭️ MEAN {sym}: корреляция ({open_corr} связанных позиций)')
+                            continue
                         add_alert('ENTRY', msg)
                         send_telegram_alert(msg)
                     for entry in mean_entries:
                         passed, reason = validate_entry(entry, balance_usdt)
                         if passed:
-                            execute_mean_revert(entry)
+                            if execute_mean_revert(entry):
+                                track_x10_entry(entry['symbol'], 'mean_revert')
                             record_auto_entry(placed=True)
                         else:
                             sym = entry['symbol']
                             log_event(f'⏭️ MEAN {sym}: {reason}')
 
-                # 3. Funding Rate Momentum x10
-                fund_alerts, fund_entries = check_funding_signals(new_positions)
-                for msg in fund_alerts:
-                    add_alert('ENTRY', msg)
-                    send_telegram_alert(msg)
+                # 3. Funding Rate Momentum x10 (работает даже при correlation_stop)
+                if not x10_blocked:
+                    fund_alerts, fund_entries = check_funding_signals(new_positions)
+                    for msg in fund_alerts:
+                        sym = msg.split()[1]  # «💰 FUNDING SYMUSDT ...»
+                        open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
+                        if open_corr >= 2:
+                            log_event(f'⏭️ FUNDING {sym}: корреляция ({open_corr} связанных позиций)')
+                            continue
+                        add_alert('ENTRY', msg)
+                        send_telegram_alert(msg)
                 for entry in fund_entries:
                     passed, reason = validate_entry(entry, balance_usdt)
                     if passed:
-                        execute_funding_entry(entry)
+                        if execute_funding_entry(entry):
+                            track_x10_entry(entry['symbol'], 'funding_momentum')
                         record_auto_entry(placed=True)
                     else:
                         sym = entry['symbol']
