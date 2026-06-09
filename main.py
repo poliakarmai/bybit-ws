@@ -58,6 +58,10 @@ from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .auto_short import check_auto_short, check_junk_dca
 from .regime import check_regime
 from .correlation import check_correlation, load_correlation_snapshot
+from .bb_scalp import check_scalp_signals, execute_scalp
+from .mean_revert import check_mean_revert, execute_mean_revert
+from .funding_entry import check_funding_signals, execute_funding_entry
+from .atr_sizer import check_position_risk, validate_entry
 
 
 def _check_risk_limits(positions: dict, risk_cfg) -> list:
@@ -526,6 +530,67 @@ def main_loop():
             # SL re-entry: лесенка после стоп-лосса (каждые 10 циклов = 5 мин)
             if cycle_count % HEAVY_CYCLE == 0:
                 check_sl_reentry(new_positions or {}, correlation_stop)
+
+            # X10 стратегии (каждые 20 циклов = 10 мин) — BB Scalp + Mean Revert + Funding
+            if cycle_count % (HEAVY_CYCLE * 2) == 0 and new_positions is not None:
+                # Получаем баланс для риск-проверок
+                try:
+                    bal = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT')
+                    usdt = bal.get('result', {}).get('list', [{}])[0].get('coin', [{}])[0]
+                    balance_usdt = float(usdt.get('walletBalance', 0))
+                except Exception:
+                    balance_usdt = 100.0
+
+                # 1. BB Scalping M5 x10
+                if not correlation_stop:
+                    scalp_alerts, scalp_entries = check_scalp_signals(new_positions, balance_usdt)
+                    for msg in scalp_alerts:
+                        add_alert('ENTRY', msg)
+                        send_telegram_alert(msg)
+                    for entry in scalp_entries:
+                        # ATR риск-проверка
+                        passed, reason = validate_entry(entry, balance_usdt)
+                        if passed:
+                            execute_scalp(entry)
+                            record_auto_entry(placed=True)
+                        else:
+                            sym = entry['symbol']
+                            log_event(f'⏭️ СКАЛЬП {sym}: {reason}')
+
+                # 2. Mean Reversion x10
+                if not correlation_stop:
+                    mean_alerts, mean_entries = check_mean_revert(new_positions)
+                    for msg in mean_alerts:
+                        add_alert('ENTRY', msg)
+                        send_telegram_alert(msg)
+                    for entry in mean_entries:
+                        passed, reason = validate_entry(entry, balance_usdt)
+                        if passed:
+                            execute_mean_revert(entry)
+                            record_auto_entry(placed=True)
+                        else:
+                            sym = entry['symbol']
+                            log_event(f'⏭️ MEAN {sym}: {reason}')
+
+                # 3. Funding Rate Momentum x10
+                fund_alerts, fund_entries = check_funding_signals(new_positions)
+                for msg in fund_alerts:
+                    add_alert('ENTRY', msg)
+                    send_telegram_alert(msg)
+                for entry in fund_entries:
+                    passed, reason = validate_entry(entry, balance_usdt)
+                    if passed:
+                        execute_funding_entry(entry)
+                        record_auto_entry(placed=True)
+                    else:
+                        sym = entry['symbol']
+                        log_event(f'⏭️ FUNDING {sym}: {reason}')
+
+                # 4. ATR риск-мониторинг текущих позиций
+                risk_alerts = check_position_risk(new_positions, balance_usdt)
+                for msg in risk_alerts:
+                    add_alert('STOP', msg)
+                    send_telegram_alert(msg)
 
             # Сводка 09:00 и 21:00
             label = should_send_summary()
