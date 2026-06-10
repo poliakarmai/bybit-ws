@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>bybit-ws — AI-Native Trading Engine</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">bybit-ws — AI-Native Trading Engine</h1>
+</header>
+<h1
+id="i-built-an-ai-native-trading-engine-in-python.-heres-how-it-works">I
+Built an AI-Native Trading Engine in Python. Here’s How It Works</h1>
+<blockquote>
+<p>9 strategies, 24/7 WebSocket monitoring, AI scoring, and full
+agent-based orchestration. Open source, MIT.</p>
+</blockquote>
+<hr />
+<h2 id="why-i-built-this">Why I Built This</h2>
+<p>Trading bots are either black-box subscriptions at $50/month, or DIY
+scripts that break at 3 AM. I wanted a system that:</p>
+<ul>
+<li><strong>Runs unattended</strong> — fire and forget</li>
+<li><strong>Understands context</strong> — not just “RSI &lt; 30 = buy”,
+but scoring across 9 metrics</li>
+<li><strong>Responds to voice/text</strong> — “go AVAX x10” and the AI
+agent executes everything</li>
+<li><strong>Is open source</strong> — so anyone can fork and
+customize</li>
+</ul>
+<p>That’s how <strong>bybit-ws</strong> was born — an AI-native trading
+engine for Bybit.</p>
+<hr />
+<h2 id="architecture-at-a-glance">Architecture at a Glance</h2>
+<pre><code>┌─────────────────────────────────────────────────┐
+│                  Hermes Agent                     │
+│  (AI orchestrator: voice, text, auto-entry)      │
+└──────────────┬──────────────────────────────────┘
+               │ MCP / REST
+┌──────────────▼──────────────────────────────────┐
+│              bybit-ws (systemd)                   │
+│  main.py → 30s cycle                             │
+│  ├── auto_entry.py   (LONG via scoring)           │
+│  ├── auto_short.py   (SHORT Tier A/B + junk)      │
+│  ├── auto_sl.py      (BB-based stop-loss)         │
+│  ├── auto_tp.py      (auto take-profit)           │
+│  ├── bb_scalp.py     (⚡ x10 M5 scalping)         │
+│  ├── mean_revert.py  (⚡ x10 extreme reversals)    │
+│  ├── funding_entry.py(⚡ x10 funding momentum)     │
+│  ├── dca.py          (ladder entries)              │
+│  ├── rpc.py          (HTTP-RPC on port 8766)      │
+│  └── dashboard.py    (SVG dashboard)              │
+└──────────────┬──────────────────────────────────┘
+               │ WebSocket
+┌──────────────▼──────────────────────────────────┐
+│               Bybit API v5                        │
+└─────────────────────────────────────────────────┘</code></pre>
+<p>Core principle: <strong>one module = one file</strong>. Not a
+5,000-line monolith, but 30+ files with clear responsibilities.</p>
+<hr />
+<h2 id="strategies-from-conservative-to-extreme">9 Strategies — From
+Conservative to Extreme</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Strategy</th>
+<th>Leverage</th>
+<th>Timeframe</th>
+<th>Signal</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Bollinger Grid LONG</td>
+<td>3x</td>
+<td>Daily</td>
+<td>Lower BB −3%</td>
+</tr>
+<tr class="even">
+<td>Bollinger Grid SHORT</td>
+<td>3x</td>
+<td>Daily</td>
+<td>BB &gt;85%</td>
+</tr>
+<tr class="odd">
+<td>Junk Short</td>
+<td>3x</td>
+<td>Daily</td>
+<td>Pump ≥80%</td>
+</tr>
+<tr class="even">
+<td>SL Re-entry</td>
+<td>3x</td>
+<td>Daily</td>
+<td>Lower BB after stop</td>
+</tr>
+<tr class="odd">
+<td>DCA Ladder</td>
+<td>3x</td>
+<td>—</td>
+<td>−5/−10/−15% from entry</td>
+</tr>
+<tr class="even">
+<td>⚡ BB Scalping</td>
+<td>10x</td>
+<td>M5</td>
+<td>Band touch + RSI filter</td>
+</tr>
+<tr class="odd">
+<td>⚡ Mean Reversion</td>
+<td>10x</td>
+<td>Daily</td>
+<td>BB% &lt;5% or &gt;95%</td>
+</tr>
+<tr class="even">
+<td>⚡ Funding Momentum</td>
+<td>10x</td>
+<td>Daily</td>
+<td>Extreme funding rate</td>
+</tr>
+<tr class="odd">
+<td>⚡ ATR Risk Sizing</td>
+<td>layer</td>
+<td>15m</td>
+<td>Validation: SL = 1.5×ATR</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The golden rule:</strong> the system doesn’t guess. Every
+entry passes through <strong>scoring across 8+ metrics</strong>:</p>
+<ul>
+<li>Tier bonus (S/A/B/C/D token)</li>
+<li>BB% position (0–100%)</li>
+<li>24h volume</li>
+<li>RSI(14)</li>
+<li>Funding rate</li>
+<li>BB Squeeze (band compression)</li>
+<li>Consecutive down days</li>
+<li>Weekly/monthly BB%</li>
+</ul>
+<p>Minimum threshold: <strong>5.5/10</strong>. Anything below — the
+system silently skips.</p>
+<hr />
+<h2 id="ai-integration-more-than-buttons">AI Integration: More Than
+Buttons</h2>
+<p>The interesting part is the AI layer. I use <strong>Hermes
+Agent</strong> (by Nous Research) as the orchestrator:</p>
+<ul>
+<li><strong>MCP Server</strong>: the agent sees positions, orders, and
+metrics through a standardized protocol</li>
+<li><strong>REST API</strong>: port 8766, CORS, rate-limiting, RPC
+token</li>
+<li><strong>Auto-entry</strong>: the agent decides on entries based on
+scoring</li>
+<li><strong>GridSignal Bot</strong> (<span class="citation"
+data-cites="GridSignalBot">@GridSignalBot</span> on Telegram): real-time
+scanner, LONG/SHORT/x10 buttons</li>
+</ul>
+<p>Example interaction:</p>
+<pre><code>Me: &quot;go AVAX x10 at market&quot;
+Agent: checks BB%, RSI, funding, correlations
+       → scoring 7.2/10 → OK
+       → calculates: margin=$5, qty=15.1, SL=−5%
+       → order placed: 53e99c39</code></pre>
+<p>All via voice or text. While driving, on shift, in the shower —
+doesn’t matter.</p>
+<hr />
+<h2 id="numbers-hardware">Numbers &amp; Hardware</h2>
+<ul>
+<li><strong>Python 3.11</strong>, systemd service</li>
+<li><strong>WebSocket</strong> — real-time data from Bybit</li>
+<li><strong>30-second light cycle</strong> — positions, orders,
+health</li>
+<li><strong>7-minute heavy cycle</strong> — scoring, BB, RSI, squeeze,
+auto-entry</li>
+<li><strong>Memory</strong>: ~200 MB at runtime</li>
+<li><strong>Uptime</strong>: weeks without restart</li>
+</ul>
+<hr />
+<h2 id="roadmap">Roadmap</h2>
+<ul>
+<li>🔜 <strong>Telegram Mini App</strong> — dashboard right in
+Telegram</li>
+<li>🔜 <strong>Paper trading mode</strong> — risk-free testing</li>
+<li>🔜 <strong>Docker one-liner</strong> — <code>docker run</code> and
+done</li>
+<li>🔮 <strong>OKX/Binance support</strong> — multi-exchange</li>
+</ul>
+<hr />
+<h2 id="try-it">Try It</h2>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/poliakarmai/bybit-ws</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> bybit-ws</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> config.example.yaml config.yaml</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co"># insert your Bybit API keys</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">systemctl</span> <span class="at">--user</span> enable <span class="at">--now</span> bybit-ws</span></code></pre></div>
+<p><strong>GitHub:</strong> <a
+href="https://github.com/poliakarmai/bybit-ws">poliakarmai/bybit-ws</a>
+<strong>Bot:</strong> <a href="https://t.me/GridSignalBot"><span
+class="citation" data-cites="GridSignalBot">@GridSignalBot</span></a>
+<strong>License:</strong> MIT</p>
+<hr />
+<p><em>Questions? Open an issue, message the Telegram bot, or fork and
+customize. The code is alive, trades real money, and improves every
+day.</em></p>
+</body>
+</html>
