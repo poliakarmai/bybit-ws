@@ -9,7 +9,8 @@ Open source, MIT. 9 strategies, WebSocket monitoring, AI scoring.
 
 ## Blog
 
-- [Я построил AI-native торговый движок на Python. Вот как он устроен](blog/ai-native-trading-engine) — June 2026
+- 🇬🇧 [I Built an AI-Native Trading Engine in Python. Here's How It Works](blog/ai-native-trading-engine-en) — June 2026
+- 🇷🇺 [Я построил AI-native торговый движок на Python. Вот как он устроен](blog/ai-native-trading-engine) — June 2026
 
 ## Links
 
