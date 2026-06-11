@@ -135,6 +135,8 @@ systemctl --user enable --now bybit-ws
 **Bot:** [@GridSignalBot](https://t.me/GridSignalBot)
 **License:** MIT
 
+💰 **Trade on Bybit with $30 bonus:** [bybit.com/invite?ref=DQ0EAQ](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)
+
 ---
 
 *Questions? Open an issue, message the Telegram bot, or fork and customize. The code is alive, trades real money, and improves every day.*
