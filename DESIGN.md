@@ -106,7 +106,7 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Параметр | Значение |
 |----------|---------|
 | Вход | Лимитный ордер на −3-5% ниже Lower BB (Daily) |
-| TP | Middle или Upper BB |
+| TP | 20% Middle BB + 80% Upper BB (два ордера) |
 | SL | −7% от Lower BB |
 | Плечо | 3x |
 | Маржа | $15 (score ≥7), $10 (≥5.5), $5 (<5.5) |
