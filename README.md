@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![Version](https://img.shields.io/badge/version-3.9-blue)](./CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![Bybit](https://img.shields.io/badge/exchange-Bybit-yellow)](https://bybit.com)
+| [![Bybit](https://img.shields.io/badge/exchange-Bybit-yellow)](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen) [![Trade on Bybit](https://img.shields.io/badge/trade-Bybit_$30_bonus-orange)](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)
 
 ---
 
@@ -135,3 +135,4 @@ MIT — see [LICENSE](./LICENSE).
 ---
 
 *Built for AI agents. Ready for yours. Questions? Open an issue or DM [@Poliakarm](https://t.me/Poliakarm).*
+*Trade on Bybit with $30 bonus: [bybit.com/invite?ref=DQ0EAQ](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)*
