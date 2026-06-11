@@ -6,9 +6,51 @@
 
 ---
 
-## 📸 What it looks like
+## 👥 Who is this for?
 
-> *[Screenshot: SVG dashboard + Telegram alerts — coming soon]*
+- **AI developers** building autonomous trading agents (Claude Code, Codex, Cursor, Hermes)
+- **Quant traders** who want a configurable Bollinger engine with HTTP API
+- **Crypto enthusiasts** who want 24/7 automated monitoring with Telegram alerts
+
+---
+
+## ❓ Why bybit-ws?
+
+| | bybit-ws | freqtrade | hummingbot |
+|---|:---:|:---:|:---:|
+| MCP server for AI agents | ✅ | ❌ | ❌ |
+| Pre-built strategies (no coding) | ✅ | ❌ | ⚠️ |
+| Single YAML config, no DB | ✅ | ❌ | ❌ |
+| Runs on $5 VPS | ✅ | ✅ | ❌ |
+
+- **AI-first**: MCP server + REST API designed for LLM agents, not just humans
+- **Ready to trade**: 8 Bollinger-based strategies with multi-metric scoring — clone and run, no strategy coding required
+- **Zero infra**: one YAML config, no database, no Docker required (but supported)
+- **Battle-tested**: runs 24/7 on real money since 2025
+
+---
+
+## ⚡ Quick Start
+
+```bash
+git clone https://github.com/poliakarmai/bybit-ws.git
+cd bybit-ws
+pip install -e .                    # install bybit-ws + dependencies
+cp config.example.yaml ~/.config/bybit-ws/config.yaml
+# Add your API keys to config.yaml (api.key + api.secret)
+bybit-ws daemon
+```
+
+```python
+from bybit_ws_sdk import Monitor
+
+m = Monitor("http://localhost:8766")
+
+signals = m.scan(mode="long", limit=5)
+for s in signals["signals"]:
+    if s["score"] >= 7.0:
+        m.enter(s["symbol"], "Buy", s["qty"])
+```
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
@@ -25,83 +67,42 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 👥 Who is this for?
-
-- **AI developers** building autonomous trading agents (Claude Code, Codex, Cursor, Hermes)
-- **Quant traders** who want a configurable Bollinger engine with HTTP API
-- **Crypto enthusiasts** who want 24/7 automated monitoring with Telegram alerts
-
----
-
-## ❓ Why bybit-ws?
-
-| | bybit-ws | freqtrade | hummingbot |
-|---|:---:|:---:|:---:|
-| AI-first (MCP + REST for LLMs) | ✅ | ❌ | ❌ |
-| Single YAML config, no DB | ✅ | ❌ | ❌ |
-| 8 strategies out of the box | ✅ | ❌ | ❌ |
-| Runs on $5 VPS | ✅ | ✅ | ❌ |
-| Python SDK for agents | ✅ | ❌ | ❌ |
-
-- **AI-first**: MCP server + REST API designed for LLM agents, not just humans
-- **Zero infra**: one YAML config, no database, no Docker required (but supported)
-- **Battle-tested**: runs 24/7 on real money since 2025
-- **Ready engine**: 8 strategies with multi-metric scoring — not a framework you need to code
-
----
-
-## ⚡ Quick Start
-
-```bash
-git clone https://github.com/poliakarmai/bybit-ws.git
-cd bybit-ws
-pip install -r requirements.txt
-cp config.example.yaml ~/.config/bybit-ws/config.yaml
-# Add BYBIT_API_KEY + BYBIT_API_SECRET to config.yaml
-python3 -m bybit_ws.main
-```
-
-```python
-import sys; sys.path.insert(0, '.')
-from bybit_ws_sdk import Monitor
-
-m = Monitor("http://localhost:8766")
-
-signals = m.scan(mode="long", limit=5)
-for s in signals["signals"]:
-    if s["score"] >= 7.0:
-        m.enter(s["symbol"], "Buy", s["qty"])
-```
-
 **[Full Quickstart →](./QUICKSTART.md)** — 5 minutes from clone to first trade.
 
 ---
 
 ## ⚙️ Configuration
 
-Key parameters in `~/.config/bybit-ws/config.yaml`:
+Key parameters in `~/.config/bybit-ws/config.yaml` (simplified — see [`config.example.yaml`](./config.example.yaml) for all options):
 
 ```yaml
-bybit:
-  api_key: "your_key"
-  api_secret: "your_secret"
-  testnet: false
+api:
+  key: "${BYBIT_API_KEY}"
+  secret: "${BYBIT_API_SECRET}"
+  base_url: "https://api.bytick.com"
 
-trading:
-  max_positions: 12
-  leverage: 3
-  position_size_pct: 5        # % of deposit per position
-  daily_loss_limit: 50        # halt trading at $ loss/day
+strategy:
+  long:
+    leverage: 3
+    max_positions: 15
+    sl_offset: 0.07              # -7% from Lower BB
+  short:
+    leverage: 3
+    max_positions: 3
+    bb_threshold: 85             # short when BB% > 85%
 
-strategies:
-  bb_grid_long:
-    enabled: true
-    interval: "D"
-    bb_threshold: 25           # enter when BB% < 25%
-    score_min: 5.5
-  # ... 7 more strategies
+position_sizing:
+  long_risk_pct: 0.20            # 20% of deposit at risk
+  max_positions: 5
+
+risk:
+  max_drawdown_pct: 15           # global stop: -15% from peak
+  max_daily_loss: 50             # halt trading at -$50/day
+  emergency_close_all: true
+
+rpc:
+  port: 8766
+  auth_token: "${RPC_TOKEN}"     # Bearer token for API auth
 ```
 
 Full config with comments (Russian): [`config.example.yaml`](./config.example.yaml)

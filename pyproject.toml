@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "bybit-ws"
+version = "3.9"
+description = "AI-Native Trading Engine — Bollinger Grid × 8 strategies, REST API + MCP"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Alexey Poliakov", email = "poliakarm@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "requests>=2.31",
+    "websocket-client>=1.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/poliakarmai/bybit-ws"
+Repository = "https://github.com/poliakarmai/bybit-ws.git"
+Issues = "https://github.com/poliakarmai/bybit-ws/issues"
