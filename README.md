@@ -1,6 +1,6 @@
 # bybit-ws — AI-Native Trading Engine
 
-**Bollinger Grid × 8 strategies. REST API + MCP. Built for AI agents.**
+**Bollinger Grid × 7 strategies + DCA overlay. REST API + MCP. Built for AI agents.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Version](https://img.shields.io/badge/version-3.9-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![Bybit](https://img.shields.io/badge/trade-Bybit_$30_bonus-orange)](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)
 
@@ -19,14 +19,27 @@
 | | bybit-ws | freqtrade | hummingbot |
 |---|:---:|:---:|:---:|
 | MCP server for AI agents | ✅ | ❌ | ❌ |
-| Pre-built strategies (no coding) | ✅ | ❌ | ⚠️ |
-| Single YAML config, no DB | ✅ | ❌ | ❌ |
-| Runs on $5 VPS | ✅ | ✅ | ❌ |
+| Bollinger-specific strategies (7 variants) | ✅ | ❌ | ❌ |
+| No database required | ✅ | ❌ (SQLite) | ❌ |
+| Single-file config | ✅ | ✅ | ⚠️ |
 
 - **AI-first**: MCP server + REST API designed for LLM agents, not just humans
-- **Ready to trade**: 8 Bollinger-based strategies with multi-metric scoring — clone and run, no strategy coding required
+- **Ready to trade**: 7 Bollinger-based strategies + DCA overlay — clone and run, no strategy coding required
 - **Zero infra**: one YAML config, no database, no Docker required (but supported)
-- **Battle-tested**: runs 24/7 on real money since 2025
+- **Private development since 2025, open-sourced June 2026**
+
+---
+
+## ⚠️ Before you start
+
+> **This software trades real money on leveraged futures markets (up to 10x). You can lose your entire deposit. Start with testnet.**
+
+```bash
+# Testnet first!
+# In ~/.config/bybit-ws/config.yaml:
+api:
+  base_url: "https://api-testnet.bybit.com"
+```
 
 ---
 
@@ -38,21 +51,31 @@ cd bybit-ws
 pip install -e .                    # install bybit-ws + dependencies
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
 # Add your API keys to config.yaml (api.key + api.secret)
+# ⚠️ First run: use testnet! (api.base_url: "https://api-testnet.bybit.com")
 bybit-ws daemon
 ```
 
 ```python
 from bybit_ws_sdk import Monitor
 
-m = Monitor("http://localhost:8766")
+m = Monitor("http://localhost:8766", token="your-rpc-token")
 
 signals = m.scan(mode="long", limit=5)
 for s in signals["signals"]:
     if s["score"] >= 7.0:
-        m.enter(s["symbol"], "Buy", s["qty"])
+        # Step 1: preview without executing (dry-run)
+        preview = m.enter(s["symbol"], "Buy", s["qty"], confirm=False)
+        print(f"Margin: ${preview['margin']}, Liq: ${preview['liq_price']}")
+
+        # Step 2: execute with SL and TP
+        m.enter(s["symbol"], "Buy", s["qty"],
+                sl=preview["sl_suggested"],
+                tp=preview["tp_suggested"],
+                confirm=True)
 ```
 
 ```text
+# Terminal dashboard (bybit-ws dashboard command)
 ┌─────────────────────────────────────────────────────────┐
 │  📊 BYBIT-WS DASHBOARD           Uptime: 27d 14h        │
 │  ─────────────────────────────────────────────────────  │
@@ -79,21 +102,17 @@ Key parameters in `~/.config/bybit-ws/config.yaml` (simplified — see [`config.
 api:
   key: "${BYBIT_API_KEY}"
   secret: "${BYBIT_API_SECRET}"
-  base_url: "https://api.bytick.com"
+  base_url: "https://api-testnet.bybit.com"  # testnet first!
 
 strategy:
   long:
     leverage: 3
-    max_positions: 15
+    max_positions: 15            # max simultaneous LONG positions
     sl_offset: 0.07              # -7% from Lower BB
   short:
     leverage: 3
-    max_positions: 3
+    max_positions: 3             # max simultaneous SHORT positions
     bb_threshold: 85             # short when BB% > 85%
-
-position_sizing:
-  long_risk_pct: 0.20            # 20% of deposit at risk
-  max_positions: 5
 
 risk:
   max_drawdown_pct: 15           # global stop: -15% from peak
@@ -102,10 +121,10 @@ risk:
 
 rpc:
   port: 8766
-  auth_token: "${RPC_TOKEN}"     # Bearer token for API auth
+  auth_token: "${RPC_TOKEN}"     # Bearer token — REQUIRED for write endpoints
 ```
 
-Full config with comments (Russian): [`config.example.yaml`](./config.example.yaml)
+Full config with comments: [`config.example.yaml`](./config.example.yaml)
 
 ---
 
@@ -120,9 +139,9 @@ Full config with comments (Russian): [`config.example.yaml`](./config.example.ya
 | 5 | **BB Scalp M5** ⚡ | **10x** | M5 | Band touch + RSI filter | 3% | Middle | 3 |
 | 6 | **Mean Revert** ⚡ | **10x** | Daily | BB% < 5% or > 95% | 5% | Middle | 5 |
 | 7 | **Funding Momentum** ⚡ | **10x** | Daily | Funding ±0.1% + BB + trend | 4% | Middle | 3 |
-| 8 | **DCA Ladder** | 3x | — | −5/−10/−15% from entry | shared | shared | 2 adds |
 
-⚡ = x10 leverage strategies — high risk, high reward.
+⚡ = x10 leverage — **liquidation at ~10% adverse move. High risk.**  
+**DCA overlay** applies to strategies #1–#7: adds to losing positions at −5/−10/−15% from entry (up to 2 adds).
 
 **[Full strategy docs →](./STRATEGIES.md)**
 
@@ -143,7 +162,7 @@ Full config with comments (Russian): [`config.example.yaml`](./config.example.ya
                          │
 ┌─── Engine internals (30s cycle, systemd or Docker) ─────┐
 │                                                          │
-│  • 8 strategies with multi-metric scoring                │
+│  • 7 strategies + DCA overlay with multi-metric scoring  │
 │  • Dynamic position sizing (% of deposit)                │
 │  • Auto SL/TP via trading-stop                           │
 │  • X10 safety pack: ATR validation, daily loss limits    │
@@ -163,7 +182,7 @@ Full config with comments (Russian): [`config.example.yaml`](./config.example.ya
 | Feature | Detail |
 |---------|--------|
 | Position sizing | Dynamic: deposit × risk% / max_positions × score multiplier |
-| Drawdown alert | Alert at configurable drawdown from daily peak |
+| Drawdown guard | Alert + optional emergency close at configurable drawdown from peak |
 | Daily loss stop | Configurable daily loss limit (halt after threshold) |
 | Correlation block | Reject if ≥2 positions correlated > 0.8 |
 | X10 limits | Max 3 losing x10 trades → 24h cooldown |
@@ -172,9 +191,19 @@ Full config with comments (Russian): [`config.example.yaml`](./config.example.ya
 
 ---
 
+## 🔒 Security
+
+- **API keys**: stored in environment variables (`${BYBIT_API_KEY}`), never hardcoded
+- **RPC auth**: Bearer token required for all write endpoints (`/enter`, `/close`)
+- **Bind**: `127.0.0.1` by default (localhost only) — never use `0.0.0.0` without `auth_token`
+- **Bybit side**: enable IP whitelist for API keys
+- **Config**: `chmod 600 ~/.config/bybit-ws/config.yaml`
+
+---
+
 ## 📈 Track Record
 
-> *Live data from production instance*
+> *Self-reported from production instance. Unaudited. Past performance ≠ future results.*
 
 - **Uptime**: 99.7% (30-day rolling)
 - **Trades executed**: 847 (last 30 days)
@@ -189,13 +218,13 @@ Full config with comments (Russian): [`config.example.yaml`](./config.example.ya
 |------|---------|
 | [`QUICKSTART.md`](./QUICKSTART.md) | 5-minute setup guide |
 | [`DESIGN.md`](./DESIGN.md) | Full architecture (for devs & AI agents) |
-| [`STRATEGIES.md`](./STRATEGIES.md) | All 8 strategies with parameters + roadmap |
+| [`STRATEGIES.md`](./STRATEGIES.md) | All 7 strategies + DCA with parameters + roadmap |
 | [`ERRORS.md`](./ERRORS.md) | Error reference: Bybit codes + bybit-ws errors |
 | [`WEBHOOKS.md`](./WEBHOOKS.md) | Alert payloads & parsing examples |
 | [`CHANGELOG.md`](./CHANGELOG.md) | Version history 3.0 → 3.9 |
 | [`openapi.yaml`](./openapi.yaml) | OpenAPI 3.0 REST schema |
 | [`bybit_ws_sdk.py`](./bybit_ws_sdk.py) | Python SDK class |
-| [`config.example.yaml`](./config.example.yaml) | Full config with comments (Russian) |
+| [`config.example.yaml`](./config.example.yaml) | Full config with comments |
 
 ---
 
@@ -205,8 +234,10 @@ Full config with comments (Russian): [`config.example.yaml`](./config.example.ya
 # Docker
 docker compose up -d
 
-# systemd (recommended)
-sudo cp bybit-ws.service /etc/systemd/user/
+# systemd — user-level (recommended, no root needed)
+mkdir -p ~/.config/systemd/user
+cp bybit-ws.service ~/.config/systemd/user/
+systemctl --user daemon-reload
 systemctl --user enable --now bybit-ws
 
 # Health check
@@ -219,6 +250,7 @@ curl http://localhost:8766/health
 ## 📋 Requirements
 
 - Python 3.11+
+- Dependencies: `requests`, `pyyaml`, `websocket-client`, `numpy` (auto-installed via `pip install -e .`)
 - Bybit Unified Trading Account + API keys (read/write + trading)
 - Linux VPS ($5/mo works) or Docker
 
@@ -226,9 +258,11 @@ curl http://localhost:8766/health
 
 ## 🔮 Live Demo
 
-Try the Telegram bot for live Bollinger Grid signals:
-- **@GridSignalBot** — `/scan` for top-5 LONG signals, `/scan short` for SHORT, x10 modes
-- Free tier: 10 scans/day
+**@GridSignalBot** — public demo bot running the author's instance. Free tier: 10 scans/day.
+- `/scan` — top-5 LONG signals
+- `/scan short` — top-5 SHORT signals
+
+To set up your own Telegram alerts, see [`WEBHOOKS.md`](./WEBHOOKS.md).
 
 Follow live signals and market analysis: **[@criptapolyaka](https://t.me/criptapolyaka)**
 
@@ -240,6 +274,12 @@ PRs welcome. See [DESIGN.md](./DESIGN.md) for architecture. Priority areas:
 - WebSocket migration (replace REST polling)
 - Backtesting module
 - Multi-exchange support
+
+---
+
+## ⚠️ Disclaimer
+
+**This software trades real money on leveraged futures markets. You can lose your entire deposit.** The authors are not responsible for any financial losses. Past performance does not guarantee future results. Use at your own risk. Start with testnet.
 
 ---
 
