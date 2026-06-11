@@ -501,8 +501,9 @@ class RPCHandler(BaseHTTPRequestHandler):
             )
             if short_result.returncode == 0:
                 result["short"] = json.loads(short_result.stdout)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger('bybit.rpc').warning(f'Short scanner failed: {e}')
 
         # LONG сигналы через auto_entry_scan
         try:
@@ -524,10 +525,12 @@ class RPCHandler(BaseHTTPRequestHandler):
                                 k, v = p.split("=", 1)
                                 signal[k] = v
                         result["long"].append(signal)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    import logging
+                    logging.getLogger('bybit.rpc').warning(f'Signal parse error: {e}')
+        except Exception as e:
+            import logging
+            logging.getLogger('bybit.rpc').warning(f'Long scanner failed: {e}')
 
         _json_response(self, result)
 

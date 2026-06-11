@@ -28,6 +28,7 @@ def _timed_call(fn, *args, timeout=HEAVY_CHECK_TIMEOUT):
     if t.is_alive():
         return [], fn.__name__
     if result and isinstance(result[0], Exception):
+        log_event(f'_timed_call {fn.__name__} error: {result[0]}')
         return [], f'{fn.__name__}({result[0]})'
     return result[0] if result else [], None
 from .api import fetch_positions, fetch_orders
@@ -88,7 +89,8 @@ def _check_risk_limits(positions: dict, risk_cfg) -> list:
             with open(metrics_file) as f:
                 m = _json.load(f)
             daily_loss = abs(float(m.get('daily_pnl', 0)))
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ _check_risk_limits error: {e}')
         pass
     max_loss = risk_cfg.get('max_daily_loss', 50)
     if daily_loss > max_loss:
@@ -115,10 +117,14 @@ def _close_instant(symbol: str, position: dict):
         'timeInForce': 'IOC', 'reduceOnly': True,
     })
     try:
-        subprocess.run([BYBIT_CLI, 'raw', 'POST', '/v5/order/create', body],
-                       capture_output=True, timeout=15)
-    except Exception:
-        pass
+        r = subprocess.run([BYBIT_CLI, 'raw', 'POST', '/v5/order/create', body],
+                           capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            log_event(f'🚨 CLOSE FAILED {symbol}: {r.stderr.strip()[:200]}')
+    except Exception as e:
+        import traceback
+        log_event(f'🚨 CLOSE EXCEPTION {symbol}: {e}')
+        log_event(f'   traceback: {traceback.format_exc()[-300:]}')
 
 
 def main_loop():
@@ -176,6 +182,10 @@ def main_loop():
                 if old_orders:
                     save_json(ORDERS_SNAPSHOT, old_orders)
                 log_event(f'Монитор остановлен (graceful)')
+                try:
+                    rpc_server.shutdown()
+                except Exception as e:
+                    log_event(f'⚠️ RPC shutdown error: {e}')
                 sys.exit(0)
 
             time.sleep(CYCLE_SECONDS)
@@ -188,8 +198,8 @@ def main_loop():
                         save_json(POSITIONS_SNAPSHOT, new_positions)
                     if new_orders:
                         save_json(ORDERS_SNAPSHOT, new_orders)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_event(f'⚠️ Watchdog snapshot save error: {e}')
                 sys.exit(1)
             WATCHDOG_LAST = now_wd
             cycle_count += 1
