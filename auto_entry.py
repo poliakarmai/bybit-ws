@@ -23,8 +23,8 @@ def _load_cooldown():
         try:
             with open(COOLDOWN_FILE) as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ auto_entry: {e}')
     return {}
 
 
@@ -35,8 +35,8 @@ def record_sl_hit(sym: str):
     try:
         with open(COOLDOWN_FILE, 'w') as f:
             json.dump(cd, f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_entry: {e}')
 
 def quick_score_bb(bb_pos):
     if bb_pos <= 10: return 15
@@ -63,8 +63,8 @@ def auto_entry_scan(positions):
         cfg = Config()
         banned = set(cfg.risk.get('banned_symbols', []))
         all_watch = [s for s in all_watch if s not in banned]
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_entry: {e}')
 
     try:
         r = safe_run([BYBIT_CLI, 'tickers'], timeout=15)

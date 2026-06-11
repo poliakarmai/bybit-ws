@@ -53,8 +53,8 @@ def _load_state():
         if os.path.exists(FUNDING_STATE_FILE):
             with open(FUNDING_STATE_FILE) as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ funding_entry: {e}')
     return {}
 
 
@@ -189,8 +189,8 @@ def execute_funding_entry(entry_info):
                      'buyLeverage': str(FUNDING_LEVERAGE),
                      'sellLeverage': str(FUNDING_LEVERAGE)}
         bybit('POST', '/v5/position/set-leverage', lev_body)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ funding_entry: {e}')
 
     for idx in (0, 1):
         try:

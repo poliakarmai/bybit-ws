@@ -16,16 +16,16 @@ def _load_tp_skip():
             for sym in data.get('skip', []):
                 TP_PERM_SKIP.add(sym)
             TP_PERM_SKIP_SIZES.update(data.get('sizes', {}))
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_tp: {e}')
 
 def _save_tp_skip():
     """Сохранить PERM_SKIP на диск."""
     try:
         with open(TP_SKIP_FILE, 'w') as f:
             json.dump({'skip': list(TP_PERM_SKIP), 'sizes': TP_PERM_SKIP_SIZES}, f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_tp: {e}')
 
 # Загружаем при импорте
 _load_tp_skip()

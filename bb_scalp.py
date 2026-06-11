@@ -48,8 +48,8 @@ def _load_state():
         if os.path.exists(SCALP_STATE_FILE):
             with open(SCALP_STATE_FILE) as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ bb_scalp: {e}')
     return {}
 
 
@@ -190,8 +190,8 @@ def execute_scalp(entry_info):
                      'buyLeverage': str(SCALP_LEVERAGE),
                      'sellLeverage': str(SCALP_LEVERAGE)}
         bybit('POST', '/v5/position/set-leverage', lev_body)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ bb_scalp: {e}')
 
     # Market order — пробуем idx=0, затем idx=1
     for idx in (0, 1):

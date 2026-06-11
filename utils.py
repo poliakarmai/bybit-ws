@@ -34,8 +34,8 @@ def get_lot_step(sym):
         instruments = data.get('result', {}).get('list', [])
         if instruments:
             return float(instruments[0].get('lotSizeFilter', {}).get('qtyStep', 0.1))
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ utils: {e}')
     return 0.1
 
 

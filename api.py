@@ -55,8 +55,8 @@ def bybit(method, path, body=None, retries=None):
             if proc:
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_event(f'⚠️ api killpg error: {e}')
             log_event(f'bybit exception: {e}')
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS)-1)])

@@ -51,8 +51,8 @@ def _load_state():
         if os.path.exists(MEAN_STATE_FILE):
             with open(MEAN_STATE_FILE) as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ mean_revert: {e}')
     return {}
 
 
@@ -159,8 +159,8 @@ def execute_mean_revert(entry_info):
                      'buyLeverage': str(MEAN_LEVERAGE),
                      'sellLeverage': str(MEAN_LEVERAGE)}
         bybit('POST', '/v5/position/set-leverage', lev_body)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ mean_revert: {e}')
 
     for idx in (0, 1):
         try:

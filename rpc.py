@@ -200,8 +200,9 @@ class RPCHandler(BaseHTTPRequestHandler):
                 bind = cfg.rpc.get('bind', '127.0.0.1')
                 if bind == '0.0.0.0':
                     return False  # внешний доступ без токена запрещён
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger('bybit.rpc').warning(f'_check_auth config: {e}')
             return True  # localhost — ок
         auth = self.headers.get('Authorization', '')
         return auth == f'Bearer {token}'
@@ -393,9 +394,9 @@ class RPCHandler(BaseHTTPRequestHandler):
                     if line:
                         try:
                             trades.append(json.loads(line))
-                        except Exception:
-                            pass
-            trades = trades[-50:]
+                        except Exception as e:
+                            import logging
+                            logging.getLogger('bybit.rpc').warning(f'trade parse: {e}')
 
         _json_response(self, {
             "positions": positions,
@@ -440,8 +441,9 @@ class RPCHandler(BaseHTTPRequestHandler):
         if hf.exists():
             try:
                 alive = time.time() - float(_read_file(hf)) < 180
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger('bybit.rpc').warning(f'health parse: {e}')
 
         _json_response(self, {
             "status": "alive" if alive else "stale",
@@ -463,15 +465,17 @@ class RPCHandler(BaseHTTPRequestHandler):
                     if line:
                         try:
                             trades.append(json.loads(line))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            import logging
+                            logging.getLogger('bybit.rpc').warning(f'trade parse: {e}')
 
         limit = 100
         if "?limit=" in self.path:
             try:
                 limit = int(self.path.split("limit=")[1].split("&")[0])
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger('bybit.rpc').warning(f'limit parse: {e}')
 
         _json_response(self, trades[-limit:])
 

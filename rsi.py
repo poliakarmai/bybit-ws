@@ -18,8 +18,8 @@ def _load_state():
         try:
             with open(DIVERGENCE_STATE_FILE) as f:
                 return json.load(f)
-        except:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ rsi: {e}')
     return {}
 
 

@@ -25,8 +25,8 @@ def _load():
         if os.path.exists(X10_STATE_FILE):
             with open(X10_STATE_FILE) as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ x10_limits: {e}')
     return {}
 
 
@@ -128,8 +128,8 @@ def track_x10_entry(sym: str, strategy: str):
         data[sym] = {'strategy': strategy, 'ts': time.time()}
         with open(X10_POSITIONS_FILE, 'w') as f:
             json.dump(data, f, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ x10_limits: {e}')
 
 
 def get_x10_strategy(sym: str) -> str:
@@ -139,8 +139,8 @@ def get_x10_strategy(sym: str) -> str:
             with open(X10_POSITIONS_FILE) as f:
                 data = json.load(f)
             return data.get(sym, {}).get('strategy', '')
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ x10_limits: {e}')
     return ''
 
 
@@ -154,5 +154,5 @@ def clear_x10_position(sym: str):
                 del data[sym]
                 with open(X10_POSITIONS_FILE, 'w') as f:
                     json.dump(data, f, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ x10_limits: {e}')

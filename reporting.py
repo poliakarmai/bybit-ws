@@ -25,8 +25,8 @@ def should_send_summary():
         with open(SUMMARY_SENT_FILE) as f:
             if f.read().strip() == now.strftime('%Y-%m-%d-%H'):
                 return None
-    except:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ reporting: {e}')
     return f"{'☀️ Утренняя' if hour == 9 else '🌙 Вечерняя'} сводка"
 
 def send_summary(label):

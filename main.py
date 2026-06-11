@@ -436,8 +436,8 @@ def main_loop():
                                 del dca_state[sym]
                         with open(dca_file, 'w') as f:
                             _json.dump(dca_state, f, indent=2)
-                    except:
-                        pass
+                    except Exception as e:
+                        log_event(f'⚠️ main dca_cleanup: {e}')
             if reduced_syms and new_positions and new_orders:
                 recycle_actions = handle_tp_recycle(reduced_syms, new_positions, new_orders)
                 if recycle_actions:

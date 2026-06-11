@@ -123,8 +123,8 @@ def compute_margin_stats(positions: dict) -> dict:
         try:
             from bybit_ws.config import Config
             max_margin = float(Config().risk.get('max_total_margin', 500))
-        except Exception:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger('bybit.dashboard').warning(f'dashboard: {e}')
 
     total_margin = 0.0
     if positions:

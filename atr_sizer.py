@@ -38,8 +38,8 @@ def _load_cache():
         if os.path.exists(ATR_CACHE_FILE):
             with open(ATR_CACHE_FILE) as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ atr_sizer: {e}')
     return {}
 
 

@@ -26,8 +26,8 @@ def _load_watchlist():
                     age_h = (time.time() - data['updated']) / 3600
                     if age_h < 24:
                         return data['symbols']
-        except:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ overbought: {e}')
     return list(STATIC_WATCHLIST)
 
 def _save_watchlist(symbols):
@@ -64,8 +64,8 @@ def rotate_watchlist():
             f.write(str(now))
         from .alerts import log_event
         log_event(f'🔄 Watchlist обновлён: {len(symbols)} монет')
-    except:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ overbought: {e}')
 
 def check_overbought(positions=None):
     """Проверить перегретые монеты (BB > 75%).

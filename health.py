@@ -2,6 +2,7 @@
 import json, math, os, time
 from datetime import datetime
 from . import BYBIT_CLI, DATA_DIR, DAILY_DRAWDOWN_LIMIT, DAILY_START_EQUITY
+from .alerts import log_event  # для except-логирования
 from . import safe_run
 from .api import get_bb_data
 from .snapshot import load_json, save_json
@@ -64,8 +65,8 @@ def check_funding_flip():
                     val_str = line.split(':')[-1].strip().replace('%', '')
                     try:
                         new_funding[sym] = float(val_str)
-                    except:
-                        pass
+                    except Exception as e:
+                        log_event(f'⚠️ health: {e}')
                     break
         except:
             continue
@@ -126,8 +127,8 @@ def check_funding_pump():
                     val_str = line.split(':')[-1].strip().replace('%', '')
                     try:
                         funding = float(val_str)
-                    except:
-                        pass
+                    except Exception as e:
+                        log_event(f'⚠️ health: {e}')
                     break
             if funding is None or funding <= 0.1:
                 continue

@@ -39,8 +39,8 @@ def _load_state():
         if os.path.exists(SL_REENTRY_FILE):
             with open(SL_REENTRY_FILE) as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ sl_reentry: {e}')
     return {}
 
 
@@ -219,8 +219,8 @@ def _get_lot_step(sym):
         instruments = data.get('result', {}).get('list', [])
         if instruments:
             return float(instruments[0].get('lotSizeFilter', {}).get('qtyStep', 0.1))
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ sl_reentry: {e}')
     return 0.1
 
 

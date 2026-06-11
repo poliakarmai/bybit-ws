@@ -19,8 +19,8 @@ def _load_state():
         try:
             with open(SQUEEZE_STATE_FILE) as f:
                 return json.load(f)
-        except:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ squeeze: {e}')
     return {}
 
 

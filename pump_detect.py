@@ -42,8 +42,8 @@ def _load_state():
         try:
             with open(PUMP_STATE_FILE) as f:
                 return json.load(f)
-        except:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ pump_detect: {e}')
     return {}
 
 
@@ -62,8 +62,8 @@ def _get_lot_step(sym):
         instruments = data.get('result', {}).get('list', [])
         if instruments:
             return float(instruments[0].get('lotSizeFilter', {}).get('qtyStep', 0.1))
-    except:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ pump_detect: {e}')
     return 0.1
 
 

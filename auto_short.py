@@ -53,8 +53,8 @@ def _load_state():
         if os.path.exists(SHORT_STATE_FILE):
             with open(SHORT_STATE_FILE) as f:
                 return json.load(f)
-    except:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_short: {e}')
     return {}
 
 
@@ -70,8 +70,8 @@ def _get_lot_step(sym):
         instruments = data.get('result', {}).get('list', [])
         if instruments:
             return float(instruments[0].get('lotSizeFilter', {}).get('qtyStep', 0.1))
-    except:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_short: {e}')
     return 0.1
 
 

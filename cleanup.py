@@ -24,8 +24,8 @@ def check_expired_orders(orders_now, prev_orders_snapshot, now_ts):
         elif o.get('createdTime'):
             try:
                 created_at = float(o['createdTime']) / 1000
-            except:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ cleanup: {e}')
         if created_at is None:
             if key not in meta:
                 meta[key] = {'first_seen': now_ts}

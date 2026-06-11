@@ -261,8 +261,8 @@ def _save_regime_file(result: dict) -> None:
         }
         with open(REGIME_FILE, "w") as f:
             json.dump(payload, f, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ regime: {e}')
 
 
 def get_cached_regime() -> dict:
@@ -279,8 +279,8 @@ def get_cached_regime() -> dict:
         try:
             with open(REGIME_FILE) as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ regime: {e}')
     return {"regime": "UNKNOWN", "confidence": 0, "details": {}}
 
 
