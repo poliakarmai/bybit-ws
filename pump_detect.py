@@ -207,9 +207,6 @@ def check_pumps(positions=None):
         prev_alerts = prev.get('alerts', [])
         last_alert_ts = prev_alerts[-1] if prev_alerts else 0
 
-        if last_price > prev_peak:
-            prev['peak_price'] = last_price
-
         # Первое обнаружение
         if not prev:
             prev = {
@@ -257,6 +254,10 @@ def check_pumps(positions=None):
                 f'📈 ПАМП {sym} продолжается: +{chg_pct*100:.0f}%, '
                 f'цена ${last_price:.4f}, ждём DCA'
             )
+
+        # Обновляем пик для существующих записей
+        if last_price > prev_peak:
+            prev['peak_price'] = last_price
 
         state[sym] = prev
 
