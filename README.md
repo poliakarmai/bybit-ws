@@ -1,6 +1,6 @@
 # bybit-ws — AI-Native Trading Engine
 
-**Bollinger Grid с авто-входами, трейлингом и DCA. 7 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
+**Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
 [![Version](https://img.shields.io/badge/version-3.10-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
@@ -40,7 +40,7 @@
 |------|-----------|
 | `main.py` | Главный цикл, RPC-сервер, оркестрация модулей |
 | `api.py` | Bybit REST API: позиции, ордера, SL/TP, BB-данные |
-| `config.py` | Конфиг: 7 стратегий, риск-менеджмент, tiers |
+| `config.py` | Конфиг: 8 стратегий, риск-менеджмент, tiers |
 | `position_sizing.py` | Динамический сайзинг (% депозита × score × multiplier) |
 | `auto_short.py` | Авто-SHORT: Tier A/B (обычный) + JUNK C/D (памп-шорты без SL) |
 | `auto_entry.py` | Авто-LONG: BB < порога, score ≥ мин |
@@ -125,7 +125,7 @@
 ## Формат уведомлений
 
 ```
-🔴 SHORT JUNK HMSTR: вход $0.000373 лимит $0.000380 ×664190 (25x) | памп +120% | TP $0.000112 | DCA: +100% @ $0.000746, +120% @ $0.000821
+🔴 SHORT JUNK HMSTR: вход $0.000373 лимит $0.000380 ×664190 (3x) | памп +120% | TP $0.000112 | DCA: +100% @ $0.000746, +120% @ $0.000821
 
 🔴 SHORT MOVE: вход $0.0143 лимит $0.0146 ×700 (3x) | BB=92% | SL $0.0150 (+5%) | TP $0.0120
 
@@ -145,7 +145,7 @@
 | Механизм | Детали |
 |----------|--------|
 | Динамический сайзинг | депозит × risk% / max_positions × score_multiplier |
-| Просадка депозита | Алерт + экстренное закрытие при −15% от пика |
+| Просадка депозита | Alert + optional emergency close при −3% дневной / −15% общей (configurable) |
 | Дневной лимит убытка | Остановка торгов при −$50/день |
 | Корреляционный блок | Отказ от входа если ≥2 позиции с корреляцией >0.8 |
 | x10 защита | Макс 3 убыточных x10 сделки → кулдаун 24ч |
@@ -183,6 +183,7 @@ m = Monitor("http://localhost:8766", token="your-token")
 signals = m.scan(mode="short", limit=5)
 for s in signals["signals"]:
     preview = m.enter(s["symbol"], "Sell", s["qty"], confirm=False)
+    print(f"Preview {s['symbol']}: sell {preview['qty']} @ market")
     m.enter(s["symbol"], "Sell", s["qty"], confirm=True)
 ```
 
@@ -197,7 +198,8 @@ pip install -e .
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
 # Добавить API-ключи в config.yaml
 # ⚠️ Первый запуск: testnet! (api.base_url: "https://api-testnet.bybit.com")
-bybit-ws daemon
+bybit-ws                          # CLI (после pip install -e .)
+# или: python3 -m bybit_ws        # без установки
 ```
 
 ### systemd (рекомендуется)
@@ -228,11 +230,11 @@ api:
 strategy:
   long:
     leverage: 3
-    max_positions: 12
+    max_positions: 12           # макс одновременных LONG-позиций (hard limit)
     sl_offset: 0.07
   short:
     leverage: 3
-    max_positions: 3
+    max_positions: 3            # макс одновременных SHORT (включая JUNK)
     bb_threshold: 85
   junk:                          # 🆕 JUNK-шорты
     daily_pump_threshold: 0.80   # 80% рост за 24ч
@@ -248,7 +250,7 @@ risk:
 
 position_sizing:
   long_risk_pct: 0.20           # 20% депозита в риске
-  max_positions: 5
+  max_positions: 5              # база для расчёта маржи: депозит × risk% / N позиций
   max_position_share: 0.40      # не более 40% бюджета на позицию
 
 rpc:
@@ -271,6 +273,7 @@ rpc:
 
 - API-ключи через `env` (никогда не хардкод)
 - RPC: Bearer-токен на write-эндпоинты
+- ⚠️ Если `RPC_TOKEN` не задан и `bind ≠ 127.0.0.1` — сервер откажется запускаться
 - Bind: `127.0.0.1` по умолчанию
 - Bybit: IP-whitelist для API-ключей
 - Конфиг: `chmod 600 ~/.config/bybit-ws/config.yaml`
@@ -295,7 +298,7 @@ rpc:
 | `README.md` | Этот файл — полное описание |
 | `QUICKSTART.md` | 5-минутный старт |
 | `DESIGN.md` | Архитектура для разработчиков |
-| `STRATEGIES.md` | Все 7 стратегий с параметрами |
+| `STRATEGIES.md` | Все 8 стратегий с параметрами |
 | `CHANGELOG.md` | История версий |
 | `openapi.yaml` | OpenAPI 3.0 схема |
 | `config.example.yaml` | Полный конфиг с комментариями |
