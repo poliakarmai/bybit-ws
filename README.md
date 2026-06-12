@@ -176,44 +176,80 @@ mcp_bybit_ws_vpn_status()      # VPN + трафик
 ```
 
 ### Python SDK
+
 ```python
 from bybit_ws_sdk import Monitor
 m = Monitor("http://localhost:8766", token="your-token")
 
+# Сканирование рынка
 signals = m.scan(mode="short", limit=5)
 for s in signals["signals"]:
     preview = m.enter(s["symbol"], "Sell", s["qty"], confirm=False)
     print(f"Preview {s['symbol']}: sell {preview['qty']} @ market")
     m.enter(s["symbol"], "Sell", s["qty"], confirm=True)
+
+# Позиции и метрики
+positions = m.positions()          # все позиции + PnL + SL
+metrics = m.metrics()              # дневная статистика (SL/TP/entries)
+pnl = sum(p["upnl"] for p in positions["positions"])  # общий PnL
+
+# Управление
+m.set_sl("DOGEUSDT", 0.075)        # set stop-loss
+m.close("APTUSDT")                 # закрыть позицию по рынку
+m.cancel_all()                     # отменить все ордера
 ```
 
 ---
 
 ## Быстрый старт
 
+### Установка
+
 ```bash
 git clone https://github.com/poliakarmai/bybit-ws.git
 cd bybit-ws
 pip install -e .
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
-# Добавить API-ключи в config.yaml
+# Создать .env с ключами:
+cp .env.example ~/.config/bybit-ws/.env
+nano ~/.config/bybit-ws/.env    # BYBIT_API_KEY, BYBIT_API_SECRET, RPC_TOKEN
 # ⚠️ Первый запуск: testnet! (api.base_url: "https://api-testnet.bybit.com")
 bybit-ws                          # CLI (после pip install -e .)
 # или: python3 -m bybit_ws        # без установки
 ```
 
 ### systemd (рекомендуется)
+
 ```bash
 mkdir -p ~/.config/systemd/user
 cp bybit-ws.service ~/.config/systemd/user/
+# Убедись что путь в ExecStart ведёт к bybit-ws:
+which bybit-ws                    # должно быть ~/.local/bin/bybit-ws
 systemctl --user daemon-reload
 systemctl --user enable --now bybit-ws
+systemctl --user status bybit-ws  # проверка
+journalctl --user -u bybit-ws -f  # логи
 ```
 
 ### Docker
+
 ```bash
 docker compose up -d
 ```
+
+## Troubleshooting
+
+| Симптом | Причина | Решение |
+|---------|---------|--------|
+| `ModuleNotFoundError: bybit_ws` | Не установлен пакет | `pip install -e .` из корня проекта |
+| `bybit-ws: command not found` | Нет entry point | `pip install -e .` или `python3 -m bybit_ws` |
+| RPC возвращает 401 | Неверный токен | Проверить `RPC_TOKEN` в `.env` |
+| Сервер не запускается | Пустой RPC_TOKEN + bind не localhost | Задать `RPC_TOKEN` в `.env` |
+| Bybit: «invalid API key» | Неверные ключи или testnet/mainnet | Проверить `api.base_url` и ключи |
+| Позиции не открываются | Депозит < $30 или banned | Проверить `get_deposit()` логи |
+| Telegram-алерты не приходят | Не задан бот или чат | Проверить `TG_BOT_TOKEN`, `TG_CHAT_ID` |
+| `Connection refused` к RPC | Сервер не запущен или порт занят | `systemctl --user status bybit-ws`, `ss -tlnp :8766` |
+| Высокий PnL минус при запуске | Нет стоп-лоссов | Дождаться первого цикла (30с), auto_sl выставит SL |
 
 ---
 
@@ -271,12 +307,20 @@ rpc:
 
 ## Безопасность
 
-- API-ключи через `env` (никогда не хардкод)
-- RPC: Bearer-токен на write-эндпоинты
+**API-ключи:**
+- Ключи через `~/.config/bybit-ws/.env` → читаются как `${BYBIT_API_KEY}`
+- Никогда не коммить `.env` (добавлен в `.gitignore`)
+- `chmod 600 ~/.config/bybit-ws/.env ~/.config/bybit-ws/config.yaml`
+
+**RPC-сервер:**
+- Write-эндпоинты (`/enter`, `/close`, `/set-sl`) требуют `Authorization: Bearer <token>
 - ⚠️ Если `RPC_TOKEN` не задан и `bind ≠ 127.0.0.1` — сервер откажется запускаться
-- Bind: `127.0.0.1` по умолчанию
-- Bybit: IP-whitelist для API-ключей
-- Конфиг: `chmod 600 ~/.config/bybit-ws/config.yaml`
+- Bind: `127.0.0.1` по умолчанию. Для внешнего доступа — `0.0.0.0`
+
+**Bybit:**
+- IP-whitelist для API-ключей (Bybit → Account → API Management)
+- Регулярная ротация ключей (раз в 90 дней)
+- Отдельные ключи для чтения и торговли (принцип минимальных прав)
 
 ---
 
