@@ -234,10 +234,18 @@ def main_loop():
                 for change_type, sym, msg in pos_changes + ord_changes:
                     if change_type == 'CLOSED' and sym in sl_hit_syms:
                         old_pos = old_positions.get(sym, {})
-                        pnl = old_pos.get('upnl', 0)
                         entry = old_pos.get('entry', 0)
-                        emoji = '🔴' if pnl < 0 else '🛑'
-                        add_alert('STOP', f'{emoji} {sym} SL −${abs(pnl):.2f} (вход ${entry:.4f})')
+                        size = old_pos.get('size', 0)
+                        side = old_pos.get('side', 'Buy')
+                        lev = old_pos.get('leverage', 1)
+                        exit_price = old_pos.get('stopLoss') or old_pos.get('mark', 0)
+                        if side == 'Sell':
+                            rpnl = size * (entry - exit_price)
+                        else:
+                            rpnl = size * (exit_price - entry)
+                        pnl_pct = (rpnl / (size * entry)) * 100 if size and entry else 0
+                        emoji = '🔴' if rpnl < 0 else '🛑'
+                        add_alert('STOP', f'{emoji} {sym} SL: ${entry:.6f}→${exit_price:.6f} | {rpnl:+.1f}$ ({pnl_pct:+.1f}%) | {size:.0f}×{lev:.0f}x {side}')
                         record_alert('SL')
                         # SL re-entry: запомнить для лесенки
                         sl_price = old_pos.get('mark', 0)
@@ -247,9 +255,17 @@ def main_loop():
                         continue
                     if change_type == 'CLOSED' and sym in tp_hit_syms:
                         old_pos = old_positions.get(sym, {})
-                        pnl = old_pos.get('upnl', 0)
                         entry = old_pos.get('entry', 0)
-                        add_alert('TP', f'🎯 {sym} TP +${pnl:.2f} (вход ${entry:.4f})')
+                        size = old_pos.get('size', 0)
+                        side = old_pos.get('side', 'Buy')
+                        lev = old_pos.get('leverage', 1)
+                        exit_price = old_pos.get('mark', 0)
+                        if side == 'Sell':
+                            rpnl = size * (entry - exit_price)
+                        else:
+                            rpnl = size * (exit_price - entry)
+                        pnl_pct = (rpnl / (size * entry)) * 100 if size and entry else 0
+                        add_alert('TP', f'🎯 {sym} TP: ${entry:.6f}→${exit_price:.6f} | +{rpnl:.1f}$ (+{pnl_pct:.1f}%) | {size:.0f}×{lev:.0f}x {side}')
                         record_alert('TP')
                         continue
                     if change_type == 'CLOSED':
