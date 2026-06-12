@@ -7,6 +7,7 @@ DESIGN.md §Стратегия:
 Фикс код-ревью Manus AI.
 """
 
+import os, json
 from .api import bybit, fetch_positions, get_bb_data
 from .config import get_config
 from .alerts import log_event
@@ -58,19 +59,16 @@ def check_and_fix_sl():
                 sl_price = mark * 0.93
                 sl_desc = f'-7% от Mark (нет BB)'
         else:
-            # SHORT: проверка на JUNK (дневной памп ≥80% → без авто-SL)
+            # SHORT: проверка на JUNK через pumps.json (помечены pump_detect/auto_short)
             try:
-                from .api import bybit as _bybit
-                ticker_data = _bybit('GET', f'/v5/market/tickers?category=linear&symbol={sym}')
-                if ticker_data and ticker_data.get('retCode') == 0:
-                    tickers = ticker_data['result'].get('list', [])
-                    if tickers:
-                        chg_pct = abs(float(tickers[0].get('price24hPcnt', 0) or 0))
-                        if chg_pct >= 0.80:
-                            log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (дневной памп {chg_pct*100:.0f}%)')
-                            continue
+                state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')
+                with open(state_file) as f:
+                    pump_state = json.loads(f.read())
+                if sym in pump_state and pump_state[sym].get('short_entry_ts'):
+                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (в стейте пампа)')
+                    continue
             except Exception:
-                pass  # fall through to normal SL
+                pass
 
             # Tier-based SL
             is_junk = sym not in tier_ab and sym not in one_way
