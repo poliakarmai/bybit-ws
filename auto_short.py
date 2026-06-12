@@ -281,9 +281,8 @@ def check_auto_short(positions):
                 _save_state(state)
 
                 dca_str = ', '.join(f'+{d["mult"]*100:.0f}% @ ${d["price"]:.4f}' for d in dca_placed)
-                msg = (f'🐻🦨 Auto-SHORT ШЛАК {sym}: лимитка ${limit_price:.4f} (рынок ${price:.4f}, +2%) ×{qty} ({SHORT_LEVERAGE}x), '
-                       f'рост +{chg_pct*100:.0f}% за 24ч, BB={bb_pct:.0f}%, БЕЗ SL, '
-                       f'TP ${tp_price:.4f} (Middle BB), DCA: {dca_str}')
+                msg = (f'🔴 SHORT JUNK {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
+                       f'памп +{chg_pct*100:.0f}% | TP ${tp_price:.6f} | DCA: {dca_str}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
                 log_event(msg)
@@ -313,9 +312,9 @@ def check_auto_short(positions):
                 state[sym] = state_entry
                 _save_state(state)
 
-                msg = (f'🐻 Auto-SHORT {sym}: лимитка ${limit_price:.4f} (рынок ${price:.4f}, +2%) ×{qty} ({SHORT_LEVERAGE}x), '
-                       f'BB={bb_pct:.0f}%, SL ${sl_price:.4f} (+{sl_pct*100:.0f}%), '
-                       f'TP ${tp_price:.4f} (Middle BB)')
+                msg = (f'🔴 SHORT {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
+                       f'BB={bb_pct:.0f}% | SL ${sl_price:.4f} (+{sl_pct*100:.0f}%) | '
+                       f'TP ${tp_price:.4f}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
                 log_event(msg)
@@ -383,8 +382,8 @@ def check_junk_dca(positions):
                 # Hard stop — закрываем по рынку
                 try:
                     _close_junk_position(sym, pos)
-                    msg = (f'🛑 ШЛАК-STOP {sym}: убыток {loss_pct*100:.1f}% > {MAX_LOSS_PCT*100:.0f}% лимит, '
-                           f'закрыт @ ${mark_price:.4f} (вход ${entry_price:.4f}, PnL ${unrealised_pnl:+.2f})')
+                    msg = (f'🛑 STOP JUNK {sym}: убыток -{loss_pct*100:.1f}% > лимит {MAX_LOSS_PCT*100:.0f}% | '
+                           f'вход ${entry_price:.6f} → выход ${mark_price:.6f} | PnL ${unrealised_pnl:+.2f}')
                     add_alert('STOP', msg)
                     log_event(msg)
                     actions.append(sym)
@@ -401,8 +400,8 @@ def check_junk_dca(positions):
             if held_hours > MAX_HOLD_HOURS and unrealised_pnl <= 0:
                 try:
                     _close_junk_position(sym, pos)
-                    msg = (f'⏰ ШЛАК-TIMEOUT {sym}: удержание {held_hours:.0f}ч > {MAX_HOLD_HOURS}ч, '
-                           f'закрыт @ ${mark_price:.4f} (PnL ${unrealised_pnl:+.2f})')
+                    msg = (f'⏰ TIMEOUT JUNK {sym}: {held_hours:.0f}ч > {MAX_HOLD_HOURS}ч лимит | '
+                           f'выход ${mark_price:.6f} | PnL ${unrealised_pnl:+.2f}')
                     add_alert('STOP', msg)
                     log_event(msg)
                     actions.append(sym)
@@ -447,8 +446,8 @@ def check_junk_dca(positions):
                     entry['dca_placed'] = dca_placed
                     _save_state(state)
 
-                    msg = (f'🐻🦨 DCA ШЛАК {sym}: +{dca_mult*100:.0f}% уровень @ ${dca_price:.4f} ×{dca_qty} '
-                           f'(вход был ${entry_price:.4f}, сейчас ${mark_price:.4f})')
+                    msg = (f'🔴 DCA JUNK {sym}: +{dca_mult*100:.0f}% @ ${dca_price:.4f} ×{dca_qty} | '
+                           f'вход ${entry_price:.6f} → сейчас ${mark_price:.6f}')
                     add_alert('ENTRY', msg)
                     actions.append(sym)
                     log_event(msg)

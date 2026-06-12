@@ -36,6 +36,7 @@ from .snapshot import load_json, save_json, check_position_changes, check_order_
 from .alerts import log_event, add_alert, get_alerts, send_telegram_alert, _is_duplicate
 from .auto_tp import auto_take_profit, apply_auto_tp
 from .trailing_sl import trailing_sl, apply_trailing_sl
+from .junk_trail import trailing_junk_tp
 from .overbought import check_overbought, rotate_watchlist
 from .pump_detect import check_pumps, check_weekly_pumps
 from .auto_entry import auto_entry_scan, record_sl_hit
@@ -307,13 +308,20 @@ def main_loop():
                 for msg in check_strategy_compliance(new_positions, new_orders):
                     add_alert('INFO', msg)
 
-            # Trailing SL
+            # Trailing SL + JUNK Trail TP
             if cycle_count % TRAIL_CHECK_INTERVAL == 0 and new_positions:
                 trail_actions = trailing_sl(new_positions)
                 if trail_actions:
                     apply_trailing_sl(trail_actions)
                     for sym, idx, side, size, price in trail_actions:
                         add_alert('INFO', f'🔺 Trailing SL {sym} подтянут до ${price:.4f}')
+
+                # Trailing TP для JUNK-шортов
+                if new_orders:
+                    junk_trail_actions = trailing_junk_tp(new_positions, new_orders)
+                    if junk_trail_actions:
+                        for sym, pnl_pct, new_tp, reason in junk_trail_actions:
+                            add_alert('TP', f'🔒 JUNK TP {sym}: {reason} при +{pnl_pct:.1f}% → ${new_tp:.6f}')
 
             # Агрессивный авто-SL: каждые 4 цикла (2 мин)
             if cycle_count % 4 == 0 and new_positions:
@@ -808,6 +816,13 @@ def run_once():
             for sym, idx, side, size, price in trail_actions:
                 print(f'🔺 {sym}: trailing SL → ${price:.4f}')
                 alerts.append(f'Trailing SL {sym} @ ${price:.4f}')
+        # JUNK trailing TP
+        if new_orders:
+            junk_trail_actions = trailing_junk_tp(new_positions, new_orders)
+            if junk_trail_actions:
+                for sym, pnl_pct, new_tp, reason in junk_trail_actions:
+                    print(f'🔒 {sym}: JUNK TP {reason} при +{pnl_pct:.1f}% → ${new_tp:.6f}')
+                    alerts.append(f'JUNK Trail TP {sym}: {reason} @ ${new_tp:.6f}')
         tp_actions = auto_take_profit(new_positions, new_orders)
         if tp_actions:
             apply_auto_tp(tp_actions)
