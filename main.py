@@ -37,7 +37,7 @@ from .alerts import log_event, add_alert, get_alerts, send_telegram_alert, _is_d
 from .auto_tp import auto_take_profit, apply_auto_tp
 from .trailing_sl import trailing_sl, apply_trailing_sl
 from .overbought import check_overbought, rotate_watchlist
-from .pump_detect import check_pumps
+from .pump_detect import check_pumps, check_weekly_pumps
 from .auto_entry import auto_entry_scan, record_sl_hit
 from .health import (check_liquidation, check_bb_squeeze, check_funding_flip,
                       check_daily_drawdown, check_funding_pump)
@@ -479,9 +479,10 @@ def main_loop():
                         for msg in msgs: add_alert('INFO', msg)
                 
                 if heavy_ok:
-                    for fn, alert_type in [(check_pumps, 'STOP'), (check_rsi_divergence, 'STOP'),
+                    for fn, alert_type in [(check_pumps, 'STOP'), (check_weekly_pumps, 'STOP'),
+                                            (check_rsi_divergence, 'STOP'),
                                             (check_squeeze, 'INFO'), (check_funding_pump, 'STOP')]:
-                        msgs, err = _a(fn, new_positions if fn == check_pumps else None) if fn == check_pumps else _a(fn)
+                        msgs, err = _a(fn, new_positions if fn == check_pumps else None) if fn in (check_pumps, check_weekly_pumps) else _a(fn)
                         if err: log_event(f'⏱️ {err}: таймаут')
                         else:
                             for msg in (msgs or []): add_alert(alert_type, msg)

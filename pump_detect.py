@@ -22,6 +22,7 @@ from .position_sizing import margin_for_strategy
 
 PUMP_STATE_FILE = os.path.join(DATA_DIR, 'pumps.json')
 PUMP_THRESHOLD = 0.80  # 80% daily pump = JUNK threshold per strategy
+WEEKLY_PUMP_THRESHOLD = 2.30  # 230% weekly pump = extreme JUNK
 DCA_STEP = 0.15
 ALERT_COOLDOWN = 3600
 MAX_TRACK_AGE = 86400 * 7
@@ -258,6 +259,116 @@ def check_pumps(positions=None):
             )
 
         state[sym] = prev
+
+    _save_state(state)
+    return alerts
+
+
+def check_weekly_pumps(positions=None):
+    """Проверить топ-80 на недельный памп (≥230%) — экстремальные JUNK-шорты БЕЗ SL."""
+    import urllib.request as _urllib
+    alerts = []
+    now = time.time()
+
+    if positions is None:
+        positions = {}
+    live_syms = set(positions.keys()) if isinstance(positions, dict) else set()
+    active_pump_shorts = _count_active_pump_shorts(positions)
+    if active_pump_shorts >= MAX_PUMP_SHORTS:
+        return alerts
+
+    data = bybit('GET', '/v5/market/tickers?category=linear')
+    if not data or data.get('retCode') != 0:
+        return alerts
+
+    tickers = data['result'].get('list', [])
+    if not tickers:
+        return alerts
+
+    tickers.sort(key=lambda t: float(t.get('turnover24h', 0) or 0), reverse=True)
+    top_tickers = tickers[:80]
+    state = _cleanup_state(_load_state(), now)
+
+    for t in top_tickers:
+        sym = t['symbol']
+        if 'USD' not in sym or not sym.endswith('USDT'):
+            continue
+        turnover = float(t.get('turnover24h', 0) or 0)
+        if turnover < 1_000_000:
+            continue
+        if sym in live_syms or sym in ONE_WAY:
+            continue
+        if active_pump_shorts >= MAX_PUMP_SHORTS:
+            break
+
+        # Skip if already tracked by daily pump
+        prev = state.get(sym, {})
+        if prev.get('short_entry_ts'):
+            continue
+
+        # Fetch 7-day klines
+        try:
+            kdata = json.loads(_urllib.urlopen(
+                f'https://api.bybit.com/v5/market/kline?category=spot&symbol={sym}&interval=D&limit=8'
+            ).read())
+            closes = [float(c[4]) for c in kdata['result']['list']]
+            if len(closes) < 8:
+                continue
+            # closes[0]=today, closes[7]=7 days ago (8th candle)
+            chg_7d = ((closes[0] - closes[7]) / closes[7])
+            if chg_7d < WEEKLY_PUMP_THRESHOLD:
+                continue
+        except Exception:
+            continue
+
+        last_price = float(t.get('lastPrice', 0))
+        alerts.append(
+            f'🚀🚀 НЕДЕЛЬНЫЙ ПАМП {sym}: +{chg_7d*100:.0f}% за 7д '
+            f'(цена ${last_price:.4f}, оборот ${turnover:,.0f})'
+        )
+
+        # JUNK short: БЕЗ SL, БЕЗ TP, только вход + DCA сетап
+        if sym not in live_syms and sym not in ONE_WAY:
+            pump_margin = margin_for_strategy('pump', score=5.5)
+            if pump_margin <= 0:
+                continue
+            usdt_qty = pump_margin * PUMP_SHORT_LEV
+            qty_step = _get_lot_step(sym)
+            qty = math.ceil(usdt_qty / last_price / qty_step) * qty_step
+            if qty <= 0:
+                continue
+
+            entry = _round_to_tick(last_price, sym)
+            try:
+                order = bybit('POST', '/v5/order/create', {
+                    'category': 'linear', 'symbol': sym,
+                    'side': 'Sell', 'orderType': 'Market',
+                    'qty': str(qty), 'positionIdx': 2,
+                    'timeInForce': 'IOC',
+                })
+                if order.get('retCode') != 0:
+                    log_event(f'⚠️ Weekly-Pump {sym}: {order.get("retMsg","?")}')
+                    continue
+
+                log_event(f'🚀🚀 Weekly-JUNK {sym}: SHORT ${entry:.4f} ×{qty}, БЕЗ SL (памп +{chg_7d*100:.0f}%)')
+                alerts.append(f'🐻🐻 JUNK-SHORT {sym}: вход @ ${entry:.4f}, БЕЗ стопа')
+
+                state[sym] = {
+                    'first_seen_ts': now,
+                    'first_price': last_price,
+                    'peak_price': last_price,
+                    'alerts': [now],
+                    'dca_level': 0,
+                    'dca_placed': ['init'],
+                    'short_entry_ts': now,
+                    'short_entry_price': entry,
+                    'weekly_pump': True,
+                }
+                _save_state(state)
+                active_pump_shorts += 1
+
+            except Exception as e:
+                log_event(f'⚠️ Weekly-Pump {sym}: {e}')
 
     _save_state(state)
     return alerts
