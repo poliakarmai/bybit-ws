@@ -248,9 +248,10 @@ def main_loop():
                         emoji = '🔴' if rpnl < 0 else '🛑'
                         add_alert('STOP', f'{emoji} {sym} SL: ${entry:.6f}→${exit_price:.6f} | {rpnl:+.1f}$ ({pnl_pct:+.1f}%) | {size:.0f}×{lev:.0f}x {side}')
                         record_alert('SL')
-                        # SL re-entry: запомнить для лесенки
-                        sl_price = old_pos.get('mark', 0)
-                        notify_sl_hit(sym, sl_price, entry)
+                        # SL re-entry: запомнить для лесенки (только LONG)
+                        if side == 'Buy':
+                            sl_price = old_pos.get('mark', 0)
+                            notify_sl_hit(sym, sl_price, entry)
                         # Cooldown для LONG: запретить повторный вход на N часов
                         record_sl_hit(sym)
                         continue
