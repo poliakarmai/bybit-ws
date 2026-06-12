@@ -21,7 +21,7 @@ from .alerts import log_event, add_alert
 from .position_sizing import margin_for_strategy
 
 PUMP_STATE_FILE = os.path.join(DATA_DIR, 'pumps.json')
-PUMP_THRESHOLD = 1.20
+PUMP_THRESHOLD = 0.80  # 80% daily pump = JUNK threshold per strategy
 DCA_STEP = 0.15
 ALERT_COOLDOWN = 3600
 MAX_TRACK_AGE = 86400 * 7

@@ -58,7 +58,21 @@ def check_and_fix_sl():
                 sl_price = mark * 0.93
                 sl_desc = f'-7% от Mark (нет BB)'
         else:
-            # SHORT: Tier-based
+            # SHORT: проверка на JUNK (дневной памп ≥80% → без авто-SL)
+            try:
+                from .api import bybit as _bybit
+                ticker_data = _bybit('GET', f'/v5/market/tickers?category=linear&symbol={sym}')
+                if ticker_data and ticker_data.get('retCode') == 0:
+                    tickers = ticker_data['result'].get('list', [])
+                    if tickers:
+                        chg_pct = abs(float(tickers[0].get('price24hPcnt', 0) or 0))
+                        if chg_pct >= 0.80:
+                            log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (дневной памп {chg_pct*100:.0f}%)')
+                            continue
+            except Exception:
+                pass  # fall through to normal SL
+
+            # Tier-based SL
             is_junk = sym not in tier_ab and sym not in one_way
             if is_junk:
                 sl_price = entry * 1.07
