@@ -1,294 +1,317 @@
 # bybit-ws — AI-Native Trading Engine
 
-**Bollinger Grid × 7 strategies + DCA overlay. REST API + MCP. Built for AI agents.**
+**Bollinger Grid с авто-входами, трейлингом и DCA. 7 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Version](https://img.shields.io/badge/version-3.9-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![Bybit](https://img.shields.io/badge/trade-Bybit_$30_bonus-orange)](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)
-
----
-
-## 👥 Who is this for?
-
-- **AI developers** building autonomous trading agents (Claude Code, Codex, Cursor, Hermes)
-- **Quant traders** who want a configurable Bollinger engine with HTTP API
-- **Crypto enthusiasts** who want 24/7 automated monitoring with Telegram alerts
+[![Version](https://img.shields.io/badge/version-3.10-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
 ---
 
-## ❓ Why bybit-ws?
+## Архитектура модулей (v3.10)
 
-| | bybit-ws | freqtrade | hummingbot |
-|---|:---:|:---:|:---:|
-| MCP server for AI agents | ✅ | ❌ | ❌ |
-| Bollinger-specific strategies (7 variants) | ✅ | ❌ | ❌ |
-| No database required | ✅ | ❌ (SQLite) | ❌ |
-| Single-file config | ✅ | ✅ | ⚠️ |
+```
+┌─────────────────── MAIN LOOP (30s) ───────────────────┐
+│                                                        │
+│  Каждый цикл:                                          │
+│    • auto_sl.py         — проверка/фикс стоп-лоссов    │
+│    • trailing_sl.py     — подтяжка SL (LONG >15%)      │
+│    • junk_trail.py      — трейлинг TP (JUNK-шорты)    │
+│    • auto_tp.py         — авто-TP на Middle/Upper BB   │
+│    • dca.py             — DCA-докупки                  │
+│    • auto_entry.py      — авто-входы (LONG)            │
+│                                                        │
+│  Каждые 10 циклов (HEAVY):                              │
+│    • auto_short.py      — авто-SHORT + JUNK-шорты      │
+│    • pump_detect.py     — детект пампов (24ч/нед)      │
+│    • correlation.py     — корреляционная матрица       │
+│    • reporting.py       — сводки, триггеры прибыли     │
+│                                                        │
+│  Мониторинг:                                           │
+│    • health.py          — ликвидации, сквизы, фондинг  │
+│    • overbought.py      — детект перегрева             │
+│    • cost_tracker.py    — учёт комиссий                │
+│    • cleanup.py         — чистка просроченных ордеров  │
+│                                                        │
+└────────────────────────────────────────────────────────┘
+```
 
-- **AI-first**: MCP server + REST API designed for LLM agents, not just humans
-- **Ready to trade**: 7 Bollinger-based strategies + DCA overlay — clone and run, no strategy coding required
-- **Zero infra**: one YAML config, no database, no Docker required (but supported)
-- **Private development since 2025, open-sourced June 2026**
+### Полный список файлов движка
+
+| Файл | Назначение |
+|------|-----------|
+| `main.py` | Главный цикл, RPC-сервер, оркестрация модулей |
+| `api.py` | Bybit REST API: позиции, ордера, SL/TP, BB-данные |
+| `config.py` | Конфиг: 7 стратегий, риск-менеджмент, tiers |
+| `position_sizing.py` | Динамический сайзинг (% депозита × score × multiplier) |
+| `auto_short.py` | Авто-SHORT: Tier A/B (обычный) + JUNK C/D (памп-шорты без SL) |
+| `auto_entry.py` | Авто-LONG: BB < порога, score ≥ мин |
+| `auto_tp.py` | Авто-TP: 20% на Middle BB + 80% на Upper BB (retry + backoff) |
+| `auto_sl.py` | Авто-SL: проверка и фикс стоп-лоссов (пропускает JUNK) |
+| `trailing_sl.py` | Трейлинг-SL для LONG: BB Weekly >75% и профит >15% |
+| **`junk_trail.py`** | 🆕 Трейлинг-TP для JUNK-шортов: фиксация 70% при +15%, 85% при +30% |
+| `pump_detect.py` | Детект пампов: 24ч ≥80%, недельный ≥230% |
+| `dca.py` | DCA-докупки LONG при −5/−10/−15% от входа |
+| `correlation.py` | Корреляционная матрица: блок при >80% корреляции |
+| `health.py` | Мониторинг: ликвидации, BB-сквизы, фондинг, дневная просадка |
+| `overbought.py` | Ротация вотчлиста перегретых монет |
+| `rsi.py` | RSI-дивергенции |
+| `squeeze.py` | BB-сквиз детектор |
+| `reporting.py` | Сводки, триггеры профита, compliance, coverage |
+| `cleanup.py` | Чистка просроченных/старых ордеров |
+| `cost_tracker.py` | Учёт торговых комиссий |
+| `recycle.py` | Рециркуляция TP → ре-вход |
+| `metrics.py` | Запись метрик (алерты, авто-входы) |
+| `alerts.py` | Telegram-алерты, дедупликация |
+| `snapshot.py` | Снапшоты позиций/ордеров, детект изменений |
 
 ---
 
-## ⚠️ Before you start
+## Режимы работы
 
-> **This software trades real money on leveraged futures markets (up to 10x). You can lose your entire deposit. Start with testnet.**
+### LONG (BB Grid)
+- **Триггер**: BB Daily < порога (Tier A: <15%, B: <25%, C: <40%, D: <65%)
+- **Плечо**: 3x
+- **Маржа**: динамическая (депозит × 20% / макс_позиций × score_multiplier)
+- **SL**: −7% от Lower BB (trading-stop)
+- **TP**: 20% на Middle BB + 80% на Upper BB (лимитные reduceOnly)
+- **Трейлинг SL**: подтягивается при BB Weekly >75% и профите >15%
+- **DCA**: докупка при −5/−10/−15% от входа, макс 2 добавки
+- **Макс позиций**: 12
 
-```bash
-# Testnet first!
-# In ~/.config/bybit-ws/config.yaml:
-api:
-  base_url: "https://api-testnet.bybit.com"
+### SHORT Tier A/B (обычный)
+- **Триггер**: BB Daily > 85%, Tier A/B монеты
+- **Плечо**: 3x
+- **SL**: +5–7% от входа (trading-stop)
+- **TP**: Middle BB
+- **Макс позиций**: 3 (общий лимит с JUNK)
+
+### SHORT JUNK Tier C/D (памп-шорты) 🆕
+- **Триггер**: 24ч рост ≥ 80% + BB Daily > 70%
+- **Плечо**: 3x
+- **SL**: **НЕТ** (JUNK слишком волатильный — SL только жрёт маржу)
+- **Защита**: max_loss −15% маржи (hard market-close), max_hold 48ч (авто-закрытие)
+- **Вход**: лимитка Sell на +2% выше рынка (ждём отскока)
+- **TP #1**: Middle BB (лимитный reduceOnly Buy, ставится при входе)
+- **TP #2 (трейлинг)**: при профите >15% → подтягивает TP, фиксируя 70% прибыли
+- **TP #3 (трейлинг)**: при профите >30% → затягивает до 85% прибыли
+- **DCA-лесенка**: лимитки Sell на +100% и +120% от входа
+- **Макс позиций**: 3 (общий лимит с Tier A/B)
+
+### JUNK-шорт: полный жизненный цикл
+```
+1. pump_detect.py → памп +80% за 24ч
+2. auto_short.py → лимитка Sell +2%, TP Middle BB, DCA +100%/+120%
+3. check_junk_dca() → проверка max_loss/max_hold/DCA-уровней
+4. junk_trail.py → профит >15%: TP подтянут (фиксация 70%)
+5. junk_trail.py → профит >30%: TP затянут (фиксация 85%)
+6. TP срабатывает → позиция закрыта с прибылью
+```
+
+### SL Re-entry
+- После срабатывания SL — лесенка re-entry (price / 1.05, price / 1.10, price / 1.15)
+- До 3 попыток на монету
+
+### x10 Стратегии (высокий риск)
+
+| Стратегия | TF | Триггер | SL | TP | Макс поз |
+|-----------|-----|---------|-----|-----|---------|
+| Scalp M5 | M5 | Касание BB + RSI | −3% | Middle | 3 |
+| Mean Revert | D | BB <5% или >95% | −5% | Middle | 5 |
+| Funding Momentum | D | Фондинг ±0.1% + BB + тренд | −4% | Middle | 3 |
+
+⚠️ **x10 плечо — ликвидация при ~10% движения против позиции.**
+
+---
+
+## Формат уведомлений
+
+```
+🔴 SHORT JUNK HMSTR: вход $0.000373 лимит $0.000380 ×664190 (25x) | памп +120% | TP $0.000112 | DCA: +100% @ $0.000746, +120% @ $0.000821
+
+🔴 SHORT MOVE: вход $0.0143 лимит $0.0146 ×700 (3x) | BB=92% | SL $0.0150 (+5%) | TP $0.0120
+
+🔴 DCA JUNK HMSTR: +100% @ $0.000746 ×664190 | вход $0.000373 → сейчас $0.000750
+
+🔒 JUNK Trail TP HMSTR: фиксация 70% при +22.5% | вход $0.000373 → TP $0.000210 (был $0.000112)
+
+🛑 STOP JUNK HMSTR: убыток -16.2% > лимит 15% | вход $0.000373 → выход $0.000433 | PnL $-12.40
+
+⏰ TIMEOUT JUNK HMSTR: 49ч > 48ч лимит | выход $0.000380 | PnL $-1.20
 ```
 
 ---
 
-## ⚡ Quick Start
+## Risk Management
+
+| Механизм | Детали |
+|----------|--------|
+| Динамический сайзинг | депозит × risk% / max_positions × score_multiplier |
+| Просадка депозита | Алерт + экстренное закрытие при −15% от пика |
+| Дневной лимит убытка | Остановка торгов при −$50/день |
+| Корреляционный блок | Отказ от входа если ≥2 позиции с корреляцией >0.8 |
+| x10 защита | Макс 3 убыточных x10 сделки → кулдаун 24ч |
+| Каскадная защита | Market-close если цена в 2× ближе к ликвидации чем к SL |
+| Бан-лист | config-driven, постоянный |
+| JUNK защита | max_loss −15% маржи, max_hold 48ч, без SL |
+
+---
+
+## Интерфейсы
+
+### REST API (порт 8766)
+```bash
+curl http://localhost:8766/health          # статус
+curl http://localhost:8766/positions       # позиции (read)
+curl http://localhost:8766/scan?mode=short # сканирование рынка
+curl -H "Authorization: Bearer $TOKEN" \
+     -X POST http://localhost:8766/enter   # вход (write, требует auth)
+```
+
+### MCP Server
+```python
+# AI-агенты (Claude Code, Codex, Cursor, Hermes) подключаются напрямую
+mcp_bybit_ws_get_positions()   # позиции + PnL + SL
+mcp_bybit_ws_scan_market()     # BB-сигналы LONG/SHORT
+mcp_bybit_ws_get_metrics()     # дневная статистика
+mcp_bybit_ws_vpn_status()      # VPN + трафик
+```
+
+### Python SDK
+```python
+from bybit_ws_sdk import Monitor
+m = Monitor("http://localhost:8766", token="your-token")
+
+signals = m.scan(mode="short", limit=5)
+for s in signals["signals"]:
+    preview = m.enter(s["symbol"], "Sell", s["qty"], confirm=False)
+    m.enter(s["symbol"], "Sell", s["qty"], confirm=True)
+```
+
+---
+
+## Быстрый старт
 
 ```bash
 git clone https://github.com/poliakarmai/bybit-ws.git
 cd bybit-ws
-pip install -e .                    # install bybit-ws + dependencies
+pip install -e .
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
-# Add your API keys to config.yaml (api.key + api.secret)
-# ⚠️ First run: use testnet! (api.base_url: "https://api-testnet.bybit.com")
+# Добавить API-ключи в config.yaml
+# ⚠️ Первый запуск: testnet! (api.base_url: "https://api-testnet.bybit.com")
 bybit-ws daemon
 ```
 
-```python
-from bybit_ws_sdk import Monitor
-
-m = Monitor("http://localhost:8766", token="your-rpc-token")
-
-signals = m.scan(mode="long", limit=5)
-for s in signals["signals"]:
-    if s["score"] >= 7.0:
-        # Step 1: preview without executing (dry-run)
-        preview = m.enter(s["symbol"], "Buy", s["qty"], confirm=False)
-        print(f"Margin: ${preview['margin']}, Liq: ${preview['liq_price']}")
-
-        # Step 2: execute with SL and TP
-        m.enter(s["symbol"], "Buy", s["qty"],
-                sl=preview["sl_suggested"],
-                tp=preview["tp_suggested"],
-                confirm=True)
+### systemd (рекомендуется)
+```bash
+mkdir -p ~/.config/systemd/user
+cp bybit-ws.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now bybit-ws
 ```
 
-```text
-# Terminal dashboard (bybit-ws dashboard command)
-┌─────────────────────────────────────────────────────────┐
-│  📊 BYBIT-WS DASHBOARD           Uptime: 27d 14h        │
-│  ─────────────────────────────────────────────────────  │
-│  Margin: $57.12/$100.00          Winrate: 68%           │
-│  Open: 6 pos  │  PnL: -$12.67    Alerts: 847           │
-│  ─────────────────────────────────────────────────────  │
-│  POSITIONS:                                              │
-│  MOVE  +$3.21  BB 18%  ████░░░░░░░░░░░░░░              │
-│  DOGE  +$5.24  BB 23%  █████░░░░░░░░░░░░░              │
-│  XRP   -$8.12  BB 35%  ████████░░░░░░░░░░              │
-│  ...                                                     │
-└─────────────────────────────────────────────────────────┘
+### Docker
+```bash
+docker compose up -d
 ```
-
-**[Full Quickstart →](./QUICKSTART.md)** — 5 minutes from clone to first trade.
 
 ---
 
-## ⚙️ Configuration
+## Конфигурация
 
-Key parameters in `~/.config/bybit-ws/config.yaml` (simplified — see [`config.example.yaml`](./config.example.yaml) for all options):
+Ключевые параметры `~/.config/bybit-ws/config.yaml`:
 
 ```yaml
 api:
   key: "${BYBIT_API_KEY}"
   secret: "${BYBIT_API_SECRET}"
-  base_url: "https://api-testnet.bybit.com"  # testnet first!
+  base_url: "https://api-testnet.bybit.com"
 
 strategy:
   long:
     leverage: 3
-    max_positions: 15            # max simultaneous LONG positions
-    sl_offset: 0.07              # -7% from Lower BB
+    max_positions: 12
+    sl_offset: 0.07
   short:
     leverage: 3
-    max_positions: 3             # max simultaneous SHORT positions
-    bb_threshold: 85             # short when BB% > 85%
+    max_positions: 3
+    bb_threshold: 85
+  junk:                          # 🆕 JUNK-шорты
+    daily_pump_threshold: 0.80   # 80% рост за 24ч
+    weekly_pump_threshold: 2.30  # 230% за неделю
+    dca_levels: [1.0, 1.2]     # DCA на +100% и +120%
+    max_loss_pct: 15            # hard stop при −15% маржи
+    max_hold_hours: 48          # авто-закрытие через 48ч
 
 risk:
-  max_drawdown_pct: 15           # global stop: -15% from peak
-  max_daily_loss: 50             # halt trading at -$50/day
+  max_drawdown_pct: 15
+  max_daily_loss: 50
   emergency_close_all: true
+
+position_sizing:
+  long_risk_pct: 0.20           # 20% депозита в риске
+  max_positions: 5
+  max_position_share: 0.40      # не более 40% бюджета на позицию
 
 rpc:
   port: 8766
-  auth_token: "${RPC_TOKEN}"     # Bearer token — REQUIRED for write endpoints
-```
-
-Full config with comments: [`config.example.yaml`](./config.example.yaml)
-
----
-
-## 📊 Strategies
-
-| # | Strategy | Lev | Timeframe | Entry Trigger | SL | TP | Max Pos |
-|---|----------|-----|-----------|---------------|-----|-----|---------|
-| 1 | **BB Grid LONG** | 3x | Daily | BB < 25%, score ≥ 5.5 | −7% | Middle/Upper | 12 |
-| 2 | **BB Grid SHORT** | 3x | Daily | BB > 85%, Tier A/B | +5–7% | Middle | 3 |
-| 3 | **Junk SHORT** | 3x | Daily | Pump ≥ 80%, BB > 70% | −15% | Middle | 2 |
-| 4 | **SL Re-entry** | 3x | Daily | Ladder after SL | −7% | Middle | per coin |
-| 5 | **BB Scalp M5** ⚡ | **10x** | M5 | Band touch + RSI filter | 3% | Middle | 3 |
-| 6 | **Mean Revert** ⚡ | **10x** | Daily | BB% < 5% or > 95% | 5% | Middle | 5 |
-| 7 | **Funding Momentum** ⚡ | **10x** | Daily | Funding ±0.1% + BB + trend | 4% | Middle | 3 |
-
-⚡ = x10 leverage — **liquidation at ~10% adverse move. High risk.**  
-**DCA overlay** applies to strategies #1–#7: adds to losing positions at −5/−10/−15% from entry (up to 2 adds).
-
-**[Full strategy docs →](./STRATEGIES.md)**
-
----
-
-## 🏗 Architecture
-
-```
-┌─── Interfaces (how AI agents connect) ──────────────────┐
-│                                                          │
-│  AI Agent (Claude Code / Codex / Cursor / Hermes)       │
-│      │                                                   │
-│      ├── REST API (port 8766)                            │
-│      ├── MCP Server                                      │
-│      └── Python SDK (bybit_ws_sdk.Monitor)               │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-                         │
-┌─── Engine internals (30s cycle, systemd or Docker) ─────┐
-│                                                          │
-│  • 7 strategies + DCA overlay with multi-metric scoring  │
-│  • Dynamic position sizing (% of deposit)                │
-│  • Auto SL/TP via trading-stop                           │
-│  • X10 safety pack: ATR validation, daily loss limits    │
-│  • Correlation matrix, funding tracker, regime classifier│
-│  • SVG dashboard (winrate, margin, funding, correlation) │
-│  • Telegram bot (@GridSignalBot) for live signals        │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-```
-
-**[Full architecture →](./DESIGN.md)**
-
----
-
-## 🛡 Risk Management
-
-| Feature | Detail |
-|---------|--------|
-| Position sizing | Dynamic: deposit × risk% / max_positions × score multiplier |
-| Drawdown guard | Alert + optional emergency close at configurable drawdown from peak |
-| Daily loss stop | Configurable daily loss limit (halt after threshold) |
-| Correlation block | Reject if ≥2 positions correlated > 0.8 |
-| X10 limits | Max 3 losing x10 trades → 24h cooldown |
-| Cascade protection | Market-close if price 2× closer to liquidation than SL |
-| Banned symbols | Config-driven permanent ban list |
-
----
-
-## 🔒 Security
-
-- **API keys**: stored in environment variables (`${BYBIT_API_KEY}`), never hardcoded
-- **RPC auth**: Bearer token required for all write endpoints (`/enter`, `/close`)
-- **Bind**: `127.0.0.1` by default (localhost only) — never use `0.0.0.0` without `auth_token`
-- **Bybit side**: enable IP whitelist for API keys
-- **Config**: `chmod 600 ~/.config/bybit-ws/config.yaml`
-
----
-
-## 📈 Track Record
-
-> *Self-reported from production instance. Unaudited. Past performance ≠ future results.*
-
-- **Uptime**: 99.7% (30-day rolling)
-- **Trades executed**: 847 (last 30 days)
-- **Win rate (LONG)**: ~68%
-- **Avg hold time**: 14h
-
----
-
-## 📦 Files
-
-| File | Purpose |
-|------|---------|
-| [`QUICKSTART.md`](./QUICKSTART.md) | 5-minute setup guide |
-| [`DESIGN.md`](./DESIGN.md) | Full architecture (for devs & AI agents) |
-| [`STRATEGIES.md`](./STRATEGIES.md) | All 7 strategies + DCA with parameters + roadmap |
-| [`ERRORS.md`](./ERRORS.md) | Error reference: Bybit codes + bybit-ws errors |
-| [`WEBHOOKS.md`](./WEBHOOKS.md) | Alert payloads & parsing examples |
-| [`CHANGELOG.md`](./CHANGELOG.md) | Version history 3.0 → 3.9 |
-| [`openapi.yaml`](./openapi.yaml) | OpenAPI 3.0 REST schema |
-| [`bybit_ws_sdk.py`](./bybit_ws_sdk.py) | Python SDK class |
-| [`config.example.yaml`](./config.example.yaml) | Full config with comments |
-
----
-
-## 🚀 Deploy
-
-```bash
-# Docker
-docker compose up -d
-
-# systemd — user-level (recommended, no root needed)
-mkdir -p ~/.config/systemd/user
-cp bybit-ws.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now bybit-ws
-
-# Health check
-curl http://localhost:8766/health
-# → {"status":"alive","uptime":86400,"cycle_count":2880}
+  auth_token: "${RPC_TOKEN}"
 ```
 
 ---
 
-## 📋 Requirements
+## Требования
 
 - Python 3.11+
-- Dependencies: `requests`, `pyyaml`, `websocket-client`, `numpy` (auto-installed via `pip install -e .`)
-- Bybit Unified Trading Account + API keys (read/write + trading)
-- Linux VPS ($5/mo works) or Docker
+- `requests`, `pyyaml`, `websocket-client`, `numpy`
+- Bybit Unified Trading Account + API ключи (read/write + trading)
+- Linux (VPS $5/мес) или Docker
 
 ---
 
-## 🔮 Live Demo
+## Безопасность
 
-**@GridSignalBot** — public demo bot running the author's instance. Free tier: 10 scans/day.
-- `/scan` — top-5 LONG signals
-- `/scan short` — top-5 SHORT signals
-
-To set up your own Telegram alerts, see [`WEBHOOKS.md`](./WEBHOOKS.md).
-
-Follow live signals and market analysis: **[@criptapolyaka](https://t.me/criptapolyaka)**
+- API-ключи через `env` (никогда не хардкод)
+- RPC: Bearer-токен на write-эндпоинты
+- Bind: `127.0.0.1` по умолчанию
+- Bybit: IP-whitelist для API-ключей
+- Конфиг: `chmod 600 ~/.config/bybit-ws/config.yaml`
 
 ---
 
-## 🤝 Contributing
+## Статистика (production)
 
-PRs welcome. See [DESIGN.md](./DESIGN.md) for architecture. Priority areas:
-- WebSocket migration (replace REST polling)
-- Backtesting module
-- Multi-exchange support
+- Аптайм: 99.7% (30 дней)
+- Сделок: 847 (последние 30 дней)
+- Win rate (LONG): ~68%
+- Среднее удержание: 14ч
 
----
-
-## ⚠️ Disclaimer
-
-**This software trades real money on leveraged futures markets. You can lose your entire deposit.** The authors are not responsible for any financial losses. Past performance does not guarantee future results. Use at your own risk. Start with testnet.
+⚠️ Прошлые результаты не гарантируют будущих.
 
 ---
 
-## 📄 License
+## Файлы документации
 
-MIT — see [LICENSE](./LICENSE).
+| Файл | Содержание |
+|------|-----------|
+| `README.md` | Этот файл — полное описание |
+| `QUICKSTART.md` | 5-минутный старт |
+| `DESIGN.md` | Архитектура для разработчиков |
+| `STRATEGIES.md` | Все 7 стратегий с параметрами |
+| `CHANGELOG.md` | История версий |
+| `openapi.yaml` | OpenAPI 3.0 схема |
+| `config.example.yaml` | Полный конфиг с комментариями |
 
 ---
 
-*Built for AI agents. Ready for yours. Questions? Open an issue or DM [@Poliakarm](https://t.me/Poliakarm).*
+## Дисклеймер
 
-*Need a Bybit account? [Sign up with $30 bonus](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen) — supports the project.*
+**Этот софт торгует реальными деньгами на фьючерсах с плечом до 10x. Можно потерять весь депозит.** Авторы не несут ответственности за финансовые потери. Начинайте с testnet.
+
+---
+
+## Лицензия
+
+MIT
+
+---
+
+*Built for AI agents. Ready for yours. Вопросы? Пиши [@Poliakarm](https://t.me/Poliakarm).*
