@@ -85,7 +85,7 @@ The interesting part is the AI layer. I use **Hermes Agent** (by Nous Research) 
 - **MCP Server**: the agent sees positions, orders, and metrics through a standardized protocol
 - **REST API**: port 8766, CORS, rate-limiting, RPC token
 - **Auto-entry**: the agent decides on entries based on scoring
-- **GridSignal Bot** (@GridSignalBot on Telegram): real-time scanner, LONG/SHORT/x10 buttons
+- **GridSignal Bot** (@Gridbolbot on Telegram): real-time scanner, LONG/SHORT/x10 buttons
 
 Example interaction:
 
@@ -132,7 +132,7 @@ systemctl --user enable --now bybit-ws
 ```
 
 **GitHub:** [poliakarmai/bybit-ws](https://github.com/poliakarmai/bybit-ws)
-**Bot:** [@GridSignalBot](https://t.me/GridSignalBot)
+**Bot:** [@Gridbolbot](https://t.me/Gridbolbot)
 **License:** MIT
 
 💰 **Trade on Bybit with $30 bonus:** [bybit.com/invite?ref=DQ0EAQ](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)

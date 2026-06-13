@@ -85,7 +85,7 @@
 - **MCP-сервер**: агент видит позиции, ордера и метрики через стандартизированный протокол
 - **REST API**: порт 8766, CORS, rate-limiting, RPC-токен
 - **Auto-entry**: агент сам принимает решение о входе на основе scoring
-- **GridSignal Bot** (@GridSignalBot в Telegram): real-time сканер, кнопки LONG/SHORT/x10
+- **GridSignal Bot** (@Gridbolbot в Telegram): real-time сканер, кнопки LONG/SHORT/x10
 
 Пример взаимодействия:
 
@@ -132,7 +132,7 @@ systemctl --user enable --now bybit-ws
 ```
 
 **GitHub:** [poliakarmai/bybit-ws](https://github.com/poliakarmai/bybit-ws)
-**Бот:** [@GridSignalBot](https://t.me/GridSignalBot)
+**Бот:** [@Gridbolbot](https://t.me/Gridbolbot)
 **Лицензия:** MIT
 
 💰 **Trade on Bybit with $30 bonus:** [bybit.com/invite?ref=DQ0EAQ](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)

@@ -15,4 +15,4 @@ Open source, MIT. 8 стратегий, Bollinger Grid, AI scoring, REST API + M
 ## Links
 
 - [GitHub](https://github.com/poliakarmai/bybit-ws)
-- [GridSignal Bot](https://t.me/GridSignalBot)
+- [GridSignal Bot](https://t.me/Gridbolbot)
