@@ -111,8 +111,8 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | SL | −7% от Lower BB |
 | Плечо | 3x |
 | **Маржа** | Динамическая (% депозита × score_multiplier, position_sizing v3.8) |
-| Скоринг | 9 метрик: Tier, BB%, объём, дни падения, Weekly/Monthly BB, фандинг, RSI |
-| Макс позиций | 12 (настраивается в risk.max_long_positions) |
+| Скоринг | **Текущая реализация: quick_score_bb() — порог BB% < 25 и > 0**. Полный 9-метричный скоринг (Tier, BB%, объём, дни падения, Weekly/Monthly BB, фандинг, RSI) — v4.0 planned |
+| **Макс позиций** | 12 — risk.max_long_positions (жёсткий лимит авто-входа). position_sizing.max_positions (5) — база для расчёта маржи, не лимит позиций |
 | Cooldown SL | 4 часа после SL перед повторным входом |
 | Приоритет проверок | margin_available → max_positions → sector_limit → correlation_stop → scoring ≥ threshold |
 
@@ -126,7 +126,7 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Маржа | $10 (будет динамическая) |
 | Порог BB | >85% (перегрев) |
 | Макс позиций | 3 |
-| Макс удержание | 72 часа (авто-закрытие, защита от фандинга) |
+| Макс удержание | 72 часа (SHORT A/B) — **проверка макс удержания не реализована в коде**. JUNK: 48ч (реализовано в check_junk_dca) |
 | ONE_WAY фильтр | XRP*, ONDO, WLFI, ENJ, ESPORTS, AVAX*, APT*, SUI* — исключены |
 | DCA-шорт | На аномальных пампах (≥80% за 24ч) + трейлинг-TP (junk_trail.py) |
 
@@ -701,14 +701,16 @@ m.close("ADAUSDT")
 
 ---
 
-## 6. Scoring (формула)
+## 6. Scoring
 
-Это ядро стратегии — как оцениваются кандидаты на вход.
+> ⚠️ **Текущая реализация (v3.10):** `quick_score_bb()` — вход при BB% < 25 и > 0. Простой BB-threshold, не 9 метрик.
+
+**Полный 9-метричный скоринг — v4.0 planned.** Ниже — целевая архитектура:
 
 ```
 Score = Σ w_i × metric_i   (диапазон 0–10)
 
-Метрики LONG:
+Метрики LONG (planned):
   1. Tier-бонус          ×2.0    S=10, A=7, B=4, C/D=1
   2. BB% (положение)     ×1.5    0% = нижняя полоса, 100% = верхняя. Идеал <30%
   3. Объём (24ч)         ×1.0    нормализованный log(volume)
@@ -719,7 +721,7 @@ Score = Σ w_i × metric_i   (диапазон 0–10)
   8. RSI(14)             ×1.0    RSI < 30 = 10, RSI > 70 = 0
   9. BB Squeeze          ×1.0    узкие полосы перед расширением
 
-Метрики SHORT:
+Метрики SHORT (planned):
   1. BB% > threshold (85%)   — перегрев верхней полосы
   2. RSI(14) > 70             — перекупленность
   3. Объём                   — подтверждение
@@ -790,7 +792,7 @@ GET-запросы (positions, orders): backoff [1, 3, 5] секунд.
 
 ### Edge Cases
 
-- **Flash crash -20%:** BB расширяются, lower уходит глубоко вниз. DCA включается (с лимитом $80/монету). SL защищает каждую позицию.
+- **Flash crash -20%:** BB расширяются, lower уходит глубоко вниз. DCA включается (с лимитом $80/монету). SL защищает каждую позицию. emergency_close_all — последний рубеж.
 - **Памп +50%:** SHORT не входит на пике (entry_offset +2% даёт буфер). BB% зашкаливает — сигнал пропускается.
 - **Фандинг раз в 8 часов:** при 3x может сжирать 0.3-1% на шорте в бычий рынок. Защита: max_hold_hours=72 (авто-закрытие). Учитывается в PnL через cost_tracker.
 - **Пустой API-ответ:** fetch_positions возвращает {} → повтор через 5с, 3 попытки. Если 3 раза пусто — принять и продолжить с последним снепшотом.
@@ -800,7 +802,39 @@ GET-запросы (positions, orders): backoff [1, 3, 5] секунд.
 |------|-----------|
 | fetch_positions() OK, fetch_orders() failed | Продолжить без check_auto_tp, check_auto_sl работает |
 | fetch_positions() пустой массив (не ошибка API) | Не считать что позиций нет. Повторить через 5с × 3. Если 3 раза пусто — использовать последний снепшот |
-| Bybit API возвращает ошибку (retCode ≠ 0) | Retry с backoff до 3 попыток, затем пропуск цикла |
+|| Bybit API возвращает ошибку (retCode ≠ 0) | Retry с backoff до 3 попыток, затем пропуск цикла |
+
+### Emergency Close Procedure
+
+> ⚠️ **Реализация: частичная.** `emergency_close_all: true` в конфиге. Ниже — целевой алгоритм.
+
+Алгоритм аварийного закрытия при срабатывании `max_drawdown_pct`:
+
+```
+1. PAUSE — приостановить все авто-входы (auto_entry, auto_short)
+2. ALERT — отправить Telegram-алерт «🚨 EMERGENCY CLOSE»
+3. ITERATE — по всем открытым позициям:
+   a. POST /v5/order/create (Market, reduceOnly, IOC)
+   b. При retCode ≠ 0: retry 1 раз
+   c. При повторной ошибке: записать в лог, продолжить к следующей
+4. WAIT — 5 секунд на исполнение ордеров
+5. VERIFY — fetch_positions(), проверить что все закрыты
+6. Оставшиеся открытые: алерт «⚠️ MANUAL CLOSE NEEDED: [символы]»
+7. RESET — через drawdown_reset_hours (конфиг) снять флаг emergency
+```
+
+**Текущие ограничения:**
+- Rate limit Bybit: 10 ордеров/сек — при >10 позиций закрытие займёт несколько секунд
+- IOC-ордера могут заполниться частично — проверка на шаге 5 критична
+- При гэпе (flash crash) лимитные SL могут не сработать — emergency close страхует
+
+**Конфиг:**
+```yaml
+risk:
+  emergency_close_all: true
+  max_drawdown_pct: 15
+  drawdown_reset_hours: 24
+```
 
 ---
 
@@ -857,6 +891,30 @@ docker-compose up -d
 
 > ⚠️ **НИКОГДА не используйте `bind: "0.0.0.0"` без `auth_token`.** POST-эндпоинты позволяют открывать/закрывать позиции.
 
+### Testing
+
+Как безопасно тестировать изменения:
+
+```bash
+# 1. Testnet: в config.yaml указать api.base_url: "https://api-testnet.bybit.com"
+# 2. Один проход: python3 -m bybit_ws.main --once
+# 3. Dry-run входа: POST /enter с confirm: false — покажет расчёт без ордера
+# 4. Проверить scoring: curl http://localhost:8766/signals — список кандидатов
+# 5. Проверить health: curl http://localhost:8766/health
+```
+
+### Graceful Degradation
+
+Поведение системы при частичных сбоях:
+
+| Компонент | Сбой | Поведение |
+|-----------|------|-----------|
+| Bybit API | Недоступен (5 мин) | Retry, затем пропуск цикла. Позиции заморожены — SL/TP на бирже продолжают работать |
+| Telegram API | Недоступен | Алерты пишутся в лог, не теряются. Резервный канал: веб-чат |
+| Диск | >90% заполнен | events.log перестаёт писаться, алерт. Авто-ротация (7 файлов × 50MB) |
+| RAM | >512MB | Watchdog перезапуск (systemd), очистка памяти |
+| RPC-сервер | Падение | Главный цикл продолжается. RPC поднимается на следующем цикле |
+
 ### Канонические пути
 
 | Компонент | Путь | Описание |
@@ -904,7 +962,7 @@ docker-compose up -d
 | 🟡 Средний | ML-модель для scoring (вместо ручных весов) | Адаптивный скоринг под рынок |
 | 🟡 Средний | Авто-фандинг-ротация | Автоматический flip LONG↔SHORT при смене ставки |
 | 🟢 Низкий | Spot-поддержка | Диверсификация инструментов |
-| 🟢 Низкий | Telegram/webhook-алерты в реальном времени | Push-уведомления вместо polling |
+| 🟢 Низкий | Webhook-алерты для внешних систем | Интеграция с Discord/Slack/webhook |
 | 🟢 Низкий | Мобильное PWA-приложение | Мониторинг с телефона |
 
 ---
@@ -993,7 +1051,7 @@ docker-compose up -d
 ```yaml
 alerts:
   telegram_enabled: true          # включить Telegram-алерты
-  telegram_chat_id: "319665243"
+  telegram_chat_id: "YOUR_CHAT_ID"
   alert_on: [sl_hit, tp_hit, emergency_stop, watchdog_restart, drawdown_trigger]
 ```
 

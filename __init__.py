@@ -1,15 +1,22 @@
 """
-Bybit WS Monitor v2.6 — модульный монитор позиций и ордеров Bybit.
+Bybit WS Monitor v3.10 — модульный монитор позиций и ордеров Bybit.
 
 Модули:
   api        — запросы к Bybit API
   alerts     — система алертов + дедупликация
   snapshot   — снепшоты и сравнение
   auto_tp    — авто-TP с retry
+  auto_sl    — авто-SL для позиций без стопа (пропускает JUNK)
+  auto_short — авто-SHORT + шлак-режим
   trailing_sl— трейлинг SL
+  junk_trail — трейлинг-TP для JUNK-шортов
   overbought — сканер перегретых монет
   auto_entry — авто-вход по scoring
+  pump_detect— детектор пампов (24ч + недельные)
+  dca        — DCA-докупки
+  sl_reentry — перезаход после SL (только LONG)
   health     — проверки здоровья (ликвидация, squeeze, funding, etc.)
+  correlation— корреляционная матрица
   cleanup    — авто-снятие просроченных ордеров
   reporting  — сводки, трейд-журнал, аудит
   metrics    — метрики успешности

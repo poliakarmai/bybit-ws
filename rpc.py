@@ -674,6 +674,13 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         order_result = _run_bybit('raw', 'POST', '/v5/order/create', order_body)
 
+        # Retry with positionIdx=1 если hedge mode
+        if order_result.get('retCode') != 0 and 'position idx' in order_result.get('retMsg', ''):
+            order_body_dict = json.loads(order_body)
+            order_body_dict['positionIdx'] = 1
+            order_body = json.dumps(order_body_dict)
+            order_result = _run_bybit('raw', 'POST', '/v5/order/create', order_body)
+
         if order_result.get('retCode') != 0:
             err_msg = order_result.get('retMsg', 'Unknown error')
             status = 400
@@ -696,6 +703,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         }
 
         # ── Ожидание появления позиции (polling) ──
+        pos = None
         for _ in range(6):  # до 3 секунд
             time.sleep(0.5)
             pos = _get_position(symbol)
@@ -705,11 +713,13 @@ class RPCHandler(BaseHTTPRequestHandler):
         # ── Размещение SL ──
         if sl is not None and sl > 0:
             sl_side = 'Sell' if side == 'Buy' else 'Buy'
+            # Use actual positionIdx (hedge-safe)
+            actual_idx = pos.get('positionIdx', 0) if pos else 0
             sl_body = json.dumps({
                 'category': 'linear',
                 'symbol': symbol,
                 'side': sl_side,
-                'positionIdx': 0,
+                'positionIdx': actual_idx,
                 'orderType': 'Market',
                 'qty': qty_str,
                 'stopLoss': str(_round_price(sl)),
