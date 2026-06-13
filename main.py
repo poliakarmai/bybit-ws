@@ -233,7 +233,7 @@ def main_loop():
                 first_cycle = False
             else:
                 for change_type, sym, msg in pos_changes + ord_changes:
-                    if change_type == 'CLOSED' and sym in sl_hit_syms:
+                    if change_type == 'CLOSED' and sym in sl_hit_syms and sym not in new_positions:
                         old_pos = old_positions.get(sym, {})
                         entry = old_pos.get('entry', 0)
                         size = old_pos.get('size', 0)
