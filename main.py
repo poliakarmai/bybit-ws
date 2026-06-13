@@ -426,26 +426,50 @@ def main_loop():
                     mark = p.get('mark', 0)
                     pnl = p.get('upnl', 0)
                     side = p.get('side', 'Buy')
-                    reason = 'закрыта'
+                    reason = 'CLOSE'
                     alert_ref = ''
                     # Определяем стратегию
                     strategy_tag = p.get('strategy', '')
                     leverage = float(p.get('leverage', 0) or 0)
-                    # Для x10 позиций — получаем стратегию из трекера
+                    # x10 стратегии
                     if leverage >= 10:
                         x10_strat = get_x10_strategy(sym)
                         if x10_strat:
-                            strategy_tag = x10_strat
-                    # Приоритет: SL важнее TP
+                            strategy_tag = f'x10:{x10_strat}'
+                        else:
+                            strategy_tag = 'x10'
+                    elif side == 'Sell':
+                        # Проверяем pumps.json для JUNK
+                        try:
+                            import json as _json2
+                            pump_file = os.path.join(DATA_DIR, 'pumps.json')
+                            if os.path.exists(pump_file):
+                                with open(pump_file) as f:
+                                    pumps = _json2.load(f)
+                                if sym in pumps and pumps[sym].get('short_entry_ts'):
+                                    strategy_tag = 'JUNK_SHORT'
+                        except: pass
+                        if not strategy_tag:
+                            strategy_tag = 'SHORT'
+                    elif side == 'Buy':
+                        strategy_tag = 'GRID_LONG'
+                    # Приоритетная причина закрытия
                     for ct2, sym2, msg2 in ord_changes:
                         if sym2 == sym:
                             if ct2 == 'SL_HIT':
                                 reason = 'SL'
                                 alert_ref = 'SL_HIT'
-                                break
                             elif ct2 == 'TP_HIT' and reason != 'SL':
                                 reason = 'TP'
                                 alert_ref = 'TP_HIT'
+                    # Проверка ручного закрытия через алерты
+                    for a in ALERTS:
+                        if sym in a and ('закрыт по таймауту' in a or 'TIMEOUT' in a):
+                            reason = 'TIMEOUT'
+                        if sym in a and ('STOP JUNK' in a):
+                            reason = 'JUNK_STOP'
+                        if sym in a and ('EMERGENCY' in a):
+                            reason = 'EMERGENCY'
                     log_trade(sym, entry, mark, pnl, side, reason, alert_ref, strategy_tag)
 
             # Очистка DCA-стейта для закрытых позиций
