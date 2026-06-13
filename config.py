@@ -64,7 +64,7 @@ _DEFAULT_STRATEGY_SHORT = {
     'cooldown_seconds': 7200,
     'max_short_pct': 20,       # макс % шортов от всех позиций
     'max_hold_hours': 72,      # авто-закрытие SHORT через 72ч если не сработал TP/SL
-    'instant_tp_symbols': ['NEARUSDT'],  # закрыть при любом профите
+    'instant_tp_symbols': [],  # закрыть при любом профите (список символов)
     'junk_daily_pump_threshold': 0.80,   # мин дневной рост для шлак-шорта (80%)
     'junk_dca_levels': [1.0, 1.2],       # DCA-лесенка: +100% и +120% от входа
 }

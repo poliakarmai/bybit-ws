@@ -44,7 +44,7 @@ strategy:
     cooldown_seconds: 7200               # 2h cooldown per symbol
     max_short_pct: 20                    # max % of portfolio in shorts
     max_hold_hours: 72                   # auto-close short after 72h
-    instant_tp_symbols: ["NEARUSDT"]     # close at ANY profit
+    instant_tp_symbols: []     # symbols to close at ANY profit (for testing)
     junk_daily_pump_threshold: 0.80      # min daily pump for junk short (80%)
     junk_dca_levels: [1.0, 1.2]          # DCA ladder: +100%, +120% from entry
 
