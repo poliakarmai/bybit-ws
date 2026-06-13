@@ -1,5 +1,5 @@
 """
-Bybit WS Monitor v3.10 — модульный монитор позиций и ордеров Bybit.
+Bybit WS Monitor v3.10.1 — модульный монитор позиций и ордеров Bybit.
 
 Модули:
   api        — запросы к Bybit API

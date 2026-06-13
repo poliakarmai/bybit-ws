@@ -4,6 +4,22 @@ All notable changes to bybit-ws.
 
 ---
 
+## [3.10.1] — 2026-06-13
+
+### Fixed
+- **`instant_tp_symbols` хардкод:** удалён `NEARUSDT` из дефолтного конфига — мгновенно закрывал позицию при любом профите, делая x10 вход в NEAR невозможным.
+- **`auto_sl.py`:** не перезатирать SL на прибыльных позициях + проверка пустого `stopLoss` (строка `""` или `"0"`).
+- **`main.py` `ALERTS`:** импорт отсутствовал → `NameError` на строке 466.
+- **`main.py` `tp_hit_syms` guard:** добавлена проверка `sym not in new_positions` по аналогии с `sl_hit_syms` — устраняла ложные STOP-алерты при hedge orderId race.
+- **x10 защита:** hedge-режим (positionIdx=1) + TP через reduceOnly-лимитки для NEAR, защита через `pumps.json`.
+- **Trade journal:** поле `strategy` заполняется для всех типов (GRID_LONG/SHORT/JUNK/x10), `reason` не всегда SL.
+- **Брендинг:** все упоминания `@GridSignalBot` заменены на `@Gridbolbot` в документации, dev.to статьях и GitHub About-секции.
+
+### Changed
+- Версия: 3.10.0 → 3.10.1 во всех файлах.
+
+---
+
 ## [3.10.0] — 2026-06-13
 
 ### Added
