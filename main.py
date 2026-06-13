@@ -2,7 +2,7 @@
 import os, sys, time, signal, threading, hashlib, re
 threading.stack_size(2048 * 1024)  # 2MB вместо 8MB — безопасный минимум для Python + requests + ssl
 from datetime import datetime
-from . import (DATA_DIR, EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
+from . import (DATA_DIR, EVENTS_LOG, ALERTS, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
                ORDERS_METADATA, BYBIT_CLI, HERMES_BIN, WATCHDOG_LAST, SHUTDOWN_REQUESTED,
                COVERAGE_CHECK_INTERVAL, TRAIL_CHECK_INTERVAL, METRICS_FILE)
 from .config import Config
@@ -255,7 +255,7 @@ def main_loop():
                         # Cooldown для LONG: запретить повторный вход на N часов
                         record_sl_hit(sym)
                         continue
-                    if change_type == 'CLOSED' and sym in tp_hit_syms:
+                    if change_type == 'CLOSED' and sym in tp_hit_syms and sym not in new_positions:
                         old_pos = old_positions.get(sym, {})
                         entry = old_pos.get('entry', 0)
                         size = old_pos.get('size', 0)
