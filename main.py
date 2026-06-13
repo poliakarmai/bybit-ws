@@ -343,8 +343,16 @@ def main_loop():
                 tp_actions = auto_take_profit(new_positions, new_orders, skip_syms=recent_hit_syms)
                 if tp_actions:
                     apply_auto_tp(tp_actions)
+                    # Dedup: не спамить один и тот же TP каждые N циклов
+                    now_ts = time.time()
+                    _tp_alerted = getattr(main_loop, '_tp_alerted', {})
                     for sym, idx, side, qty, price, pos_size in tp_actions:
-                        add_alert('INFO', f'🎯 Auto-TP {sym}: @ ${price:.4f}')
+                        key = f'{sym}:{price:.4f}'
+                        last = _tp_alerted.get(key, 0)
+                        if now_ts - last > 1800:  # 30 мин кулдаун на ту же цену
+                            add_alert('INFO', f'🎯 Auto-TP {sym}: @ ${price:.4f}')
+                            _tp_alerted[key] = now_ts
+                    main_loop._tp_alerted = _tp_alerted
 
             # Ликвидация + просадка + risk-лимиты
             if new_positions:
@@ -772,7 +780,9 @@ def main_loop():
             log_event('Монитор остановлен')
             break
         except Exception as e:
+            import traceback
             log_event(f'Ошибка в цикле: {e}')
+            log_event(f'Traceback:\\n{traceback.format_exc()}')
             time.sleep(5)
             continue
 
