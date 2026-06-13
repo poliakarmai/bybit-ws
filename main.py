@@ -66,6 +66,11 @@ from .funding_entry import check_funding_signals, execute_funding_entry
 from .atr_sizer import check_position_risk, validate_entry
 from .x10_limits import record_x10_trade, x10_entry_allowed, get_x10_stats, track_x10_entry, get_x10_strategy, clear_x10_position
 
+# Дедупликация STOP-алертов: кулдаун 5 минут на символ
+# Предотвращает спам от hedge SL orderId race (orderId меняется каждый цикл)
+_SL_DEDUP = {}  # symbol -> timestamp последнего STOP-алерта
+SL_ALERT_COOLDOWN = 300  # 5 минут
+
 
 def _check_risk_limits(positions: dict, risk_cfg) -> list:
     """Проверить risk-лимиты: max_total_margin, max_daily_loss.
@@ -234,6 +239,11 @@ def main_loop():
             else:
                 for change_type, sym, msg in pos_changes + ord_changes:
                     if change_type == 'CLOSED' and sym in sl_hit_syms and sym not in new_positions:
+                        # Dedup: кулдаун 5 минут на STOP-алерт (hedge SL orderId race)
+                        _now = time.time()
+                        if _now - _SL_DEDUP.get(sym, 0) < SL_ALERT_COOLDOWN:
+                            continue
+                        _SL_DEDUP[sym] = _now
                         old_pos = old_positions.get(sym, {})
                         entry = old_pos.get('entry', 0)
                         size = old_pos.get('size', 0)
@@ -293,6 +303,12 @@ def main_loop():
                         add_alert('TP', f'🎯 {msg}')
                         record_alert('TP', is_false=(sym in new_positions and sym not in reduced_syms))
                     elif change_type == 'SL_HIT':
+                        # Dedup: позиция не в снапшоте (гонка) — кулдаун 5 минут
+                        if sym not in new_positions:
+                            _now = time.time()
+                            if _now - _SL_DEDUP.get(sym, 0) < SL_ALERT_COOLDOWN:
+                                continue
+                            _SL_DEDUP[sym] = _now
                         add_alert('STOP', f'🛑 {msg}')
                         record_alert('SL', is_false=(sym in new_positions))
                     elif change_type == 'ENTRY_HIT':
