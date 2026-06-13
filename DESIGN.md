@@ -1,6 +1,6 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
-> **Версия:** 3.9.1 | **Дата:** 09.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.10 | **Дата:** 13.06.2026 | **Автор:** Alexey Polyakov
 >
 > Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API + MCP для внешнего управления.
 >
@@ -32,7 +32,8 @@
 │    ├── dca.py          DCA-добавка при падении         │
 │    ├── sl_reentry.py   перезаход после SL              │
 │    ├── overbought.py   детектор перегрева BB           │
-│    ├── pump_detect.py  детектор пампов                 │
+│    ├── pump_detect.py  детектор пампов (24ч + недельные)     │
+│    ├── junk_trail.py   трейлинг-TP для JUNK-шортов           │
 │    ├── rsi.py          RSI-дивергенции                 │
 │    ├── squeeze.py      BB-сжатие (squeeze)             │
 │    ├── health.py       ликвидация, корреляция, фандинг │
@@ -109,7 +110,7 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | TP | 20% Middle BB + 80% Upper BB (два ордера) |
 | SL | −7% от Lower BB |
 | Плечо | 3x |
-| Маржа | $15 (score ≥7), $10 (≥5.5), $5 (<5.5) |
+| **Маржа** | Динамическая (% депозита × score_multiplier, position_sizing v3.8) |
 | Скоринг | 9 метрик: Tier, BB%, объём, дни падения, Weekly/Monthly BB, фандинг, RSI |
 | Макс позиций | 12 (настраивается в risk.max_long_positions) |
 | Cooldown SL | 4 часа после SL перед повторным входом |
@@ -119,15 +120,15 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Параметр | Значение |
 |----------|---------|
 | Вход | Лимитный ордер Sell на +2% выше рынка (ждём отскока) |
-| TP | Middle BB (через trading-stop takeProfit, единый вызов с SL) |
-| SL | +5% для Tier A/B, +7% для шлака C/D |
+| **TP** | Middle BB (через trading-stop takeProfit, единый вызов с SL) + трейлинг-TP (junk_trail.py) |
+| **SL** | +5% для Tier A/B, +7% для шлака C/D. JUNK-шорты: БЕЗ SL (hard stop −15% маржи, max_hold 48ч) |
 | Плечо | 3x |
-| Маржа | $10 |
+| Маржа | $10 (будет динамическая) |
 | Порог BB | >85% (перегрев) |
 | Макс позиций | 3 |
 | Макс удержание | 72 часа (авто-закрытие, защита от фандинга) |
-| ONE_WAY фильтр | XRP\\*, ONDO, WLFI, ENJ, ESPORTS, AVAX\\*, APT\\*, SUI\\* — исключены |
-| DCA-шорт | На аномальных пампах (>120% за 24ч) |
+| ONE_WAY фильтр | XRP*, ONDO, WLFI, ENJ, ESPORTS, AVAX*, APT*, SUI* — исключены |
+| DCA-шорт | На аномальных пампах (≥80% за 24ч) + трейлинг-TP (junk_trail.py) |
 
 ### SHORT Шлак-режим (v3.7) 🦨
 
@@ -146,6 +147,8 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Маржа | $10 |
 | Макс позиций | 2 шлак-шорта одновременно |
 | Кулдаун | 2 часа на монету |
+| Трейлинг-TP | junk_trail.py: 70% при +15% профита, 85% при +30% |
+| Недельный памп | Рост ≥230% за 7д → market SHORT, без SL/TP |
 
 Конфиг:
 ```yaml

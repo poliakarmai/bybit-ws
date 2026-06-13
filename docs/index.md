@@ -5,7 +5,7 @@ title: bybit-ws Blog
 
 # bybit-ws — AI-native trading engine
 
-Open source, MIT. 9 strategies, WebSocket monitoring, AI scoring.
+Open source, MIT. 8 стратегий, Bollinger Grid, AI scoring, REST API + MCP для AI-агентов.
 
 ## Blog
 

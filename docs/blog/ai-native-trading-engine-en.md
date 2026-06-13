@@ -1,6 +1,6 @@
 # I Built an AI-Native Trading Engine in Python. Here's How It Works
 
-> 9 strategies, 24/7 WebSocket monitoring, AI scoring, and full agent-based orchestration. Open source, MIT.
+> 8 strategies, Bollinger Grid, AI scoring, and full agent-based orchestration via Hermes. Open source, MIT.
 
 ---
 

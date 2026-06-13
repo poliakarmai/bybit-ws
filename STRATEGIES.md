@@ -1,6 +1,6 @@
 # Bybit Bollinger Grid Monitor — Стратегии и Roadmap
 
-> **Версия:** 3.9 | **Дата:** 09.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.10 | **Дата:** 13.06.2026 | **Автор:** Alexey Polyakov
 >
 > Полный свод всех торговых стратегий bybit-ws. От базового Bollinger Grid 3x до экстремальных x10.
 > Этот документ — для AI-агентов и людей: описание, параметры, условия входа, риск-менеджмент.
@@ -12,15 +12,14 @@
 ```
 СТРАТЕГИЯ              ПЛЕЧО   ТФ      ВХОД                      SL       TP         ПОЗИЦИЙ
 ──────────────────────────────────────────────────────────────────────────────────────────
-Bollinger Grid LONG     3x     Daily   Lower BB −3%             −7%      Middle BB   12
-Bollinger Grid SHORT    3x     Daily   Upper BB +2%, BB>85%     +5-7%    Middle BB    3
-Шлак-шорт (Junk)        3x     Daily   Рост ≥80%, BB>70%        15% loss Middle BB    2
-SL Re-entry             3x     Daily   Lower BB после SL        −7%      Middle BB    на монету
-DCA (лесенка)           3x     —       −5/−10/−15% от входа     общий    общий        2 добавки
-BB Scalping M5      ⚡ 10x     M5      Касание BB + RSI-фильтр   3%       Middle BB    3
-Mean Reversion Ext   ⚡ 10x     Daily   BB% <5% / >95%           5%       Middle BB    5
-Funding Momentum     ⚡ 10x     Daily   Фондинг ±0.1% + BB+тренд 4%       Middle BB    3
-ATR Risk Sizing        (слой)   15m     Валидация входа         1.5×ATR  —           —
+Bollinger Grid LONG     3x     Daily   Lower BB −3%             −7%      Middle+Upper 12
+Bollinger Grid SHORT    3x     Daily   Upper BB +2%, BB>85%     +5-7%    Middle BB     3
+Junk-шорт               3x     Daily   Рост ≥80%, BB>70%        15% loss Middle BB     2
+SL Re-entry             3x     Daily   Lower BB после SL        −7%      Middle BB     на монету
+DCA (лесенка)           3x     —       −5/−10/−15% от входа     общий    общий         2 добавки
+BB Scalping M5      ⚡ 10x     M5      Касание BB + RSI         3%       Middle BB     3
+Mean Reversion Ext   ⚡ 10x     Daily   BB% <5% / >95%           5%       Middle BB     5
+Funding Momentum     ⚡ 10x     Daily   Фондинг ±0.1% + BB+тренд 4%       Middle BB     3
 ```
 
 ⚡ = стратегии с плечом x10 — высокий риск, высокий потенциал.
@@ -34,7 +33,7 @@ ATR Risk Sizing        (слой)   15m     Валидация входа       
 | Параметр | Значение |
 |----------|---------|
 | **Плечо** | 3x |
-| **Маржа** | $15 (Score ≥7), $10 (≥5.5), $5 (<5.5) |
+|| **Маржа** | Динамическая (% депозита, position_sizing v3.8) |
 | **Вход** | Лимитный ордер Buy на −3% ниже Lower BB Daily |
 | **TP** | 20% позиции на Middle BB, 80% на Upper BB |
 | **SL** | −7% от Lower BB |
@@ -68,8 +67,8 @@ ATR Risk Sizing        (слой)   15m     Валидация входа       
 | **Плечо** | 3x |
 | **Маржа** | $10 |
 | **Вход** | Лимитный Sell на +2% выше рынка |
-| **TP** | Middle BB (через takeProfit в trading-stop) |
-| **SL** | +5% (Tier A/B), +7% (Tier C/D) |
+| **TP** | Middle BB (через takeProfit в trading-stop) + трейлинг-TP для JUNK (junk_trail.py) |
+| **SL** | +5% (Tier A/B), +7% (Tier C/D). JUNK: без SL |
 | **Порог BB** | >85% Daily |
 | **Макс позиций** | 3 |
 | **Макс удержание** | 72 часа |
@@ -78,9 +77,9 @@ ATR Risk Sizing        (слой)   15m     Валидация входа       
 
 ---
 
-## 4. Шлак-шорт (Junk Mode, 3x) — v3.7
+## 4. Шлак-шорт (Junk Mode, 3x) — v3.10
 
-**Новое в v3.7:** hard stop при убытке >15% маржи + авто-закрытие через 48ч.
+**Новое в v3.10:** трейлинг-TP (junk_trail.py), недельные пампы (≥230% за 7д). Из v3.7: hard stop, авто-закрытие.
 
 | Параметр | Значение |
 |----------|---------|
@@ -92,6 +91,8 @@ ATR Risk Sizing        (слой)   15m     Валидация входа       
 | **Max hold** | **48 часов** — авто-закрытие |
 | **DCA-уровни** | +100% и +120% от входа |
 | **Макс позиций** | 2 |
+| **Трейлинг-TP** | junk_trail.py: фиксация 70% профита при +15%, 85% при +30% |
+| **Недельный памп** | Рост ≥230% за 7д + оборот ≥$1M → market SHORT, без SL/TP, макс 2 |
 
 ### Конфиг
 
