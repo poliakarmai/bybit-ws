@@ -4,6 +4,7 @@ from datetime import datetime
 from . import TP_FAIL_COUNT, TP_FAIL_BACKOFF, TP_FAIL_DELAYS, TP_MAX_FAILS, TP_PERM_SKIP, TP_PERM_SKIP_SIZES, TP_SKIP_FILE, DATA_DIR
 from .api import bybit, get_bb_data
 from .alerts import log_event
+from .manual_positions import is_manual_position
 
 import json, os
 
@@ -43,6 +44,9 @@ def auto_take_profit(positions, orders, skip_syms=None):
 
     actions = []
     for sym, p in positions.items():
+        # Ручные позиции — не ставим авто-TP
+        if is_manual_position(sym):
+            continue
         # Перманентный скип: проверяем, не выросла ли позиция
         if sym in TP_PERM_SKIP:
             prev_size = TP_PERM_SKIP_SIZES.get(sym, 0)

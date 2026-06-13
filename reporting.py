@@ -4,7 +4,8 @@ from . import safe_run
 from datetime import datetime
 from . import DATA_DIR, BYBIT_CLI, HERMES_BIN, COVERAGE_CHECK_INTERVAL
 from .snapshot import load_json, save_json
-from .alerts import log_event, add_alert, send_telegram_alert
+from .alerts import log_event, send_telegram_alert
+from .manual_positions import is_manual_position
 
 TRADE_LOG = os.path.join(DATA_DIR, 'trades.md')
 TRADE_JSONL = os.path.join(DATA_DIR, 'trades.jsonl')
@@ -113,6 +114,9 @@ def check_strategy_compliance(positions, orders):
     """Аудит TP/SL покрытия для отдельных позиций."""
     alerts = []
     for sym, p in positions.items():
+        # Ручные позиции — не проверяем на compliance (пользователь сам решает)
+        if is_manual_position(sym):
+            continue
         if p['side'] != 'Buy' or p['size'] <= 0:
             continue
         size = p['size']
@@ -135,6 +139,9 @@ def check_coverage_summary(positions, orders):
     protected = 0
     total = len(positions)
     for sym, p in positions.items():
+        # Ручные позиции — пропускаем в сводке покрытия
+        if is_manual_position(sym):
+            continue
         if p['side'] != 'Buy' or p['size'] <= 0:
             total -= 1
             continue

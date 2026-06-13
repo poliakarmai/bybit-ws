@@ -65,6 +65,7 @@ from .mean_revert import check_mean_revert, execute_mean_revert
 from .funding_entry import check_funding_signals, execute_funding_entry
 from .atr_sizer import check_position_risk, validate_entry
 from .x10_limits import record_x10_trade, x10_entry_allowed, get_x10_stats, track_x10_entry, get_x10_strategy, clear_x10_position
+from .manual_positions import is_manual_position, mark_manual_position
 
 # Дедупликация STOP-алертов: кулдаун 5 минут на символ
 # Предотвращает спам от hedge SL orderId race (orderId меняется каждый цикл)
@@ -376,6 +377,9 @@ def main_loop():
                     add_alert('STOP', msg)
                 # Каскадная ликвидация: если mark ближе к liqPrice чем к SL → market-close
                 for sym, p in new_positions.items():
+                    # Ручные позиции — пользователь сам решает когда закрывать
+                    if is_manual_position(sym):
+                        continue
                     liq = p.get('liqPrice')
                     sl = p.get('stopLoss')
                     mark = p.get('mark', 0)
@@ -403,6 +407,9 @@ def main_loop():
                 instant_syms = set(cfg.strategy.short.get('instant_tp_symbols', []))
                 if instant_syms:
                     for sym, p in new_positions.items():
+                        # Ручные позиции — не убиваем через instant TP
+                        if is_manual_position(sym):
+                            continue
                         if sym in instant_syms and float(p.get('upnl', 0)) > 0:
                             _close_instant(sym, p)
                             pnl_val = float(p["upnl"])

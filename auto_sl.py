@@ -11,6 +11,7 @@ import os, json
 from .api import bybit, fetch_positions, get_bb_data
 from .config import get_config
 from .alerts import log_event
+from .manual_positions import is_manual_position
 
 
 def _get_tiers(cfg):
@@ -39,6 +40,10 @@ def check_and_fix_sl():
     tier_ab, one_way = _get_tiers(cfg)
 
     for sym, p in positions.items():
+        # Ручные позиции — не трогаем SL (пользователь управляет сам)
+        if is_manual_position(sym):
+            continue
+
         sl = p.get('stopLoss')
         if sl is not None and sl != '' and sl != '0' and float(sl or 0) > 0:
             continue  # SL уже есть

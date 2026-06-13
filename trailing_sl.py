@@ -3,11 +3,15 @@ import math
 from . import TRAIL_SL_PERCENT
 from .api import bybit, get_bb_data, place_stop_loss
 from .alerts import log_event
+from .manual_positions import is_manual_position
 
 def trailing_sl(positions):
     """Подтянуть SL: Weekly BB >75% И профит >15%."""
     actions = []
     for sym, p in positions.items():
+        # Ручные позиции — не подтягиваем SL
+        if is_manual_position(sym):
+            continue
         entry, mark, side, size, idx = p['entry'], p['mark'], p['side'], p['size'], p['positionIdx']
         current_sl = p.get('stopLoss')
         if side != 'Buy' or size <= 0:
