@@ -60,6 +60,7 @@
 │                                                       │
 │  MCP Server: ~/.local/bin/hermes-mcp-server.py        │
 │    ├── scan_market     GridSignal scanner              │
+│    └── bot             @Gridbolbot (Telegram)          │
 │    ├── get_positions   позиции + PnL                   │
 │    ├── get_metrics     SL/TP/entries за день           │
 │    └── vpn_status      VPN health + трафик             │

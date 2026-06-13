@@ -24,6 +24,8 @@ Funding Momentum     ⚡ 10x     Daily   Фондинг ±0.1% + BB+тренд 4
 
 ⚡ = стратегии с плечом x10 — высокий риск, высокий потенциал.
 
+**Telegram-бот:** [@Gridbolbot](https://t.me/Gridbolbot) — live-сканер, сигналы LONG/SHORT/x10, алерты.
+
 ---
 
 ## 2. Bollinger Grid LONG (основная, 3x)
