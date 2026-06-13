@@ -39,7 +39,8 @@ def check_and_fix_sl():
     tier_ab, one_way = _get_tiers(cfg)
 
     for sym, p in positions.items():
-        if p.get('stopLoss') is not None:
+        sl = p.get('stopLoss')
+        if sl is not None and sl != '' and sl != '0' and float(sl or 0) > 0:
             continue  # SL уже есть
 
         mark = p['mark']
@@ -47,6 +48,12 @@ def check_and_fix_sl():
         idx = p['positionIdx']
         size = p['size']
         entry = p['entry']
+
+        # Не ставить SL на прибыльные позиции — пусть работает TP
+        if side == 'Buy' and mark > entry:
+            continue
+        if side == 'Sell' and mark < entry:
+            continue
 
         if side == 'Buy':
             # LONG: SL = -7% от Lower BB Daily
