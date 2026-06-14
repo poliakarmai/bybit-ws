@@ -114,7 +114,10 @@ def check_daily_drawdown(new_positions):
         dd_state['last_alert'] = time.time()
         dd_state['drawdown'] = round(drawdown * 100, 1)
         dd_state['equity'] = equity
-        save_json(dd_file, dd_state)
+        try:
+            save_json(dd_file, dd_state)
+        except Exception as e:
+            log_event(f'⚠️ drawdown save_json: {e}')
         return f'📉 Дневная просадка {drawdown*100:.1f}%! Equity ${equity:.0f} (было ${DAILY_START_EQUITY:.0f})'
     return None
 
