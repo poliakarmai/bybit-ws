@@ -79,8 +79,8 @@ def check_and_fix_sl():
                 if sym in pump_state and pump_state[sym].get('short_entry_ts'):
                     log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (в стейте пампа)')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_sl: ошибка чтения pumps.json для {sym}: {e}')
 
             # Tier-based SL
             is_junk = sym not in tier_ab and sym not in one_way

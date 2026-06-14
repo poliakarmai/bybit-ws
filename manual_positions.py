@@ -24,8 +24,8 @@ def _load_state():
         try:
             with open(PUMP_STATE_FILE) as f:
                 return json.loads(f.read())
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ manual_positions: ошибка чтения pumps.json: {e}')
     return {}
 
 

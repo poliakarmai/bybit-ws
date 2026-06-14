@@ -68,8 +68,8 @@ def _count_down_days(sym: str) -> int:
                 else:
                     break
             return down
-    except:
-        pass
+    except Exception:
+        pass  # ticker parse error — return 0 (no down days detected)
     return 0
 
 
@@ -129,8 +129,8 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
                 elif abs_f < 0.0002:       fund_score = 3
                 elif abs_f < 0.0004:       fund_score = 2
                 else:                      fund_score = 0
-    except:
-        pass
+    except Exception:
+        pass  # funding rate parse error — default score 0
 
     # 5. BB Width / Volatility (0-5)
     if 3 <= bb_width <= 8:    vola_score = 5

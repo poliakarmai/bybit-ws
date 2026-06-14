@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "bybit-ws"
@@ -32,4 +32,4 @@ Repository = "https://github.com/poliakarmai/bybit-ws.git"
 Issues = "https://github.com/poliakarmai/bybit-ws/issues"
 
 [project.scripts]
-bybit-ws = "bybit_ws.__main__:main_loop"
+bybit-ws = "bybit_ws.main:run_cli"
