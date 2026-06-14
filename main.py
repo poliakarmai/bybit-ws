@@ -644,8 +644,9 @@ def main_loop():
                         record_auto_entry(placed=True)
 
             # SL re-entry: лесенка после стоп-лосса (каждые 10 циклов = 5 мин)
+            # correlation_stop НЕ передаём — ре-энтри восстанавливает позицию, а не наращивает exposure
             if cycle_count % HEAVY_CYCLE == 0:
-                check_sl_reentry(new_positions or {}, correlation_stop)
+                check_sl_reentry(new_positions or {}, False)
 
             # X10 стратегии (каждые 20 циклов = 10 мин) — BB Scalp + Mean Revert + Funding
             if cycle_count % (HEAVY_CYCLE * 2) == 0 and new_positions is not None:
