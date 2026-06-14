@@ -31,7 +31,7 @@ def _timed_call(fn, *args, timeout=HEAVY_CHECK_TIMEOUT):
         log_event(f'_timed_call {fn.__name__} error: {result[0]}')
         return [], f'{fn.__name__}({result[0]})'
     return result[0] if result else [], None
-from .api import fetch_positions, fetch_orders
+from .api import fetch_positions, fetch_orders, bybit
 from .snapshot import load_json, save_json, check_position_changes, check_order_changes
 from .alerts import log_event, add_alert, get_alerts, send_telegram_alert, _is_duplicate
 from .auto_tp import auto_take_profit, apply_auto_tp
@@ -95,7 +95,7 @@ def _check_risk_limits(positions: dict, risk_cfg) -> list:
         if os.path.exists(metrics_file):
             with open(metrics_file) as f:
                 m = _json.load(f)
-            daily_loss = abs(float(m.get('daily_pnl', 0)))
+            daily_loss = float(m.get('daily_pnl', 0))  # negative = loss
     except Exception as e:
         log_event(f'⚠️ _check_risk_limits error: {e}')
         pass
@@ -112,8 +112,8 @@ def _check_risk_limits(positions: dict, risk_cfg) -> list:
     return alerts
 
 
-def _close_instant(symbol: str, position: dict):
-    """Мгновенно закрыть позицию рынком."""
+def _close_instant(symbol: str, position: dict) -> bool:
+    """Мгновенно закрыть позицию рынком. Возвращает True если ордер отправлен успешно."""
     import subprocess, json
     side = position.get('side', 'Buy')
     close_side = 'Sell' if side == 'Buy' else 'Buy'
@@ -128,10 +128,19 @@ def _close_instant(symbol: str, position: dict):
                            capture_output=True, text=True, timeout=15)
         if r.returncode != 0:
             log_event(f'🚨 CLOSE FAILED {symbol}: {r.stderr.strip()[:200]}')
+            return False
+        resp = json.loads(r.stdout)
+        if resp.get('retCode') != 0:
+            ret_msg = resp.get('retMsg', 'unknown')[:200]
+            log_event(f'🚨 CLOSE REJECTED {symbol}: {ret_msg}')
+            return False
+        log_event(f'✅ CLOSE OK {symbol}: {close_side} {qty} @ market')
+        return True
     except Exception as e:
         import traceback
         log_event(f'🚨 CLOSE EXCEPTION {symbol}: {e}')
         log_event(f'   traceback: {traceback.format_exc()[-300:]}')
+        return False
 
 
 def main_loop():
@@ -158,6 +167,16 @@ def main_loop():
         save_json(POSITIONS_SNAPSHOT, old_positions)
     if old_orders:
         save_json(ORDERS_SNAPSHOT, old_orders)
+
+    # Защита позиций после старта: проверить SL на всех позициях сразу
+    if old_positions:
+        try:
+            sl_alerts = check_and_fix_sl()
+            if sl_alerts:
+                for a in sl_alerts:
+                    add_alert('SL', a)
+        except Exception as e:
+            log_event(f'⚠️ startup SL check error: {e}')
         meta = load_json(ORDERS_METADATA)
         now = time.time()
         for key, o in old_orders.items():
@@ -213,8 +232,11 @@ def main_loop():
             now_ts = time.time()
 
             # Health-check: timestamp последнего успешного цикла
-            with open(HEALTH_FILE, 'w') as hf:
-                hf.write(str(now_ts))
+            try:
+                with open(HEALTH_FILE, 'w') as hf:
+                    hf.write(str(now_ts))
+            except Exception as e:
+                log_event(f'⚠️ health file write error: {e}')
 
             # RPC health update
             rpc_update_health(alive=True, cycle_count=cycle_count)

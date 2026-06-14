@@ -83,7 +83,7 @@ def fetch_positions():
             liq = p.get('liqPrice', '')
             position_im = float(p.get('positionIM', 0))
             cum_rpnl = float(p.get('cumRealisedPnl', 0))
-            open_time = p.get('openTime', '')
+            open_time = int(p.get('openTime', 0) or 0)
             margin = float(p.get('margin', 0))
             positions[sym] = {
                 'size': size,

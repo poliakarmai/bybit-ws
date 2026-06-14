@@ -212,7 +212,10 @@ def execute_scalp(entry_info):
                     'slTriggerBy': 'MarkPrice', 'tpTriggerBy': 'MarkPrice',
                     'tpslMode': 'Full',
                 }
-                bybit('POST', '/v5/position/trading-stop', ts_body)
+                ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
+                if ts_resp.get('retCode') != 0:
+                    ret_msg = ts_resp.get('retMsg', '?')
+                    log_event(f'⚠️ СКАЛЬП {sym}: SL/TP не выставился — {ret_msg}')
                 return True
             elif order.get('retCode') == 10001:
                 continue

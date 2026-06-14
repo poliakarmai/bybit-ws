@@ -244,6 +244,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             return self._handle_orders()
         if path == "/metrics":
             return self._handle_metrics()
+        if path == "/balance":
+            return self._handle_balance()
         if path == "/signals":
             return self._handle_signals()
         if path == "/config":

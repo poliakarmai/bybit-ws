@@ -310,7 +310,7 @@ def check_weekly_pumps(positions=None):
         # Fetch 7-day klines
         try:
             kdata = json.loads(_urllib.urlopen(
-                f'https://api.bybit.com/v5/market/kline?category=spot&symbol={sym}&interval=D&limit=8'
+                f'https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=8'
             ).read())
             closes = [float(c[4]) for c in kdata['result']['list']]
             if len(closes) < 8:
