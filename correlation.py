@@ -140,9 +140,33 @@ def check_correlation(positions):
             if abs(corr) > CORRELATION_THRESHOLD:
                 flagged.append((s1, s2, round(corr, 4)))
                 direction = '📈📈' if corr > 0 else '📈📉'
+
+                # Build actionable alert with position context
+                pos1 = positions.get(s1, {})
+                pos2 = positions.get(s2, {})
+                side1 = '🔴 SHORT' if pos1.get('side') == 'Sell' else '🟢 LONG'
+                side2 = '🔴 SHORT' if pos2.get('side') == 'Sell' else '🟢 LONG'
+                size1 = pos1.get('size', '?')
+                size2 = pos2.get('size', '?')
+
+                # Determine risk severity and action
+                both_same_side = pos1.get('side') == pos2.get('side')
+                if corr > 0:
+                    if both_same_side:
+                        risk_msg = 'Двигаются синхронно в одну сторону — при развороте двойной убыток'
+                        action = 'Закрой одну или ужесточи SL на обеих'
+                    else:
+                        risk_msg = 'Двигаются синхронно но в разных позах — частичный хедж'
+                        action = 'Проверь что размер хеджа сбалансирован'
+                else:
+                    risk_msg = 'Обратная корреляция — естественный хедж'
+                    action = 'Ок, но проверь что нет перекоса размеров'
+
                 messages.append(
-                    f'⚠️ Корреляция {direction} {s1}↔{s2}: r={corr:+.3f} '
-                    f'(>±{CORRELATION_THRESHOLD}) — концентрационный риск'
+                    f'⚠️ Корреляция {direction} {s1}↔{s2}: r={corr:+.3f} (>±{CORRELATION_THRESHOLD})\n'
+                    f'   {s1} {side1} ×{size1} | {s2} {side2} ×{size2}\n'
+                    f'   {risk_msg}\n'
+                    f'   → {action}'
                 )
 
     # Save snapshot for dashboard
@@ -158,8 +182,10 @@ def check_correlation(positions):
 
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(CORRELATION_SNAPSHOT, 'w') as f:
+        tmp = CORRELATION_SNAPSHOT + '.tmp'
+        with open(tmp, 'w') as f:
             json.dump(result, f, indent=2, default=str)
+        os.replace(tmp, CORRELATION_SNAPSHOT)
     except (IOError, OSError):
         pass
 

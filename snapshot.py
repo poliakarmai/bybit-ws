@@ -1,5 +1,7 @@
 """Снепшоты и сравнение состояний."""
 import json
+from filelock import FileLock
+
 
 def load_json(path):
     try:
@@ -8,9 +10,12 @@ def load_json(path):
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
+
 def save_json(path, data):
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
+    lock = FileLock(path + '.lock', timeout=5)
+    with lock:
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
 
 def check_position_changes(old, new):
     changes = []

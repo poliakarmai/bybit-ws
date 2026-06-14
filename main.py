@@ -1,6 +1,5 @@
 """Главный цикл монитора и точка входа."""
 import os, sys, time, signal, threading, hashlib, re
-threading.stack_size(2048 * 1024)  # 2MB вместо 8MB — безопасный минимум для Python + requests + ssl
 from datetime import datetime
 from . import (DATA_DIR, EVENTS_LOG, ALERTS, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
                ORDERS_METADATA, BYBIT_CLI, HERMES_BIN, WATCHDOG_LAST, SHUTDOWN_REQUESTED,
