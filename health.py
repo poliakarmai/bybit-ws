@@ -84,6 +84,17 @@ def check_daily_drawdown(new_positions):
     global DAILY_START_EQUITY
     if not new_positions:
         return None
+    
+    # Кулдаун 24 часа на алерт просадки
+    dd_file = os.path.join(DATA_DIR, 'drawdown_alert.json')
+    try:
+        dd_state = load_json(dd_file) or {}
+        last_alert = dd_state.get('last_alert', 0)
+        if time.time() - last_alert < 86400:
+            return None  # кулдаун не истёк
+    except:
+        dd_state = {}
+    
     try:
         r = safe_run([BYBIT_CLI, 'balance'], timeout=10)
         equity = None
@@ -100,6 +111,10 @@ def check_daily_drawdown(new_positions):
         return None
     drawdown = (DAILY_START_EQUITY - equity) / DAILY_START_EQUITY
     if drawdown > DAILY_DRAWDOWN_LIMIT:
+        dd_state['last_alert'] = time.time()
+        dd_state['drawdown'] = round(drawdown * 100, 1)
+        dd_state['equity'] = equity
+        save_json(dd_file, dd_state)
         return f'📉 Дневная просадка {drawdown*100:.1f}%! Equity ${equity:.0f} (было ${DAILY_START_EQUITY:.0f})'
     return None
 
