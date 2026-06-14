@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bybit-ws Dashboard v4.0</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --green:#3fb950; --red:#f85149; --yellow:#d2991d; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font:14px/1.5 'SF Mono',monospace; padding:16px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; max-width:1400px; margin:0 auto; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:14px; }
+.card h2 { font-size:13px; color:#8b949e; margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px; }
+.kpi { font-size:28px; font-weight:bold; }
+.kpi.green { color:var(--green); } .kpi.red { color:var(--red); } .kpi.yellow { color:var(--yellow); }
+.pos-row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); font-size:12px; }
+.pos-row:last-child { border-bottom:none; }
+.pos-sym { width:100px; font-weight:bold; }
+.pos-side { width:36px; }
+.pos-side.Buy { color:var(--green); } .pos-side.Sell { color:var(--red); }
+.pos-pnl { width:70px; text-align:right; }
+.pos-pnl.positive { color:var(--green); } .pos-pnl.negative { color:var(--red); }
+.header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; max-width:1400px; margin:0 auto 16px; }
+.status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+.status-dot.alive { background:var(--green); } .status-dot.dead { background:var(--red); }
+#equity-chart { max-height:250px; }
+.metric { font-size:12px; padding:2px 0; }
+.refresh { color:#8b949e; font-size:11px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <span class="status-dot" id="status-dot"></span>
+    <strong>bybit-ws</strong> v4.0
+  </div>
+  <div class="refresh">обновлено: <span id="updated">—</span></div>
+</div>
+
+<div class="grid">
+  <!-- KPI -->
+  <div class="card">
+    <h2>💰 Equity</h2>
+    <div class="kpi" id="kpi-equity">—</div>
+  </div>
+  <div class="card">
+    <h2>📊 PnL (нереализ.)</h2>
+    <div class="kpi" id="kpi-pnl">—</div>
+  </div>
+  <div class="card">
+    <h2>📈 Сегодня</h2>
+    <div>TP: <strong id="metric-tp">0</strong> | SL: <strong id="metric-sl">0</strong></div>
+    <div>Входов: <strong id="metric-entry">0</strong> | Авто: <strong id="metric-auto">0</strong></div>
+  </div>
+
+  <!-- Equity Chart -->
+  <div class="card" style="grid-column:span 2;">
+    <h2>📉 Equity (24h)</h2>
+    <canvas id="equity-chart"></canvas>
+  </div>
+
+  <!-- Позиции -->
+  <div class="card">
+    <h2>📌 Позиции (<span id="pos-count">0</span>)</h2>
+    <div id="positions"></div>
+  </div>
+
+  <!-- Алерты -->
+  <div class="card">
+    <h2>⚠️ Последние алерты</h2>
+    <div id="alerts">—</div>
+  </div>
+</div>
+
+<script>
+const RPC = 'http://127.0.0.1:8766';
+let chart = null;
+let equityHistory = [];
+
+async function fetchJSON(url) {
+  try { const r = await fetch(url); return await r.json(); }
+  catch(e) { return null; }
+}
+
+async function refresh() {
+  const [health, positions, metrics] = await Promise.all([
+    fetchJSON(`${RPC}/health`),
+    fetchJSON(`${RPC}/positions`),
+    fetchJSON(`${RPC}/metrics`)
+  ]);
+
+  // Status
+  const dot = document.getElementById('status-dot');
+  if (health?.alive) { dot.className = 'status-dot alive'; }
+  else { dot.className = 'status-dot dead'; }
+  document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+
+  // Equity & PnL
+  let equity = 0, totalPnl = 0;
+  if (Array.isArray(positions)) {
+    for (const p of positions) {
+      totalPnl += parseFloat(p.upnl || 0);
+      equity += parseFloat(p.size || 0) * parseFloat(p.mark || 0) / parseFloat(p.leverage || 1);
+    }
+  }
+  
+  const eqEl = document.getElementById('kpi-equity');
+  eqEl.textContent = `$${equity.toFixed(0)}`;
+  eqEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
+  
+  const pnlEl = document.getElementById('kpi-pnl');
+  pnlEl.textContent = `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`;
+  pnlEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
+
+  // Metrics
+  if (metrics) {
+    const today = Object.values(metrics)[0] || {};
+    document.getElementById('metric-tp').textContent = today.tp_real || 0;
+    document.getElementById('metric-sl').textContent = today.sl_real || 0;
+    document.getElementById('metric-entry').textContent = today.entry || 0;
+    document.getElementById('metric-auto').textContent = today.auto_entry_placed || 0;
+  }
+
+  // Positions
+  document.getElementById('pos-count').textContent = Array.isArray(positions) ? positions.length : 0;
+  let posHTML = '';
+  if (Array.isArray(positions)) {
+    for (const p of positions) {
+      const pnl = parseFloat(p.upnl || 0);
+      const pnlCls = pnl >= 0 ? 'positive' : 'negative';
+      posHTML += `<div class="pos-row">
+        <span class="pos-sym">${p.symbol}</span>
+        <span class="pos-side ${p.side}">${p.side}</span>
+        <span>${p.leverage}x</span>
+        <span>$${parseFloat(p.mark||0).toFixed(4)}</span>
+        <span class="pos-pnl ${pnlCls}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>
+      </div>`;
+    }
+  }
+  document.getElementById('positions').innerHTML = posHTML || '<div class="metric">Нет позиций</div>';
+
+  // Equity chart — добавляем точку
+  const now = new Date();
+  equityHistory.push({ x: now, y: equity });
+  if (equityHistory.length > 288) equityHistory = equityHistory.slice(-288); // 24ч по 5мин
+
+  if (!chart) {
+    const ctx = document.getElementById('equity-chart').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: [{ label:'Equity', data:equityHistory, borderColor:'#3fb950', borderWidth:1.5, pointRadius:0, tension:0.3, fill:false }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { type:'time', time:{unit:'hour'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} },
+          y: { grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10},callback:v=>'$'+v} }
+        },
+        plugins: { legend:{display:false} }
+      }
+    });
+  } else {
+    chart.data.datasets[0].data = equityHistory;
+    chart.update('none');
+  }
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
