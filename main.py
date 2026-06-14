@@ -673,11 +673,12 @@ def main_loop():
                     corr_snapshot = load_correlation_snapshot()
                     if corr_snapshot:
                         corr_threshold = cfg.alerts.get('correlation_threshold', 0.80)
-                        for pair_str, data in corr_snapshot.get('pairs', {}).items():
-                            if abs(data.get('r', 0)) > corr_threshold:
-                                s1, s2 = pair_str.split('↔')
-                                correlated_x10.add(s1)
-                                correlated_x10.add(s2)
+                        for pair_data in corr_snapshot.get('pairs', []):
+                            if len(pair_data) >= 3:
+                                s1, s2, r = pair_data[0], pair_data[1], pair_data[2]
+                                if abs(r) > corr_threshold:
+                                    correlated_x10.add(s1)
+                                    correlated_x10.add(s2)
 
                 # 1. BB Scalping M5 x10
                 if not correlation_stop and not x10_blocked:

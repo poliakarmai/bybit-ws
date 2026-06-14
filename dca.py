@@ -17,6 +17,7 @@ def _get_dca_config(cfg):
     return {
         'levels': [
             (float(l.get('drawdown', -0.10)), float(l.get('margin_mult', 1.5)))
+            if isinstance(l, dict) else (float(l), 1.5)
             for l in dca.get('levels', [
                 {'drawdown': -0.10, 'margin_mult': 1.5},
                 {'drawdown': -0.20, 'margin_mult': 2.0},
