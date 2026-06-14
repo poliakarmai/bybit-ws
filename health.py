@@ -90,9 +90,11 @@ def check_daily_drawdown(new_positions):
     try:
         dd_state = load_json(dd_file) or {}
         last_alert = dd_state.get('last_alert', 0)
-        if time.time() - last_alert < 86400:
+        elapsed = time.time() - last_alert
+        if elapsed < 86400:
             return None  # кулдаун не истёк
-    except:
+    except Exception as e:
+        log_event(f'⚠️ drawdown load: {e}')
         dd_state = {}
     
     try:
