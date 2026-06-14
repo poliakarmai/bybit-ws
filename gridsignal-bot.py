@@ -240,6 +240,10 @@ T = {
             f"Сигналы по Bollinger Grid: полосы Боллинджера + 8-метричный скоринг + RSI.\n\n"
             f"📊 `/scan` — топ-5 LONG-сигналов\n"
             f"🔴 `/scan short` — топ-5 SHORT-сигналов\n"
+            f"⚡ `/scan scalp` — BB Scalping x10\n"
+            f"🔄 `/scan mean` — Mean Reversion x10\n"
+            f"💰 `/scan funding` — Funding Momentum x10\n"
+            f"🏆 `/top` — лидерборд по винрейту\n"
             f"📊 `/scan TIAUSDT` — скан по тикеру\n"
             f"🟢 `/scan green` — только зона покупки\n"
             f"📈 `/chart BTCUSDT` — график BB (таймфрейм по умолч.)\n"
@@ -885,6 +889,19 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
             lines.append(format_signal_short(s))
             lines.append("")
 
+        # Personal 24h stats
+        my_sigs = conn2.execute(
+            'SELECT outcome, pnl_pct FROM signals WHERE user_id=? AND outcome IS NOT NULL AND outcome_ts > ?',
+            (uid, day_ago)
+        ).fetchall()
+        if my_sigs:
+            my_total = len(my_sigs)
+            my_wins = sum(1 for r in my_sigs if r[0] in ('TP1', 'TP2'))
+            pnl_vals = [r[1] for r in my_sigs if r[1] is not None]
+            my_avg = sum(pnl_vals)/len(pnl_vals) if pnl_vals else 0
+            lines.append(f"🎯 Твой винрейт за 24ч: {my_wins}/{my_total} ({my_wins/my_total*100:.0f}%) · avg PnL: {my_avg:+.1f}%" if lang == 'ru'
+                        else f"🎯 Your 24h winrate: {my_wins}/{my_total} ({my_wins/my_total*100:.0f}%) · avg PnL: {my_avg:+.1f}%")
+
         lines.append(t('daily_footer', lang))
 
         msg = "\n".join(lines)
@@ -1480,16 +1497,84 @@ async def cmd_horoscope(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Только владелец
-    if update.effective_user.id != 319665243:
-        conn = init_db()
-        lang = get_lang(conn, update.effective_user.id)
-        conn.close()
-        await update.message.reply_text(t('stats_forbidden', lang))
-        return
+    user_id = update.effective_user.id
+    is_admin = user_id == 319665243
     conn = init_db()
+    lang = get_lang(conn, user_id)
+
+    # Personal stats for all users
+    if not is_admin:
+        now_ts = time.time()
+        day_ago = now_ts - 86400
+        my_sigs = conn.execute(
+            'SELECT outcome, pnl_pct FROM signals WHERE user_id=? AND outcome IS NOT NULL',
+            (user_id,)
+        ).fetchall()
+        my_total = len(my_sigs)
+        my_wins = sum(1 for r in my_sigs if r[0] in ('TP1', 'TP2'))
+        my_wr = f"{my_wins/my_total*100:.0f}%" if my_total > 0 else "—"
+        pnl_vals = [r[1] for r in my_sigs if r[1] is not None]
+        my_avg = sum(pnl_vals)/len(pnl_vals) if pnl_vals else 0
+        my_scans = conn.execute(
+            'SELECT COUNT(*) FROM events WHERE user_id=? AND event="scan"',
+            (user_id,)
+        ).fetchone()[0]
+        my_alerts = conn.execute(
+            'SELECT COUNT(*) FROM alerts WHERE user_id=? AND active=1',
+            (user_id,)
+        ).fetchone()[0]
+        avg_score = conn.execute(
+            'SELECT AVG(score) FROM signals WHERE user_id=?',
+            (user_id,)
+        ).fetchone()[0]
+        conn.close()
+
+        lines = [
+            "📊 **Твоя статистика**\n",
+            f"🔍 Сканов: {my_scans} · Сигналов: {my_total} · Винрейт: {my_wr}",
+        ]
+        if pnl_vals:
+            lines.append(f"📊 PnL: средний {my_avg:+.1f}% · лучший {max(pnl_vals):+.1f}% · худший {min(pnl_vals):+.1f}%")
+        if avg_score:
+            lines.append(f"⭐ Средний score сигналов: {avg_score:.1f}/10")
+        if my_alerts > 0:
+            lines.append(f"🔔 Активных алертов: {my_alerts}")
+        lines.append(f"\n⚡ /scan — новый сигнал" if lang == 'ru' else f"\n⚡ /scan — new signal")
+        await update.message.reply_text("\n".join(lines))
+        return
     now = time.time()
     day_ago, week_ago, month_ago = now - 86400, now - 7*86400, now - 30*86400
+
+
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Лидерборд по винрейту (мин. 5 отработанных сигналов)."""
+    user_id = update.effective_user.id
+    conn_tmp = init_db()
+    lang = get_lang(conn_tmp, user_id)
+    log_event(conn_tmp, user_id, 'top', update)
+    rows = conn_tmp.execute('''SELECT u.username, u.first_name,
+        COUNT(*) as total,
+        SUM(CASE WHEN s.outcome IN ("TP1","TP2") THEN 1 ELSE 0 END) as wins,
+        AVG(s.pnl_pct) as avg_pnl
+        FROM signals s JOIN users u ON s.user_id=u.user_id
+        WHERE s.outcome IS NOT NULL
+        GROUP BY s.user_id HAVING total >= 5
+        ORDER BY wins*1.0/total DESC LIMIT 10''').fetchall()
+    conn_tmp.close()
+    if not rows:
+        await update.message.reply_text(
+            "🏆 Пока нет данных для рейтинга (нужно ≥5 отработанных сигналов)." if lang == 'ru'
+            else "🏆 Not enough data for ranking (need ≥5 resolved signals).")
+        return
+    medals = ['🥇', '🥈', '🥉'] + [''] * 7
+    lines = ["🏆 **Лидерборд** (мин. 5 сигналов)\n" if lang == 'ru'
+             else "🏆 **Leaderboard** (min 5 signals)\n"]
+    for i, row in enumerate(rows):
+        name = row[1] or row[0] or f'user{row[0]}'
+        total, wins, avg_pnl = row[2], row[3], row[4] or 0
+        wr = wins/total*100 if total > 0 else 0
+        lines.append(f"{medals[i]}{i+1}. {name}: {wr:.0f}% ({wins}/{total}) · avg {avg_pnl:+.1f}%")
+    await update.message.reply_text("\n".join(lines))
 
     total_users = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
     new_7d = conn.execute('SELECT COUNT(*) FROM users WHERE joined_at > ?',
@@ -1996,6 +2081,7 @@ def main():
     app.add_handler(CommandHandler('rules', cmd_rules))
     app.add_handler(CommandHandler('scan', cmd_scan))
     app.add_handler(CommandHandler('stats', cmd_stats))
+    app.add_handler(CommandHandler('top', cmd_top))
     app.add_handler(CommandHandler('setrisk', cmd_setrisk))
     app.add_handler(CommandHandler('history', cmd_history))
     app.add_handler(CommandHandler('subscribe', cmd_subscribe))
