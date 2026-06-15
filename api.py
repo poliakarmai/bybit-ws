@@ -58,7 +58,7 @@ def _sign_request(method, path, body=None):
         # For GET, sign the query string (without leading ?)
         body_str = path.split('?', 1)[1]
     elif body:
-        body_str = json.dumps(body, separators=(',', ':'))
+        body_str = json.dumps(body, separators=(', ', ': '))
     else:
         body_str = ''
     sign_str = ts + _API_KEY + recv + body_str
