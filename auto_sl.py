@@ -76,8 +76,19 @@ def check_and_fix_sl():
                 state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')
                 with open(state_file) as f:
                     pump_state = json.loads(f.read())
-                if sym in pump_state and pump_state[sym].get('short_entry_ts'):
-                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (в стейте пампа)')
+                entry = pump_state.get(sym, {})
+                # Прямой short_entry_ts (от auto_short / _place_pump_short)
+                if entry.get('short_entry_ts'):
+                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (short_entry_ts)')
+                    continue
+                # Pump detector tracking (first_seen_ts + alerts) — ручные JUNK-входы
+                # pump_detect перезаписывает pumps.json каждый цикл, стирая short_entry_ts
+                if entry.get('first_seen_ts') and entry.get('alerts'):
+                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (pump_detect tracking)')
+                    continue
+                # Ручной JUNK без стопа (daily_pump / manual флаг)
+                if entry.get('daily_pump') or entry.get('manual'):
+                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (manual/daily_pump)')
                     continue
             except Exception as e:
                 log_event(f'⚠️ auto_sl: ошибка чтения pumps.json для {sym}: {e}')
