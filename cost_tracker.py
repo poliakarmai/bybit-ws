@@ -8,6 +8,7 @@ import json, os, sqlite3, time
 from datetime import datetime
 from .api import bybit
 from . import EVENTS_LOG
+from .file_utils import safe_json_write
 
 COSTS_DB = os.path.expanduser('~/.hermes/data/costs.db')
 SEEN_FILE = os.path.join(os.path.dirname(EVENTS_LOG), 'cost_tracker_seen.json')
@@ -31,8 +32,7 @@ def _load_seen():
 
 def _save_seen(seen):
     os.makedirs(os.path.dirname(SEEN_FILE), exist_ok=True)
-    with open(SEEN_FILE, 'w') as f:
-        json.dump(list(seen), f)
+    safe_json_write(SEEN_FILE, list(seen))
 
 
 def _insert_fee(order_id, symbol, side, fee_usd, fee_asset, pnl, created_time):

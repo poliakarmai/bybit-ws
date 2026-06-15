@@ -244,6 +244,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             return self._handle_orders()
         if path == "/metrics":
             return self._handle_metrics()
+        if path == "/risk":
+            return self._handle_risk()
         if path == "/balance":
             return self._handle_balance()
         if path == "/signals":
@@ -265,6 +267,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_alerts()
         elif path == "/rpc/metrics":
             self._handle_metrics()
+        elif path == "/rpc/risk":
+            self._handle_risk()
         elif path == "/rpc/signals":
             self._handle_signals()
         elif path == "/rpc/config":
@@ -323,9 +327,9 @@ class RPCHandler(BaseHTTPRequestHandler):
             "api_version": API_VERSION,
             "endpoints": [
                 "/rpc/all", "/rpc/positions", "/rpc/orders",
-                "/rpc/health", "/rpc/trades", "/rpc/alerts", "/rpc/metrics",
+                "/rpc/health", "/rpc/trades", "/rpc/alerts", "/rpc/metrics", "/rpc/risk",
                 "/rpc/signals", "/rpc/config",
-                "/health", "/positions", "/orders", "/metrics", "/signals", "/config",
+                "/health", "/positions", "/orders", "/metrics", "/risk", "/signals", "/config",
                 "POST /scan", "POST /enter", "POST /close",
                 "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
             ]
@@ -494,6 +498,51 @@ class RPCHandler(BaseHTTPRequestHandler):
     def _handle_metrics(self):
         metrics = _load_json(DATA_DIR / "metrics.json")
         _json_response(self, metrics)
+
+    def _handle_risk(self):
+        """GET /rpc/risk — risk limits and current usage."""
+        metrics = _load_json(DATA_DIR / "metrics.json")
+        positions = _load_json(DATA_DIR / "positions.json")
+
+        cfg = _load_json(DATA_DIR / "config.json") if os.path.exists(DATA_DIR / "config.json") else {}
+        risk_cfg = cfg.get("risk", {})
+        max_daily_loss = risk_cfg.get("max_daily_loss", 50)
+        max_total_margin = risk_cfg.get("max_total_margin", 500)
+
+        last_trade_date = None
+        for date_key, entry in sorted(metrics.items(), reverse=True):
+            if date_key.startswith("20") and len(date_key) >= 8:
+                try:
+                    import datetime
+                    d = datetime.datetime.strptime(date_key[:10], "%Y-%m-%d")
+                    if d.date() == datetime.date.today():
+                        last_trade_date = date_key
+                        break
+                except:
+                    pass
+
+        daily_loss = metrics.get(last_trade_date, {}).get("pnl_total", 0) if last_trade_date else 0
+        total_margin = sum(float(p.get("margin", 0) or p.get("positionIM", 0)) for p in positions.values())
+        position_count = len(positions)
+
+        blocked = daily_loss <= -max_daily_loss or total_margin >= max_total_margin
+        reasons = []
+        if daily_loss <= -max_daily_loss:
+            reasons.append(f"daily_loss (${abs(daily_loss):.2f}) >= max_daily_loss (${max_daily_loss})")
+        if total_margin >= max_total_margin:
+            reasons.append(f"total_margin (${total_margin:.2f}) >= max_total_margin (${max_total_margin})")
+
+        _json_response(self, {
+            "blocked": blocked,
+            "reasons": reasons,
+            "daily_loss": round(daily_loss, 2),
+            "max_daily_loss": max_daily_loss,
+            "total_margin": round(total_margin, 2),
+            "max_total_margin": max_total_margin,
+            "position_count": position_count,
+            "remaining_daily_loss": round(max_daily_loss - abs(daily_loss), 2),
+            "remaining_margin": round(max_total_margin - total_margin, 2),
+        })
 
     def _handle_signals(self):
         """GET /rpc/signals — LONG и SHORT сигналы."""

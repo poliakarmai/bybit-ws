@@ -14,6 +14,7 @@ import json
 import time
 from datetime import datetime
 from . import DATA_DIR, EVENTS_LOG
+from .file_utils import safe_json_write
 from .config import Config
 
 
@@ -45,8 +46,7 @@ def _load_alert_state() -> dict:
 def _save_alert_state(state: dict):
     """Сохранить состояние дедупликации."""
     try:
-        with open(_MARGIN_ALERT_FILE, 'w') as f:
-            json.dump(state, f, indent=2)
+        safe_json_write(_MARGIN_ALERT_FILE, state)
     except IOError:
         pass
 

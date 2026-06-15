@@ -38,6 +38,7 @@ from .trailing_sl import trailing_sl, apply_trailing_sl
 from .junk_trail import trailing_junk_tp
 from .overbought import check_overbought, rotate_watchlist
 from .pump_detect import check_pumps, check_weekly_pumps
+from .file_utils import safe_json_write, locked_open
 from .auto_entry import auto_entry_scan, record_sl_hit
 from .health import (check_liquidation, check_bb_squeeze, check_funding_flip,
                       check_daily_drawdown, check_funding_pump)
@@ -72,19 +73,21 @@ _SL_DEDUP = {}  # symbol -> timestamp последнего STOP-алерта
 SL_ALERT_COOLDOWN = 300  # 5 минут
 
 
-def _check_risk_limits(positions: dict, risk_cfg) -> list:
+def _check_risk_limits(positions: dict, risk_cfg) -> tuple[bool, list]:
     """Проверить risk-лимиты: max_total_margin, max_daily_loss.
-    Возвращает список алерт-сообщений.
+    Возвращает (blocked, alerts) — blocked=True означает блокировку ВСЕХ новых входов.
     """
+    blocked = False
     alerts = []
     if not positions:
-        return alerts
+        return blocked, alerts
 
     # Суммарная маржа
     total_margin = sum(float(p.get('positionIM', p.get('margin', 0))) for p in positions.values())
     max_margin = risk_cfg.get('max_total_margin', 500)
     if total_margin > max_margin:
         alerts.append(f'🚨 Превышена суммарная маржа: ${total_margin:.0f} > ${max_margin}')
+        blocked = True
 
     # Дневной убыток (через metrics.json)
     metrics_file = os.path.join(DATA_DIR, 'metrics.json')
@@ -101,6 +104,7 @@ def _check_risk_limits(positions: dict, risk_cfg) -> list:
     max_loss = risk_cfg.get('max_daily_loss', 50)
     if daily_loss > max_loss:
         alerts.append(f'🚨 Дневной убыток превышен: -${daily_loss:.0f} > -${max_loss}')
+        blocked = True
 
     # Лимит LONG позиций
     long_count = sum(1 for p in positions.values() if p.get('side') == 'Buy')
@@ -108,7 +112,7 @@ def _check_risk_limits(positions: dict, risk_cfg) -> list:
     if long_count > max_long:
         alerts.append(f'⚠️ Превышен лимит LONG: {long_count} > {max_long}')
 
-    return alerts
+    return blocked, alerts
 
 
 def _close_instant(symbol: str, position: dict) -> bool:
@@ -232,8 +236,7 @@ def main_loop():
 
             # Health-check: timestamp последнего успешного цикла
             try:
-                with open(HEALTH_FILE, 'w') as hf:
-                    hf.write(str(now_ts))
+                save_json(HEALTH_FILE, now_ts)
             except Exception as e:
                 log_event(f'⚠️ health file write error: {e}')
 
@@ -416,7 +419,7 @@ def main_loop():
                     if dd_msg:
                         add_alert('STOP', dd_msg)
                     # Risk limits: max_total_margin + max_daily_loss
-                    risk_msgs = _check_risk_limits(new_positions, cfg.risk)
+                    risk_blocked, risk_msgs = _check_risk_limits(new_positions, cfg.risk)
                     for msg in risk_msgs:
                         add_alert('STOP', msg)
                     # Margin utilization alerts (80%/95% thresholds)
@@ -450,8 +453,7 @@ def main_loop():
                         except: pass
                     if now_ts - last_alert > 86400:  # раз в 24 часа
                         add_alert('STOP', f'🚨 Шортов {shorts}/{total_pos} ({shorts/total_pos*100:.0f}%) > {max_short_pct}% лимит')
-                        with open(dedup_file, 'w') as f:
-                            _json.dump({'ts': now_ts, 'shorts': shorts, 'total': total_pos}, f)
+                        safe_json_write(dedup_file, {'ts': now_ts, 'shorts': shorts, 'total': total_pos})
                 # SHORT max_hold_hours: авто-закрытие шортов старше N часов
                 max_hold = cfg.strategy.short.get('max_hold_hours', 0)
                 if max_hold > 0:
@@ -535,8 +537,7 @@ def main_loop():
                         for sym in closed_syms:
                             if sym in dca_state:
                                 del dca_state[sym]
-                        with open(dca_file, 'w') as f:
-                            _json.dump(dca_state, f, indent=2)
+                        safe_json_write(dca_file, dca_state)
                     except Exception as e:
                         log_event(f'⚠️ main dca_cleanup: {e}')
             if reduced_syms and new_positions and new_orders:
@@ -658,27 +659,40 @@ def main_loop():
                 if correlation_stop:
                     log_event('🛑 Авто-вход заблокирован: корреляция LONG >80%')
                 else:
-                    auto_entries = auto_entry_scan(new_positions)
-                    for msg in auto_entries:
-                        add_alert('ENTRY', msg)
-                        send_telegram_alert(msg)
-                        record_auto_entry(placed=True)
+                    entry_blocked, _ = _check_risk_limits(new_positions, cfg.risk)
+                    if entry_blocked:
+                        log_event('🛑 Авто-вход заблокирован: risk-лимит (max_daily_loss / max_total_margin)')
+                    else:
+                        auto_entries = auto_entry_scan(new_positions)
+                        for msg in auto_entries:
+                            add_alert('ENTRY', msg)
+                            send_telegram_alert(msg)
+                            record_auto_entry(placed=True)
 
             # SL re-entry: лесенка после стоп-лосса (каждые 10 циклов = 5 мин)
             # correlation_stop НЕ передаём — ре-энтри восстанавливает позицию, а не наращивает exposure
             if cycle_count % HEAVY_CYCLE == 0:
-                check_sl_reentry(new_positions or {}, False)
+                reentry_blocked, _ = _check_risk_limits(new_positions or {}, cfg.risk)
+                if reentry_blocked:
+                    log_event('🛑 SL re-entry заблокирован: risk-лимит')
+                else:
+                    check_sl_reentry(new_positions or {}, False)
 
             # X10 стратегии (каждые 20 циклов = 10 мин) — BB Scalp + Mean Revert + Funding
             if cycle_count % (HEAVY_CYCLE * 2) == 0 and new_positions is not None:
                 # Проверка x10-стопа (дневной лимит убытков)
                 x10_ok, x10_reason = x10_entry_allowed(cfg)
+                x10_blocked = False
                 if not x10_ok:
                     if not _is_duplicate(f'x10_stop_{x10_reason[:20]}', 'STOP'):
                         log_event(f'🛑 X10 блок: {x10_reason}')
                     x10_blocked = True
-                else:
-                    x10_blocked = False
+                # Глобальный risk-лимит (max_daily_loss / max_total_margin)
+                if not x10_blocked:
+                    global_blocked, _ = _check_risk_limits(new_positions, cfg.risk)
+                    if global_blocked:
+                        x10_blocked = True
+                        log_event('🛑 X10 блок: глобальный risk-лимит')
 
                 # Получаем баланс для риск-проверок
                 try:
@@ -804,7 +818,7 @@ def main_loop():
             if cycle_count % 2 == 0:
                 alerts = get_alerts()
                 if alerts:
-                    with open(os.path.join(DATA_DIR, 'new_alerts.txt'), 'w') as f:
+                    with locked_open(os.path.join(DATA_DIR, 'new_alerts.txt'), 'w') as f:
                         for a in alerts:
                             f.write(a + '\n')
                 else:
@@ -936,7 +950,7 @@ def run_cli():
                 current = [l.strip() for l in f if l.strip()]
         if sym not in current:
             current.append(sym)
-            with open(wl_file, 'w') as f:
+            with locked_open(wl_file, 'w') as f:
                 f.write('\n'.join(current) + '\n')
             print(f'✅ {sym} добавлен в watchlist')
         else:
@@ -952,7 +966,7 @@ def run_cli():
                 current = [l.strip() for l in f if l.strip()]
             if sym in current:
                 current.remove(sym)
-                with open(wl_file, 'w') as f:
+                with locked_open(wl_file, 'w') as f:
                     f.write('\n'.join(current) + '\n')
                 print(f'🗑️ {sym} удалён из watchlist')
             else:

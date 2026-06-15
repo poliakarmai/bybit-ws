@@ -112,8 +112,13 @@ def bybit(method, path, body=None, retries=None):
             if resp.status_code != 200:
                 err = f'HTTP {resp.status_code}: {resp.text[:100]}'
                 if attempt < retries:
-                    delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                    log_event(f'bybit retry {attempt+1}/{retries} in {delay}s: {err}')
+                    if resp.status_code == 429:
+                        # Exponential backoff: 1s → 2s → 4s → 8s → 16s
+                        delay = 2 ** attempt
+                        log_event(f'bybit 429 rate-limit, backoff {attempt+1}/{retries} in {delay}s')
+                    else:
+                        delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                        log_event(f'bybit retry {attempt+1}/{retries} in {delay}s: {err}')
                     time.sleep(delay)
                     continue
                 log_event(f'bybit error (final): {err}')

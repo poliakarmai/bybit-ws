@@ -5,6 +5,7 @@ from . import TP_FAIL_COUNT, TP_FAIL_BACKOFF, TP_FAIL_DELAYS, TP_MAX_FAILS, TP_P
 from .api import bybit, get_bb_data
 from .alerts import log_event
 from .manual_positions import is_manual_position
+from .file_utils import safe_json_write
 
 import json, os
 
@@ -23,8 +24,7 @@ def _load_tp_skip():
 def _save_tp_skip():
     """Сохранить PERM_SKIP на диск."""
     try:
-        with open(TP_SKIP_FILE, 'w') as f:
-            json.dump({'skip': list(TP_PERM_SKIP), 'sizes': TP_PERM_SKIP_SIZES}, f)
+        safe_json_write(TP_SKIP_FILE, {'skip': list(TP_PERM_SKIP), 'sizes': TP_PERM_SKIP_SIZES})
     except Exception as e:
         log_event(f'⚠️ auto_tp: {e}')
 

@@ -3,13 +3,15 @@ import json, os, time
 from datetime import datetime
 from . import DATA_DIR, METRICS_FILE
 from .snapshot import load_json
+from .file_utils import locked_open, safe_json_write
 
 def _today_key():
     return datetime.now().strftime('%Y-%m-%d')
 
 def record_alert(level, is_false=False):
     """Записать алерт в метрики."""
-    metrics = load_json(METRICS_FILE)
+    with open(METRICS_FILE) as f:
+        metrics = json.load(f)
     today = _today_key()
     if today not in metrics:
         metrics = {today: {'tp_real': 0, 'tp_false': 0, 'sl_real': 0, 'sl_false': 0,
@@ -24,11 +26,11 @@ def record_alert(level, is_false=False):
         else: m['sl_real'] += 1
     elif level == 'ENTRY':
         m['entry'] += 1
-    with open(METRICS_FILE, 'w') as f:
-        json.dump(metrics, f, indent=2)
+    safe_json_write(METRICS_FILE, metrics)
 
 def record_auto_entry(placed=False, filled=False, pnl=0.0):
-    metrics = load_json(METRICS_FILE)
+    with open(METRICS_FILE) as f:
+        metrics = json.load(f)
     today = _today_key()
     if today not in metrics:
         metrics[today] = {'tp_real': 0, 'tp_false': 0, 'sl_real': 0, 'sl_false': 0,
@@ -38,11 +40,11 @@ def record_auto_entry(placed=False, filled=False, pnl=0.0):
     if placed: m['auto_entry_placed'] += 1
     if filled: m['auto_entry_filled'] += 1
     m['auto_entry_pnl'] += pnl
-    with open(METRICS_FILE, 'w') as f:
-        json.dump(metrics, f, indent=2)
+    safe_json_write(METRICS_FILE, metrics)
 
 def get_metrics():
-    metrics = load_json(METRICS_FILE)
+    with open(METRICS_FILE) as f:
+        metrics = json.load(f)
     today = _today_key()
     return metrics.get(today, {})
 

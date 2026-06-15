@@ -6,6 +6,7 @@ from . import DATA_DIR, BYBIT_CLI, HERMES_BIN, COVERAGE_CHECK_INTERVAL
 from .snapshot import load_json, save_json
 from .alerts import log_event, send_telegram_alert
 from .manual_positions import is_manual_position
+from .file_utils import locked_open, safe_json_append
 
 TRADE_LOG = os.path.join(DATA_DIR, 'trades.md')
 TRADE_JSONL = os.path.join(DATA_DIR, 'trades.jsonl')
@@ -82,11 +83,11 @@ def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref='', strategy=
     strat_str = f' | {strategy}' if strategy else ''
     line = f'| {now} | {sym} | {side} | ${entry:.4f} | ${exit_price:.4f} | ${pnl:+.2f} | {reason}{ref_str}{strat_str} |'
     if not os.path.exists(TRADE_LOG):
-        with open(TRADE_LOG, 'w') as f:
+        with locked_open(TRADE_LOG, 'w') as f:
             f.write('# Трейд-журнал\n\n')
             f.write('| Дата | Монета | Сторона | Вход | Выход | PnL | Причина | Стратегия |\n')
             f.write('|------|--------|---------|------|-------|-----|--------|----------|\n')
-    with open(TRADE_LOG, 'a') as f:
+    with locked_open(TRADE_LOG, 'a') as f:
         f.write(line + '\n')
 
     # JSONL для машиночитаемого доступа (дашборд, RPC)
@@ -102,8 +103,7 @@ def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref='', strategy=
         'alert_ref': alert_ref,
         'strategy': strategy,
     }
-    with open(TRADE_JSONL, 'a') as f:
-        f.write(_json.dumps(trade_record) + '\n')
+    safe_json_append(TRADE_JSONL, trade_record)
 
     emoji = '✅' if pnl > 0 else '❌'
     log_event(f'{emoji} Трейд {sym}: ${pnl:+.2f} ({reason})')

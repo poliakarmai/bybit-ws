@@ -7,6 +7,7 @@ import json, math, os, time
 from .api import bybit, fetch_positions, get_bb_data
 from .alerts import log_event
 from .config import Config
+from .file_utils import safe_json_write
 
 DCA_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/dca_state.json')
 
@@ -46,8 +47,7 @@ def _load_state():
 
 
 def _save_state(state):
-    with open(DCA_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+    safe_json_write(DCA_STATE_FILE, state)
 
 
 def _get_lot_step(sym):

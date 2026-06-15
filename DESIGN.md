@@ -112,7 +112,7 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | SL | −7% от Lower BB |
 | Плечо | 3x |
 | **Маржа** | Динамическая (% депозита × score_multiplier, position_sizing v3.8) |
-| Скоринг | **Текущая реализация: quick_score_bb() — порог BB% < 25 и > 0**. Полный 9-метричный скоринг (Tier, BB%, объём, дни падения, Weekly/Monthly BB, фандинг, RSI) — v4.0 planned |
+| Скоринг | **Текущая реализация: quick_score_bb() — порог 0 < BB% < 25**. Полный 9-метричный скоринг (Tier, BB%, объём, дни падения, Weekly/Monthly BB, фандинг, RSI) — v4.0 planned |
 | **Макс позиций** | 12 — risk.max_long_positions (жёсткий лимит авто-входа). position_sizing.max_positions (5) — база для расчёта маржи, не лимит позиций |
 | Cooldown SL | 4 часа после SL перед повторным входом |
 | Приоритет проверок | margin_available → max_positions → sector_limit → correlation_stop → scoring ≥ threshold |
@@ -704,7 +704,7 @@ m.close("ADAUSDT")
 
 ## 6. Scoring
 
-> ⚠️ **Текущая реализация (v3.10.1):** `quick_score_bb()` — вход при BB% < 25 и > 0. Простой BB-threshold, не 9 метрик.
+> ⚠️ **Текущая реализация (v3.10.1):** `quick_score_bb()` — вход при 0 < BB% < 25. Простой BB-threshold, не 9 метрик.
 
 **Полный 9-метричный скоринг — v4.0 planned.** Ниже — целевая архитектура:
 
