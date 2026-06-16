@@ -36,6 +36,7 @@ from .alerts import log_event, add_alert
 from .config import Config
 from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
+from .state_db import db  # SQLite dual-write
 
 SHORT_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/short_positions.json')
 
@@ -62,6 +63,12 @@ def _load_state():
 def _save_state(state):
     os.makedirs(os.path.dirname(SHORT_STATE_FILE), exist_ok=True)
     safe_json_write(SHORT_STATE_FILE, state)
+    # Dual-write в SQLite
+    for sym, data in state.items():
+        try:
+            db.save_short_state(sym, data)
+        except Exception:
+            pass
 
 
 def _get_lot_step(sym):

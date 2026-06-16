@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from .state_db import db  # SQLite dual-write
 
 _log = logging.getLogger('bybit.x10_limits')
 
@@ -37,6 +38,14 @@ def _save(state):
     os.makedirs(os.path.dirname(X10_STATE_FILE), exist_ok=True)
     with open(X10_STATE_FILE, 'w') as f:
         json.dump(state, f, indent=2)
+    # Dual-write в SQLite
+    for key, data in state.items():
+        try:
+            if ':' in key:
+                date, strategy = key.split(':', 1)
+                db.save_x10_limits(date, strategy, data)
+        except Exception:
+            pass
 
 
 def _today_key():

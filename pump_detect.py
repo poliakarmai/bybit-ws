@@ -19,6 +19,7 @@ from . import DATA_DIR, BYBIT_CLI
 from .api import bybit
 from .alerts import log_event, add_alert
 from .position_sizing import margin_for_strategy
+from .state_db import db  # SQLite dual-write
 
 PUMP_STATE_FILE = os.path.join(DATA_DIR, 'pumps.json')
 PUMP_THRESHOLD = 0.80  # 80% daily pump = JUNK threshold per strategy
@@ -54,6 +55,12 @@ def _save_state(state):
     with open(tmp, 'w') as f:
         json.dump(state, f, indent=2)
     os.replace(tmp, PUMP_STATE_FILE)
+    # Dual-write в SQLite
+    for sym, data in state.items():
+        try:
+            db.save_pump_state(sym, data)
+        except Exception:
+            pass
 
 
 def _cleanup_state(state, now):

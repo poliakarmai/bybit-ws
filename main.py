@@ -57,6 +57,7 @@ from .funding_tracker import check_cycle as funding_tracker_check
 from .margin_alerts import check_margin_utilization, get_margin_stats
 from .rpc import start_rpc_server, update_health as rpc_update_health, rpc_state
 from .sl_reentry import notify_sl_hit, check_sl_reentry
+from .state_db import db  # SQLite trade_history
 from .auto_short import check_auto_short, check_junk_dca
 from .regime import check_regime
 from .correlation import check_correlation, load_correlation_snapshot
@@ -533,6 +534,12 @@ def main_loop():
                         if sym in a and ('EMERGENCY' in a):
                             reason = 'EMERGENCY'
                     log_trade(sym, entry, mark, pnl, side, reason, alert_ref, strategy_tag)
+                    # SQLite trade_history (аудит PnL)
+                    try:
+                        db.add_trade(sym, side, strategy_tag, entry, mark,
+                                     p.get('size', 0), pnl, fees=0)
+                    except Exception:
+                        pass
 
             # Очистка DCA-стейта для закрытых позиций
             if closed_syms:
