@@ -59,35 +59,57 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 continue
         if sym in skip_syms:
             continue
-        if p['side'] != 'Buy' or p['size'] <= 0:
+
+        side = p.get('side', 'Buy')
+        pos_size = p['size']
+        if pos_size <= 0:
             continue
+
         bb = get_bb_data(sym, 'D')
         if not bb:
             continue
-        middle, upper, cur = bb['middle'], bb['upper'], bb['cur']
-        pos_size = p['size']
-        # Округляем до шага лота: для позиций < 10 шт используем 1 знак после запятой
+
+        middle, upper, lower, cur = bb['middle'], bb['upper'], bb.get('lower', 0), bb['cur']
         rounding = 0 if pos_size >= 10 else 1
-        need_mid = round(pos_size * 0.2, rounding)
-        need_up = round(pos_size * 0.8, rounding)
-        # Если Mid-часть < 1 → пропускаем Middle, всё на Upper
-        if need_mid < 0.5:
-            need_up = round(pos_size, rounding)
-            need_mid = 0
 
-        existing = existing_tp.get(sym, [])
-        has_mid = sum(q for q, pr in existing if abs(pr - middle) / middle < 0.02) if middle > 0 else 0
-        has_up = sum(q for q, pr in existing if abs(pr - upper) / upper < 0.02) if upper > 0 else 0
+        if side == 'Buy':
+            # LONG: TP на Middle (20%) + Upper (80%)
+            need_mid = round(pos_size * 0.2, rounding)
+            need_up = round(pos_size * 0.8, rounding)
+            if need_mid < 0.5:
+                need_up = round(pos_size, rounding)
+                need_mid = 0
+            existing = existing_tp.get(sym, [])
+            has_mid = sum(q for q, pr in existing if abs(pr - middle) / middle < 0.02) if middle > 0 else 0
+            has_up = sum(q for q, pr in existing if abs(pr - upper) / upper < 0.02) if upper > 0 else 0
+            if need_mid > 0 and middle > cur and has_mid < need_mid * 0.9:
+                gap = round(need_mid - has_mid, rounding)
+                if gap > 0:
+                    actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
+            if upper > cur and has_up < need_up * 0.9:
+                gap = round(need_up - has_up, rounding)
+                if gap > 0:
+                    actions.append((sym, p['positionIdx'], side, gap, upper, pos_size))
 
-        if need_mid > 0 and middle > cur and has_mid < need_mid * 0.9:
-            gap = round(need_mid - has_mid, rounding)
-            if gap > 0:
-                actions.append((sym, p['positionIdx'], p['side'], gap, middle, pos_size))
-
-        if upper > cur and has_up < need_up * 0.9:
-            gap = round(need_up - has_up, rounding)
-            if gap > 0:
-                actions.append((sym, p['positionIdx'], p['side'], gap, upper, pos_size))
+        elif side == 'Sell':
+            # SHORT: TP на Middle (20%) + Lower (80%) — зеркало LONG
+            # Для шорта TP = Buy ниже рынка, цена должна быть < cur
+            need_mid = round(pos_size * 0.2, rounding)
+            need_lo = round(pos_size * 0.8, rounding)
+            if need_mid < 0.5:
+                need_lo = round(pos_size, rounding)
+                need_mid = 0
+            existing = existing_tp.get(sym, [])
+            has_mid = sum(q for q, pr in existing if abs(pr - middle) / middle < 0.02) if middle > 0 else 0
+            has_lo = sum(q for q, pr in existing if abs(pr - lower) / lower < 0.02) if lower > 0 else 0
+            if need_mid > 0 and middle < cur and has_mid < need_mid * 0.9:
+                gap = round(need_mid - has_mid, rounding)
+                if gap > 0:
+                    actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
+            if lower > 0 and lower < cur and has_lo < need_lo * 0.9:
+                gap = round(need_lo - has_lo, rounding)
+                if gap > 0:
+                    actions.append((sym, p['positionIdx'], side, gap, lower, pos_size))
 
     return actions
 

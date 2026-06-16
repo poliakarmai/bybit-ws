@@ -52,7 +52,7 @@ def log_event(msg):
     try:
         _rotate_if_needed(EVENTS_LOG)
     except Exception as e:
-        log_event(f'⚠️ alerts: {e}')
+        print(f'⚠️ log rotation error: {e}', file=__import__('sys').stderr)
 
     with open(EVENTS_LOG, 'a') as f:
         f.write(line)
@@ -67,8 +67,8 @@ def _rotate_if_needed(log_path: str):
         cfg = Config()
         max_size_mb = cfg.logging.get('max_size_mb', 50)
         max_files = cfg.logging.get('max_files', 7)
-    except Exception as e:
-        log_event(f'⚠️ alerts: {e}')
+    except Exception:
+        pass  # фоллбек на дефолты, не спамим в log_event (рекурсия)
 
     max_bytes = max_size_mb * 1024 * 1024
     if not os.path.exists(log_path):
