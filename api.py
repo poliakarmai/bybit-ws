@@ -157,9 +157,16 @@ def bybit(method, path, body=None, retries=None):
     return None
 
 
-# === High-level API (без изменений — используют bybit() выше) ===
+# === High-level API ===
+# Bybit v5 REST API docs: https://bybit-exchange.github.io/docs/v5/
+
 
 def fetch_positions():
+    """Получить все открытые позиции по USDT-линейным контрактам.
+
+    Endpoint: GET /v5/position/list
+    Docs: https://bybit-exchange.github.io/docs/v5/position#get-position-info
+    """
     data = bybit('GET', '/v5/position/list?category=linear&settleCoin=USDT')
     if not data or data.get('retCode') != 0:
         return {}
@@ -193,6 +200,11 @@ def fetch_positions():
 
 
 def fetch_orders():
+    """Получить активные ордера с пагинацией (до 50 за запрос).
+
+    Endpoint: GET /v5/order/realtime
+    Docs: https://bybit-exchange.github.io/docs/v5/order#get-open-orders
+    """
     orders = {}
     cursor = ''
     while True:
@@ -238,8 +250,11 @@ def fetch_orders():
 
 
 def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
-    # Bybit v5 trading-stop: только category, symbol, positionIdx, stopLoss, slTriggerBy
-    # НЕ передаём side/orderType/qty/triggerBy — это параметры /v5/order/create
+    """Поставить/обновить стоп-лосс через trading-stop.
+
+    Endpoint: POST /v5/position/trading-stop
+    Docs: https://bybit-exchange.github.io/docs/v5/position#set-trading-stop
+    """
     body = {'category': 'linear', 'symbol': symbol,
             'positionIdx': positionIdx,
             'stopLoss': str(stop_price), 'slTriggerBy': 'MarkPrice'}
@@ -254,6 +269,11 @@ def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
 
 
 def place_take_profit(symbol, positionIdx, side, qty, tp_price):
+    """Поставить лимитный reduce-only ордер (тейк-профит).
+
+    Endpoint: POST /v5/order/create
+    Docs: https://bybit-exchange.github.io/docs/v5/order#create-order
+    """
     tp_side = 'Sell' if side == 'Buy' else 'Buy'
     qty_str = str(int(qty)) if qty == int(qty) else str(qty)
     body = {'category': 'linear', 'symbol': symbol, 'side': tp_side,
@@ -273,6 +293,11 @@ def place_take_profit(symbol, positionIdx, side, qty, tp_price):
 
 
 def cancel_order(symbol, order_id):
+    """Отменить ордер.
+
+    Endpoint: POST /v5/order/cancel
+    Docs: https://bybit-exchange.github.io/docs/v5/order#cancel-order
+    """
     body = {'category': 'linear', 'symbol': symbol, 'orderId': order_id}
     data = bybit('POST', '/v5/order/cancel', body)
     if data and data.get('retCode') == 0:
@@ -282,6 +307,11 @@ def cancel_order(symbol, order_id):
 
 
 def get_bb_lower(symbol, interval='D'):
+    """Получить нижнюю полосу Боллинджера (SMA - 2σ).
+
+    Endpoint: GET /v5/market/kline
+    Docs: https://bybit-exchange.github.io/docs/v5/market/kline#get-kline
+    """
     import math
     data = bybit('GET', f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit=20')
     if not data or data.get('retCode') != 0:
@@ -299,7 +329,11 @@ def get_bb_lower(symbol, interval='D'):
 
 
 def get_bb_data(symbol, interval='D'):
-    """Получить полные данные BB: lower, middle, upper, cur, bb_pos."""
+    """Получить полные данные BB: lower, middle, upper, cur, bb_pos.
+
+    Endpoint: GET /v5/market/kline
+    Docs: https://bybit-exchange.github.io/docs/v5/market/kline#get-kline
+    """
     import math
     data = bybit('GET', f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit=20')
     if not data or data.get('retCode') != 0:
