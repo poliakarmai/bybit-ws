@@ -49,7 +49,8 @@ from .auto_sl import check_and_fix_sl
 from .dca import check_dca
 from .cleanup import check_expired_orders, apply_cancel_expired, clean_stale_orders
 from .reporting import (should_send_summary, send_summary, check_profit_triggers,
-                         log_trade, check_strategy_compliance, check_coverage_summary)
+                         log_trade, check_strategy_compliance, check_coverage_summary,
+                         check_daily_pnl_alert)
 from .metrics import record_alert, record_auto_entry
 from .recycle import handle_tp_recycle, apply_recycle
 from .cost_tracker import check_cycle as cost_tracker_check
@@ -146,6 +147,283 @@ def _close_instant(symbol: str, position: dict) -> bool:
         log_event(f'🚨 CLOSE EXCEPTION {symbol}: {e}')
         log_event(f'   traceback: {traceback.format_exc()[-300:]}')
         return False
+
+
+# ═══════════════════════════════════════════════════════════
+# Извлечённые функции главного цикла (рефакторинг #4)
+# ═══════════════════════════════════════════════════════════
+
+def _run_heavy_cycle(cfg, new_positions, new_orders, cycle_count, now_ts):
+    """Тяжёлые проверки каждые HEAVY_CYCLE циклов (5 мин)."""
+    HEAVY_CYCLE = cfg.monitor.heavy_cycle
+    if cycle_count % HEAVY_CYCLE != 0:
+        return
+
+    cycle_elapsed = time.time() - now_ts
+    heavy_ok = cycle_elapsed < 90
+    if not heavy_ok:
+        log_event(f'⏭️ Цикл перегружен ({cycle_elapsed:.0f}с) — тяжёлые проверки пропущены')
+
+    _a = lambda fn, *a: _timed_call(fn, *a)
+
+    if heavy_ok:
+        try:
+            regime_result = check_regime(force=True)
+            regime_label = regime_result.get("regime", "UNKNOWN")
+            regime_conf = regime_result.get("confidence", 0)
+            rlog = f'📊 Режим рынка: {regime_label} (conf: {regime_conf}%)'
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] {rlog}")
+            if cycle_count % (HEAVY_CYCLE * 3) == 0:
+                details = regime_result.get("details", {})
+                if details:
+                    btc_chg = details.get("btc_change_pct", 0)
+                    eth_chg = details.get("eth_change_pct", 0)
+                    log_event(f'{rlog} | BTC {btc_chg:+.1f}% ETH {eth_chg:+.1f}%')
+        except Exception as e:
+            log_event(f'⚠️ check_regime failed: {e}')
+
+    if heavy_ok and new_positions:
+        msgs, err = _a(check_overbought, new_positions)
+        if err: log_event(f'⏱️ check_overbought: таймаут/ошибка — {err}')
+        else:
+            for msg in msgs: add_alert('INFO', msg)
+
+    if heavy_ok:
+        for fn, alert_type in [(check_pumps, 'STOP'), (check_weekly_pumps, 'STOP'),
+                                (check_rsi_divergence, 'STOP'),
+                                (check_squeeze, 'INFO'), (check_funding_pump, 'STOP')]:
+            msgs, err = _a(fn, new_positions if fn == check_pumps else None) if fn in (check_pumps, check_weekly_pumps) else _a(fn)
+            if err: log_event(f'⏱️ {err}: таймаут')
+            else:
+                for msg in (msgs or []): add_alert(alert_type, msg)
+
+    if not rpc_state.get("paused"):
+        dca_blocked, _ = _check_risk_limits(new_positions or {}, cfg.risk)
+        if not dca_blocked:
+            for msg in check_dca():
+                add_alert("ENTRY", msg)
+        else:
+            log_event('🛑 DCA заблокирован: risk-лимит')
+
+    if heavy_ok and not rpc_state.get("paused"):
+        msgs, err = _a(check_auto_short, new_positions or {})
+        if err: log_event(f'⏱️ check_auto_short: таймаут — {err}')
+        if cfg.strategy.junk.get('enabled', False):
+            junk_msgs, junk_err = _a(check_junk_dca, new_positions or {})
+            if junk_err:
+                log_event(f'⏱️ check_junk_dca: таймаут — {junk_err}')
+            else:
+                for msg in (junk_msgs or []): add_alert('ENTRY', msg)
+
+    for msg in check_bb_squeeze():
+        add_alert('INFO', msg)
+
+    if new_orders and new_positions is not None:
+        for msg in clean_stale_orders(new_positions, new_orders):
+            add_alert('INFO', msg)
+
+    if heavy_ok:
+        msgs, err = _a(check_funding_flip)
+        if err: log_event(f'⏱️ check_funding_flip: таймаут — {err}')
+        else:
+            for msg in (msgs or []): add_alert('INFO', msg)
+
+    corr_result, corr_err = _a(check_correlation, new_positions)
+    if corr_err:
+        log_event(f'⏱️ check_correlation: таймаут — {corr_err}')
+    elif corr_result:
+        corr_dedup = load_json(CORR_DEDUP_FILE)
+        now_ts2 = time.time()
+        for msg in corr_result.get('messages', []):
+            pair_match = re.search(r'(\w+↔\w+)', msg)
+            pair_key = pair_match.group(1) if pair_match else msg
+            pair_hash = hashlib.md5(pair_key.encode()).hexdigest()[:16]
+            last = corr_dedup.get(pair_hash, 0)
+            if now_ts2 - last > 86400:
+                add_alert('STOP', msg)
+                corr_dedup[pair_hash] = now_ts2
+        save_json(CORR_DEDUP_FILE, corr_dedup)
+
+
+def _run_x10_cycle(cfg, new_positions, cycle_count, correlation_stop):
+    """X10 стратегии каждые HEAVY_CYCLE*2 циклов (10 мин)."""
+    HEAVY_CYCLE = cfg.monitor.heavy_cycle
+    if cycle_count % (HEAVY_CYCLE * 2) != 0 or new_positions is None:
+        return
+
+    x10_ok, x10_reason = x10_entry_allowed(cfg)
+    x10_blocked = False
+    if not x10_ok:
+        if not _is_duplicate(f'x10_stop_{x10_reason[:20]}', 'STOP'):
+            log_event(f'🛑 X10 блок: {x10_reason}')
+        x10_blocked = True
+
+    if not x10_blocked:
+        global_blocked, _ = _check_risk_limits(new_positions, cfg.risk)
+        if global_blocked:
+            x10_blocked = True
+            log_event('🛑 X10 блок: глобальный risk-лимит')
+
+    try:
+        bal = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT')
+        usdt = bal.get('result', {}).get('list', [{}])[0].get('coin', [{}])[0]
+        balance_usdt = float(usdt.get('walletBalance', 0))
+    except Exception:
+        balance_usdt = 100.0
+
+    correlated_x10 = set()
+    if new_positions and len(new_positions) >= 3:
+        corr_snapshot = load_correlation_snapshot()
+        if corr_snapshot:
+            corr_threshold = cfg.alerts.get('correlation_threshold', 0.80)
+            for pair_data in corr_snapshot.get('pairs', []):
+                if len(pair_data) >= 3:
+                    s1, s2, r = pair_data[0], pair_data[1], pair_data[2]
+                    if abs(r) > corr_threshold:
+                        correlated_x10.add(s1)
+                        correlated_x10.add(s2)
+
+    # 1. BB Scalping M5 x10
+    if not correlation_stop and not x10_blocked:
+        scalp_alerts, scalp_entries = check_scalp_signals(new_positions, balance_usdt)
+        for msg in scalp_alerts:
+            sym = msg.split()[1]
+            open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
+            if open_corr >= 2:
+                log_event(f'⏭️ СКАЛЬП {sym}: корреляция ({open_corr} связанных позиций)')
+                continue
+            add_alert('ENTRY', msg)
+            send_telegram_alert(msg)
+        for entry in scalp_entries:
+            passed, reason = validate_entry(entry, balance_usdt)
+            if passed:
+                if execute_scalp(entry):
+                    track_x10_entry(entry['symbol'], 'scalp')
+                record_auto_entry(placed=True)
+            else:
+                log_event(f'⏭️ СКАЛЬП {entry["symbol"]}: {reason}')
+
+    # 2. Mean Reversion x10
+    if not correlation_stop and not x10_blocked:
+        mean_alerts, mean_entries = check_mean_revert(new_positions)
+        for msg in mean_alerts:
+            sym = msg.split()[1]
+            open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
+            if open_corr >= 2:
+                log_event(f'⏭️ MEAN {sym}: корреляция ({open_corr} связанных позиций)')
+                continue
+            add_alert('ENTRY', msg)
+            send_telegram_alert(msg)
+        for entry in mean_entries:
+            passed, reason = validate_entry(entry, balance_usdt)
+            if passed:
+                if execute_mean_revert(entry):
+                    track_x10_entry(entry['symbol'], 'mean_revert')
+                record_auto_entry(placed=True)
+            else:
+                log_event(f'⏭️ MEAN {entry["symbol"]}: {reason}')
+
+    # 3. Funding Rate Momentum x10
+    if not x10_blocked:
+        fund_alerts, fund_entries = check_funding_signals(new_positions)
+        for msg in fund_alerts:
+            sym = msg.split()[1]
+            open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
+            if open_corr >= 2:
+                log_event(f'⏭️ FUNDING {sym}: корреляция ({open_corr} связанных позиций)')
+                continue
+            add_alert('ENTRY', msg)
+            send_telegram_alert(msg)
+        for entry in fund_entries:
+            passed, reason = validate_entry(entry, balance_usdt)
+            if passed:
+                if execute_funding_entry(entry):
+                    track_x10_entry(entry['symbol'], 'funding_momentum')
+                record_auto_entry(placed=True)
+            else:
+                log_event(f'⏭️ FUNDING {entry["symbol"]}: {reason}')
+
+    # 4. ATR риск-мониторинг
+    risk_alerts = check_position_risk(new_positions, balance_usdt)
+    for msg in risk_alerts:
+        add_alert('STOP', msg)
+        send_telegram_alert(msg)
+
+
+def _run_safety_checks(new_positions, cfg, cycle_count, now_ts):
+    """Ликвидация, просадка, риск-лимиты, маржа, шорт-лимиты."""
+    if not new_positions:
+        return
+    HEAVY_CYCLE = cfg.monitor.heavy_cycle
+
+    for msg in check_liquidation(new_positions):
+        add_alert('STOP', msg)
+
+    # Каскадная защита
+    for sym, p in new_positions.items():
+        if is_manual_position(sym):
+            continue
+        liq = p.get('liqPrice')
+        sl = p.get('stopLoss')
+        mark = p.get('mark', 0)
+        if liq and sl and mark:
+            dist_to_liq = abs(mark - liq)
+            dist_to_sl = abs(mark - sl)
+            if dist_to_sl > 0 and dist_to_liq < dist_to_sl * 0.5:
+                _close_instant(sym, p)
+                add_alert('STOP', f'🆘 {sym}: cascade — mark ${mark:.4f} ближе к liq ${liq:.4f} чем к SL ${sl:.4f}')
+
+    if cycle_count % HEAVY_CYCLE == 0:
+        dd_msg = check_daily_drawdown(new_positions)
+        if dd_msg:
+            add_alert('STOP', dd_msg)
+        risk_blocked, risk_msgs = _check_risk_limits(new_positions, cfg.risk)
+        for msg in risk_msgs:
+            add_alert('STOP', msg)
+        margin_msgs = check_margin_utilization(new_positions)
+        for msg in margin_msgs:
+            add_alert('STOP', msg)
+            send_telegram_alert(msg, level='STOP')
+
+    # Instant TP
+    instant_syms = set(cfg.strategy.short.get('instant_tp_symbols', []))
+    if instant_syms:
+        for sym, p in new_positions.items():
+            if is_manual_position(sym):
+                continue
+            if sym in instant_syms and float(p.get('upnl', 0)) > 0:
+                _close_instant(sym, p)
+                add_alert('TP', f'⚡ {sym} мгновенный TP: +${float(p["upnl"]):.2f}')
+
+    # Лимит шортов
+    max_short_pct = cfg.strategy.short.get('max_short_pct', 20)
+    total_pos = len(new_positions)
+    shorts = sum(1 for p in new_positions.values() if p.get('side') == 'Sell')
+    if total_pos > 0 and shorts / total_pos * 100 > max_short_pct:
+        dedup_file = os.path.join(DATA_DIR, 'last_short_alert.json')
+        last_alert = 0
+        if os.path.exists(dedup_file):
+            try:
+                with open(dedup_file) as f:
+                    last_alert = json.load(f).get('ts', 0)
+            except Exception as e:
+                log_event(f'⚠️ last_short_alert read error: {e}')
+        if now_ts - last_alert > 86400:
+            add_alert('STOP', f'🚨 Шортов {shorts}/{total_pos} ({shorts/total_pos*100:.0f}%) > {max_short_pct}% лимит')
+            safe_json_write(dedup_file, {'ts': now_ts, 'shorts': shorts, 'total': total_pos})
+
+    # SHORT max_hold_hours
+    max_hold = cfg.strategy.short.get('max_hold_hours', 0)
+    if max_hold > 0:
+        for sym, p in new_positions.items():
+            if p.get('side') != 'Sell':
+                continue
+            open_time = p.get('openTime', 0)
+            if open_time > 0:
+                held_hours = (now_ts - open_time / 1000) / 3600
+                if held_hours > max_hold:
+                    _close_instant(sym, p)
+                    add_alert('STOP', f'⏰ {sym}: SHORT закрыт по таймауту ({held_hours:.0f}ч > {max_hold}ч)')
 
 
 def main_loop():
@@ -402,78 +680,8 @@ def main_loop():
                             _tp_alerted[key] = now_ts
                     main_loop._tp_alerted = _tp_alerted
 
-            # Ликвидация + просадка + risk-лимиты
-            if new_positions:
-                for msg in check_liquidation(new_positions):
-                    add_alert('STOP', msg)
-                # Каскадная ликвидация: если mark ближе к liqPrice чем к SL → market-close
-                for sym, p in new_positions.items():
-                    # Ручные позиции — пользователь сам решает когда закрывать
-                    if is_manual_position(sym):
-                        continue
-                    liq = p.get('liqPrice')
-                    sl = p.get('stopLoss')
-                    mark = p.get('mark', 0)
-                    if liq and sl and mark:
-                        dist_to_liq = abs(mark - liq)
-                        dist_to_sl = abs(mark - sl)
-                        if dist_to_sl > 0 and dist_to_liq < dist_to_sl * 0.5:
-                            # Цена в 2 раза ближе к ликвидации чем к SL — экстренное закрытие
-                            _close_instant(sym, p)
-                            add_alert('STOP', f'🆘 {sym}: cascade protection — mark ${mark:.4f} ближе к liq ${liq:.4f} чем к SL ${sl:.4f}')
-                if cycle_count % HEAVY_CYCLE == 0:
-                    dd_msg = check_daily_drawdown(new_positions)
-                    if dd_msg:
-                        add_alert('STOP', dd_msg)
-                    # Risk limits: max_total_margin + max_daily_loss
-                    risk_blocked, risk_msgs = _check_risk_limits(new_positions, cfg.risk)
-                    for msg in risk_msgs:
-                        add_alert('STOP', msg)
-                    # Margin utilization alerts (80%/95% thresholds)
-                    margin_msgs = check_margin_utilization(new_positions)
-                    for msg in margin_msgs:
-                        add_alert('STOP', msg)
-                        send_telegram_alert(msg, level='STOP')
-                # Instant TP: закрыть указанные символы при любом профите
-                instant_syms = set(cfg.strategy.short.get('instant_tp_symbols', []))
-                if instant_syms:
-                    for sym, p in new_positions.items():
-                        # Ручные позиции — не убиваем через instant TP
-                        if is_manual_position(sym):
-                            continue
-                        if sym in instant_syms and float(p.get('upnl', 0)) > 0:
-                            _close_instant(sym, p)
-                            pnl_val = float(p["upnl"])
-                            add_alert('TP', f'⚡ {sym} мгновенный TP: +${pnl_val:.2f}')
-                # Лимит шортов: не более max_short_pct% от всех позиций (дедупликация: раз в сутки)
-                max_short_pct = cfg.strategy.short.get('max_short_pct', 20)
-                total_pos = len(new_positions)
-                shorts = sum(1 for p in new_positions.values() if p.get('side') == 'Sell')
-                if total_pos > 0 and shorts / total_pos * 100 > max_short_pct:
-                    import json as _json
-                    dedup_file = os.path.join(DATA_DIR, 'last_short_alert.json')
-                    last_alert = 0
-                    if os.path.exists(dedup_file):
-                        try:
-                            with open(dedup_file) as f:
-                                last_alert = _json.load(f).get('ts', 0)
-                        except Exception as e:
-                            log_event(f'⚠️ last_short_alert read error: {e}')
-                    if now_ts - last_alert > 86400:  # раз в 24 часа
-                        add_alert('STOP', f'🚨 Шортов {shorts}/{total_pos} ({shorts/total_pos*100:.0f}%) > {max_short_pct}% лимит')
-                        safe_json_write(dedup_file, {'ts': now_ts, 'shorts': shorts, 'total': total_pos})
-                # SHORT max_hold_hours: авто-закрытие шортов старше N часов
-                max_hold = cfg.strategy.short.get('max_hold_hours', 0)
-                if max_hold > 0:
-                    for sym, p in new_positions.items():
-                        if p.get('side') != 'Sell':
-                            continue
-                        open_time = p.get('openTime', 0)
-                        if open_time > 0:
-                            held_hours = (now_ts - open_time / 1000) / 3600
-                            if held_hours > max_hold:
-                                _close_instant(sym, p)
-                                add_alert('STOP', f'⏰ {sym}: SHORT закрыт по таймауту ({held_hours:.0f}ч > {max_hold}ч)')
+            # Безопасность: ликвидация, просадка, риск-лимиты, шорт-лимиты
+            _run_safety_checks(new_positions, cfg, cycle_count, now_ts)
 
             # Профит-триггеры
             if new_positions:
@@ -560,95 +768,8 @@ def main_loop():
                 if recycle_actions:
                     apply_recycle(recycle_actions)
 
-            # Блок каждые HEAVY_CYCLE циклов — тяжёлые проверки с таймаутом
-            if cycle_count % HEAVY_CYCLE == 0:
-                cycle_elapsed = time.time() - now_ts
-                heavy_ok = cycle_elapsed < 90
-                if not heavy_ok:
-                    log_event(f'⏭️ Цикл перегружен ({cycle_elapsed:.0f}с) — тяжёлые проверки пропущены')
-                
-                # Каждая тяжёлая проверка в отдельном потоке с таймаутом 25с
-                _a = lambda fn, *a: _timed_call(fn, *a)
-
-                # Market regime detection (lightweight — 3 API calls, no heavy compute)
-                if heavy_ok:
-                    try:
-                        regime_result = check_regime(force=True)
-                        regime_label = regime_result.get("regime", "UNKNOWN")
-                        regime_conf = regime_result.get("confidence", 0)
-                        rlog = f'📊 Режим рынка: {regime_label} (conf: {regime_conf}%)'
-                        # Print to stdout (visible in terminal)
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] {rlog}")
-                        # Log to file (less frequently — every 3rd heavy cycle)
-                        if cycle_count % (HEAVY_CYCLE * 3) == 0:
-                            details = regime_result.get("details", {})
-                            if details:
-                                btc_chg = details.get("btc_change_pct", 0)
-                                eth_chg = details.get("eth_change_pct", 0)
-                                log_event(f'{rlog} | BTC {btc_chg:+.1f}% ETH {eth_chg:+.1f}%')
-                    except Exception as e:
-                        log_event(f'⚠️ check_regime failed: {e}')
-                
-                if heavy_ok and new_positions:
-                    msgs, err = _a(check_overbought, new_positions)
-                    if err: log_event(f'⏱️ check_overbought: таймаут/ошибка — {err}')
-                    else:
-                        for msg in msgs: add_alert('INFO', msg)
-                
-                if heavy_ok:
-                    for fn, alert_type in [(check_pumps, 'STOP'), (check_weekly_pumps, 'STOP'),
-                                            (check_rsi_divergence, 'STOP'),
-                                            (check_squeeze, 'INFO'), (check_funding_pump, 'STOP')]:
-                        msgs, err = _a(fn, new_positions if fn == check_pumps else None) if fn in (check_pumps, check_weekly_pumps) else _a(fn)
-                        if err: log_event(f'⏱️ {err}: таймаут')
-                        else:
-                            for msg in (msgs or []): add_alert(alert_type, msg)
-                
-                # Лёгкие проверки — без таймаута
-                if not rpc_state.get("paused"):
-                    # DCA должен уважать risk-лимиты (не докупаться при превышении)
-                    dca_blocked, _ = _check_risk_limits(new_positions or {}, cfg.risk)
-                    if not dca_blocked:
-                        for msg in check_dca():
-                            add_alert("ENTRY", msg)
-                    else:
-                        log_event('🛑 DCA заблокирован: risk-лимит')
-                if heavy_ok and not rpc_state.get("paused"):
-                    msgs, err = _a(check_auto_short, new_positions or {})
-                    if err: log_event(f'⏱️ check_auto_short: таймаут — {err}')
-                    # JUNK-шорты: только если strategy.junk.enabled
-                    if cfg.strategy.junk.get('enabled', False):
-                        junk_msgs, junk_err = _a(check_junk_dca, new_positions or {})
-                        if junk_err:
-                            log_event(f'⏱️ check_junk_dca: таймаут — {junk_err}')
-                        else:
-                            for msg in (junk_msgs or []): add_alert('ENTRY', msg)
-                for msg in check_bb_squeeze():
-                    add_alert('INFO', msg)
-                if new_orders and new_positions is not None:
-                    for msg in clean_stale_orders(new_positions, new_orders):
-                        add_alert('INFO', msg)
-                if heavy_ok:
-                    msgs, err = _a(check_funding_flip)
-                    if err: log_event(f'⏱️ check_funding_flip: таймаут — {err}')
-                    else:
-                        for msg in (msgs or []): add_alert('INFO', msg)
-                corr_result, corr_err = _a(check_correlation, new_positions)
-                if corr_err:
-                    log_event(f'⏱️ check_correlation: таймаут — {corr_err}')
-                elif corr_result:
-                    # Корреляции: dedup 24ч через хеш пары (без _is_duplicate у которого TTL 5 мин)
-                    corr_dedup = load_json(CORR_DEDUP_FILE)
-                    now_ts = time.time()
-                    for msg in corr_result.get('messages', []):
-                        pair_match = re.search(r'(\w+↔\w+)', msg)
-                        pair_key = pair_match.group(1) if pair_match else msg
-                        pair_hash = hashlib.md5(pair_key.encode()).hexdigest()[:16]
-                        last = corr_dedup.get(pair_hash, 0)
-                        if now_ts - last > 86400:  # 24 часа
-                            add_alert('STOP', msg)
-                            corr_dedup[pair_hash] = now_ts
-                    save_json(CORR_DEDUP_FILE, corr_dedup)
+            # Тяжёлые проверки каждые HEAVY_CYCLE циклов
+            _run_heavy_cycle(cfg, new_positions, new_orders, cycle_count, now_ts)
 
             # Сводка TP/SL покрытия раз в 4 часа
             if cycle_count % COVERAGE_CHECK_INTERVAL == 0 and new_positions and new_orders:
@@ -656,6 +777,13 @@ def main_loop():
                 if cov_msg:
                     send_telegram_alert(cov_msg)
                     add_alert('INFO', '🛡 Отправлена сводка TP/SL покрытия')
+
+            # Ежедневный PnL-алерт: худший день за неделю (раз в час с дедупликацией)
+            if cycle_count % 120 == 0:  # каждый час
+                pnl_msg = check_daily_pnl_alert()
+                if pnl_msg:
+                    add_alert('STOP', pnl_msg)
+                    send_telegram_alert(pnl_msg, level='STOP')
 
             # Cost tracking: логирование комиссий (раз в час, с внутренним троттлингом)
             cost_tracker_check()
@@ -700,113 +828,8 @@ def main_loop():
                 else:
                     check_sl_reentry(new_positions or {}, False)
 
-            # X10 стратегии (каждые 20 циклов = 10 мин) — BB Scalp + Mean Revert + Funding
-            if cycle_count % (HEAVY_CYCLE * 2) == 0 and new_positions is not None:
-                # Проверка x10-стопа (дневной лимит убытков)
-                x10_ok, x10_reason = x10_entry_allowed(cfg)
-                x10_blocked = False
-                if not x10_ok:
-                    if not _is_duplicate(f'x10_stop_{x10_reason[:20]}', 'STOP'):
-                        log_event(f'🛑 X10 блок: {x10_reason}')
-                    x10_blocked = True
-                # Глобальный risk-лимит (max_daily_loss / max_total_margin)
-                if not x10_blocked:
-                    global_blocked, _ = _check_risk_limits(new_positions, cfg.risk)
-                    if global_blocked:
-                        x10_blocked = True
-                        log_event('🛑 X10 блок: глобальный risk-лимит')
-
-                # Получаем баланс для риск-проверок
-                try:
-                    bal = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT')
-                    usdt = bal.get('result', {}).get('list', [{}])[0].get('coin', [{}])[0]
-                    balance_usdt = float(usdt.get('walletBalance', 0))
-                except Exception:
-                    balance_usdt = 100.0
-
-                # Строим список коррелирующих монет для x10-проверок
-                correlated_x10 = set()
-                if new_positions and len(new_positions) >= 3:
-                    corr_snapshot = load_correlation_snapshot()
-                    if corr_snapshot:
-                        corr_threshold = cfg.alerts.get('correlation_threshold', 0.80)
-                        for pair_data in corr_snapshot.get('pairs', []):
-                            if len(pair_data) >= 3:
-                                s1, s2, r = pair_data[0], pair_data[1], pair_data[2]
-                                if abs(r) > corr_threshold:
-                                    correlated_x10.add(s1)
-                                    correlated_x10.add(s2)
-
-                # 1. BB Scalping M5 x10
-                if not correlation_stop and not x10_blocked:
-                    scalp_alerts, scalp_entries = check_scalp_signals(new_positions, balance_usdt)
-                    for msg in scalp_alerts:
-                        # Проверка корреляции: не более 2 связанных позиций
-                        sym = msg.split()[1]  # «⚡ СКАЛЬП SYMUSDT ...»
-                        open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
-                        if open_corr >= 2:
-                            log_event(f'⏭️ СКАЛЬП {sym}: корреляция ({open_corr} связанных позиций)')
-                            continue
-                        add_alert('ENTRY', msg)
-                        send_telegram_alert(msg)
-                    for entry in scalp_entries:
-                        # ATR риск-проверка
-                        passed, reason = validate_entry(entry, balance_usdt)
-                        if passed:
-                            if execute_scalp(entry):
-                                track_x10_entry(entry['symbol'], 'scalp')
-                            record_auto_entry(placed=True)
-                        else:
-                            sym = entry['symbol']
-                            log_event(f'⏭️ СКАЛЬП {sym}: {reason}')
-
-                # 2. Mean Reversion x10
-                if not correlation_stop and not x10_blocked:
-                    mean_alerts, mean_entries = check_mean_revert(new_positions)
-                    for msg in mean_alerts:
-                        sym = msg.split()[1]  # «🔄 MEAN-REVERT SYMUSDT ...»
-                        open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
-                        if open_corr >= 2:
-                            log_event(f'⏭️ MEAN {sym}: корреляция ({open_corr} связанных позиций)')
-                            continue
-                        add_alert('ENTRY', msg)
-                        send_telegram_alert(msg)
-                    for entry in mean_entries:
-                        passed, reason = validate_entry(entry, balance_usdt)
-                        if passed:
-                            if execute_mean_revert(entry):
-                                track_x10_entry(entry['symbol'], 'mean_revert')
-                            record_auto_entry(placed=True)
-                        else:
-                            sym = entry['symbol']
-                            log_event(f'⏭️ MEAN {sym}: {reason}')
-
-                # 3. Funding Rate Momentum x10 (работает даже при correlation_stop)
-                if not x10_blocked:
-                    fund_alerts, fund_entries = check_funding_signals(new_positions)
-                    for msg in fund_alerts:
-                        sym = msg.split()[1]  # «💰 FUNDING SYMUSDT ...»
-                        open_corr = sum(1 for s in new_positions if s in correlated_x10 and sym in correlated_x10)
-                        if open_corr >= 2:
-                            log_event(f'⏭️ FUNDING {sym}: корреляция ({open_corr} связанных позиций)')
-                            continue
-                        add_alert('ENTRY', msg)
-                        send_telegram_alert(msg)
-                for entry in fund_entries:
-                    passed, reason = validate_entry(entry, balance_usdt)
-                    if passed:
-                        if execute_funding_entry(entry):
-                            track_x10_entry(entry['symbol'], 'funding_momentum')
-                        record_auto_entry(placed=True)
-                    else:
-                        sym = entry['symbol']
-                        log_event(f'⏭️ FUNDING {sym}: {reason}')
-
-                # 4. ATR риск-мониторинг текущих позиций
-                risk_alerts = check_position_risk(new_positions, balance_usdt)
-                for msg in risk_alerts:
-                    add_alert('STOP', msg)
-                    send_telegram_alert(msg)
+            # X10 стратегии каждые HEAVY_CYCLE*2 циклов
+            _run_x10_cycle(cfg, new_positions, cycle_count, correlation_stop)
 
             # Сводка 09:00 и 21:00
             label = should_send_summary()

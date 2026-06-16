@@ -1,7 +1,7 @@
 """Сводки, трейд-журнал, аудит стратегии."""
 import os
 from . import safe_run
-from datetime import datetime
+from datetime import datetime, timedelta
 from . import DATA_DIR, BYBIT_CLI, HERMES_BIN, COVERAGE_CHECK_INTERVAL
 from .snapshot import load_json, save_json
 from .alerts import log_event, send_telegram_alert
@@ -161,4 +161,47 @@ def check_coverage_summary(positions, orders):
         else:
             lines.append(f'  ⚠️ {side_icon} {sym}: {", ".join(issues)}')
     lines.insert(1, f'  {protected}/{total} позиций защищены')
-    return '\\n'.join(lines) if protected < total else None
+    return '\n'.join(lines) if protected < total else None
+
+
+def check_daily_pnl_alert():
+    """Проверить дневной PnL: алерт если сегодня — худший день за 7 дней."""
+    try:
+        import json
+        from . import METRICS_FILE
+        if not os.path.exists(METRICS_FILE):
+            return None
+        
+        with open(METRICS_FILE) as f:
+            metrics = json.load(f)
+        
+        today = datetime.now().strftime('%Y-%m-%d')
+        today_entry = metrics.get(today, {})
+        today_pnl = today_entry.get('pnl_total', 0)
+        
+        if today_pnl >= 0:
+            return None  # профитный день — не алертим
+        
+        # Собрать PnL за последние 7 дней (включая сегодня)
+        now = datetime.now()
+        week_pnls = {}
+        for i in range(7):
+            d = now - timedelta(days=i)
+            key = d.strftime('%Y-%m-%d')
+            pnl = metrics.get(key, {}).get('pnl_total', 0)
+            week_pnls[key] = pnl
+        
+        # Худший день?
+        worst_day = min(week_pnls, key=week_pnls.get)
+        worst_pnl = week_pnls[worst_day]
+        
+        if worst_day == today and len(week_pnls) >= 2:
+            second_worst = sorted(week_pnls.values())[1]  # второй худший
+            gap = abs(today_pnl) - abs(second_worst)
+            msg = (f'⚠️ Дневной PnL: ${today_pnl:.2f} — ХУДШИЙ ДЕНЬ ЗА НЕДЕЛЮ\n'
+                   f'   Предыдущий худший: ${second_worst:.2f} (Δ ${gap:.2f})')
+            return msg
+    except Exception as e:
+        from .alerts import log_event
+        log_event(f'⚠️ daily_pnl_alert error: {e}')
+    return None
