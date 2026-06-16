@@ -66,8 +66,33 @@ TRAIL_CHECK_INTERVAL = 5
 # Лимиты и защита
 MAX_POSITION_VALUE = 40
 DAILY_DRAWDOWN_LIMIT = 1.0  # отключено по просьбе пользователя
-SHORT_ALERT_COOLDOWN = 1800
+SHORT_ALERT_COOLDOWN = 14400  # 4 часа — не спамить перегревами
 SHORT_ALERT_LAST = {}
+SHORT_ALERT_FILE = os.path.join(DATA_DIR, 'short_alert_last.json')
+
+def _load_short_alerts():
+    """Загрузить persistent стейт SHORT_ALERT_LAST из файла."""
+    global SHORT_ALERT_LAST
+    try:
+        if os.path.exists(SHORT_ALERT_FILE):
+            import json as _json
+            with open(SHORT_ALERT_FILE) as f:
+                SHORT_ALERT_LAST = _json.load(f)
+    except Exception:
+        pass  # файла нет или битый — ок, начинаем с пустого
+
+def _save_short_alerts():
+    """Сохранить SHORT_ALERT_LAST в файл (вызывается из overbought.py)."""
+    try:
+        import json as _json
+        with open(SHORT_ALERT_FILE + '.tmp', 'w') as f:
+            _json.dump(SHORT_ALERT_LAST, f)
+        os.replace(SHORT_ALERT_FILE + '.tmp', SHORT_ALERT_FILE)
+    except Exception:
+        pass
+
+# Загружаем при импорте
+_load_short_alerts()
 
 # Auto-TP failure tracker → retry с backoff
 TP_FAIL_COUNT = {}

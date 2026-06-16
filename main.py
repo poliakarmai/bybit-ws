@@ -456,7 +456,8 @@ def main_loop():
                         try:
                             with open(dedup_file) as f:
                                 last_alert = _json.load(f).get('ts', 0)
-                        except: pass
+                        except Exception as e:
+                            log_event(f'⚠️ last_short_alert read error: {e}')
                     if now_ts - last_alert > 86400:  # раз в 24 часа
                         add_alert('STOP', f'🚨 Шортов {shorts}/{total_pos} ({shorts/total_pos*100:.0f}%) > {max_short_pct}% лимит')
                         safe_json_write(dedup_file, {'ts': now_ts, 'shorts': shorts, 'total': total_pos})
@@ -508,7 +509,8 @@ def main_loop():
                                     pumps = _json2.load(f)
                                 if sym in pumps and pumps[sym].get('short_entry_ts'):
                                     strategy_tag = 'JUNK_SHORT'
-                        except: pass
+                        except Exception as e:
+                            log_event(f'⚠️ pumps.json read error (strategy tag): {e}')
                         if not strategy_tag:
                             strategy_tag = 'SHORT'
                     elif side == 'Buy':
@@ -597,8 +599,13 @@ def main_loop():
                 
                 # Лёгкие проверки — без таймаута
                 if not rpc_state.get("paused"):
-                    for msg in check_dca():
-                        add_alert("ENTRY", msg)
+                    # DCA должен уважать risk-лимиты (не докупаться при превышении)
+                    dca_blocked, _ = _check_risk_limits(new_positions or {}, cfg.risk)
+                    if not dca_blocked:
+                        for msg in check_dca():
+                            add_alert("ENTRY", msg)
+                    else:
+                        log_event('🛑 DCA заблокирован: risk-лимит')
                 if heavy_ok and not rpc_state.get("paused"):
                     msgs, err = _a(check_auto_short, new_positions or {})
                     if err: log_event(f'⏱️ check_auto_short: таймаут — {err}')

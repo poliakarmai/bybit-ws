@@ -49,8 +49,11 @@ def _load_state():
 
 
 def _save_state(state):
-    with open(PUMP_STATE_FILE, 'w') as f:
+    # Атомарная запись: tmp + os.replace — не повредит файл при параллельной записи
+    tmp = PUMP_STATE_FILE + '.tmp'
+    with open(tmp, 'w') as f:
         json.dump(state, f, indent=2)
+    os.replace(tmp, PUMP_STATE_FILE)
 
 
 def _cleanup_state(state, now):

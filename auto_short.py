@@ -31,7 +31,7 @@ import math
 import os
 import time
 
-from .api import bybit, get_bb_data
+from .api import bybit, get_bb_data, fetch_orders
 from .alerts import log_event, add_alert
 from .config import Config
 from .position_sizing import margin_for_strategy
@@ -211,6 +211,19 @@ def check_auto_short(positions):
         tp_price = _round_to_tick(middle, sym)
 
         try:
+            # Проверка: нет ли уже pending лимитного Sell на этот символ (дедупликация)
+            try:
+                all_orders = fetch_orders()
+                pending_sells = [o for o in all_orders if o.get('symbol') == sym
+                                 and o.get('side') == 'Sell' 
+                                 and o.get('orderStatus') == 'New'
+                                 and o.get('orderType') == 'Limit']
+                if pending_sells:
+                    log_event(f'⏭️ Auto-SHORT {sym}: уже есть pending лимитка Sell, пропуск')
+                    continue
+            except Exception:
+                pass  # не блокируем вход из-за ошибки проверки
+
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
             order = bybit('POST', '/v5/order/create', {

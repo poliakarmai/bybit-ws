@@ -2,7 +2,7 @@
 import json, math, os, time
 from . import safe_run
 from datetime import datetime
-from . import BYBIT_CLI, DATA_DIR, SHORT_ALERT_LAST, SHORT_ALERT_COOLDOWN, WATCHLIST_UPDATED_FILE
+from . import BYBIT_CLI, DATA_DIR, SHORT_ALERT_LAST, SHORT_ALERT_COOLDOWN, WATCHLIST_UPDATED_FILE, _save_short_alerts
 from .api import get_bb_data
 
 # Статический watchlist (fallback)
@@ -88,5 +88,6 @@ def check_overbought(positions=None):
             if now - last < SHORT_ALERT_COOLDOWN:
                 continue
             SHORT_ALERT_LAST[sym] = now
-            alerts.append(f'🔥 {sym} на {bb_pos:.0f}% BB (${bb["cur"]:.4f}, Upper ${bb["upper"]:.4f}) — перегрев, кандидат на SHORT')
+            _save_short_alerts()
+            alerts.append(f"🔥 {sym} на {bb_pos:.0f}% BB (${bb['cur']:.4f}, Upper ${bb['upper']:.4f}) — перегрев, кандидат на SHORT")
     return alerts
