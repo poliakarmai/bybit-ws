@@ -32,15 +32,15 @@ import json
 import os
 import time
 import threading
-import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from collections import defaultdict
 
+from .api import bybit as _bybit_api
+from .api import fetch_positions as _fetch_positions
+
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 HOME = Path.home()
-BYBIT_CLI = str(HOME / ".local" / "bin" / "bybit")
-GRIDSIGNAL_SCANNER = str(HOME / ".local" / "bin" / "gridsignal_scanner.py")
 
 # Глобальное состояние (обновляется main-потоком)
 rpc_state = {
@@ -96,25 +96,34 @@ def _error(handler, error: str, detail: str = "", status: int = 400):
     }, status)
 
 
-def _run_bybit(*args, timeout=30) -> dict:
-    """Выполнить bybit CLI и вернуть JSON."""
-    try:
-        result = subprocess.run(
-            [BYBIT_CLI, *args],
-            capture_output=True, text=True, timeout=timeout
-        )
-        if result.returncode != 0:
-            return {'retCode': -1, 'retMsg': result.stderr.strip()[:200] or f'exit {result.returncode}'}
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return {'retCode': -1, 'retMsg': f'JSON parse error: {result.stdout[:200]}'}
-    except subprocess.TimeoutExpired:
-        return {'retCode': -1, 'retMsg': 'bybit CLI timeout'}
-    except FileNotFoundError:
-        return {'retCode': -1, 'retMsg': 'bybit CLI not found'}
-    except Exception as e:
-        return {'retCode': -1, 'retMsg': str(e)[:200]}
+def _api_call(method, path, body=None) -> dict:
+    """Выполнить запрос к Bybit API через нативный модуль api.
+    
+    Замена subprocess(BYBIT_CLI) на прямые вызовы requests.
+    """
+    if body is not None and isinstance(body, str):
+        body = json.loads(body)
+    return _bybit_api(method, path, body)
+
+
+def _get_position(symbol: str) -> dict | None:
+    """Получить информацию о позиции по символу."""
+    data = _bybit_api('GET',
+                      f'/v5/position/list?category=linear&symbol={symbol}')
+    if data.get('retCode') != 0:
+        return None
+    for p in data.get('result', {}).get('list', []):
+        if float(p.get('size', 0)) > 0:
+            return {
+                'symbol': p['symbol'],
+                'side': p['side'],
+                'size': float(p['size']),
+                'entry': float(p['avgPrice']),
+                'mark': float(p['markPrice']),
+                'positionIdx': int(p.get('positionIdx', 0)),
+                'leverage': float(p.get('leverage', '1')),
+            }
+    return None
 
 
 def _get_auth_token() -> str:
@@ -123,7 +132,6 @@ def _get_auth_token() -> str:
         from .config import Config
         cfg = Config()
         token = cfg.rpc.get('auth_token', '')
-        # Если токен — env-var который не подставился, считаем пустым
         if token.startswith('${') or token == '':
             return ''
         return token
@@ -163,26 +171,6 @@ def _round_price(price: float) -> float:
     """Округлить цену до правильного тика."""
     tick = _tick_size(price)
     return round(round(price / tick) * tick, 8)
-
-
-def _get_position(symbol: str) -> dict | None:
-    """Получить информацию о позиции по символу."""
-    data = _run_bybit('raw', 'GET',
-                      f'/v5/position/list?category=linear&symbol={symbol}')
-    if data.get('retCode') != 0:
-        return None
-    for p in data.get('result', {}).get('list', []):
-        if float(p.get('size', 0)) > 0:
-            return {
-                'symbol': p['symbol'],
-                'side': p['side'],
-                'size': float(p['size']),
-                'entry': float(p['avgPrice']),
-                'mark': float(p['markPrice']),
-                'positionIdx': int(p.get('positionIdx', 0)),
-                'leverage': float(p.get('leverage', '1')),
-            }
-    return None
 
 
 class RPCHandler(BaseHTTPRequestHandler):
@@ -548,28 +536,23 @@ class RPCHandler(BaseHTTPRequestHandler):
         """GET /rpc/signals — LONG и SHORT сигналы."""
         result = {"long": [], "short": []}
 
-        # SHORT сигналы через GridSignal сканер
+        # SHORT сигналы через gridsignal_scanner (прямой вызов вместо subprocess)
         try:
-            short_result = subprocess.run(
-                ['python3', GRIDSIGNAL_SCANNER, '--mode', 'short', '--limit', '10'],
-                capture_output=True, text=True, timeout=60
-            )
-            if short_result.returncode == 0:
-                result["short"] = json.loads(short_result.stdout)
+            from .gridsignal_scanner import scan
+            short_candidates = scan(limit=10, mode='short')
+            result["short"] = short_candidates
         except Exception as e:
             import logging
             logging.getLogger('bybit.rpc').warning(f'Short scanner failed: {e}')
 
-        # LONG сигналы через auto_entry_scan
+        # LONG сигналы через auto_entry_scan (уже был прямой вызов)
         try:
             from .auto_entry import auto_entry_scan
             positions = _load_json(DATA_DIR / "positions.json")
             if not isinstance(positions, dict):
                 positions = {}
             long_entries = auto_entry_scan(positions)
-            # Парсим сообщения в структурированные сигналы
             for msg in long_entries:
-                # Формат: "📌 SYMUSDT score=X.X (Tier X) BB=X% ..."
                 try:
                     parts = msg.split()
                     if len(parts) >= 3 and parts[0] == "📌":
@@ -612,16 +595,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             return _error(self, 'Invalid limit', 'limit must be between 1 and 20', 400)
 
         try:
-            result = subprocess.run(
-                ['python3', GRIDSIGNAL_SCANNER,
-                 '--mode', mode, '--limit', str(limit)],
-                capture_output=True, text=True, timeout=120
-            )
-            if result.returncode != 0:
-                return _error(self, 'Scanner failed',
-                              result.stderr.strip()[:500] or f'exit code {result.returncode}', 500)
-
-            signals = json.loads(result.stdout)
+            from .gridsignal_scanner import scan
+            signals = scan(limit=limit, mode=mode)
             if not isinstance(signals, list):
                 return _error(self, 'Scanner returned unexpected format',
                               str(signals)[:200], 500)
@@ -632,15 +607,9 @@ class RPCHandler(BaseHTTPRequestHandler):
                 'signals': signals,
             })
 
-        except subprocess.TimeoutExpired:
-            return _error(self, 'Scanner timed out',
-                          'Scanner did not complete within 120 seconds', 504)
-        except json.JSONDecodeError:
-            return _error(self, 'Scanner output parse error',
-                          result.stdout[:500] if 'result' in dir() else '', 500)
-        except FileNotFoundError:
-            return _error(self, 'Scanner script not found',
-                          f'Expected at {GRIDSIGNAL_SCANNER}', 500)
+        except ImportError:
+            return _error(self, 'Scanner module not found',
+                          'gridsignal_scanner not importable', 500)
         except Exception as e:
             return _error(self, 'Internal scanner error', str(e)[:500], 500)
 
@@ -713,7 +682,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError):
             qty_str = str(qty)
 
-        order_body = json.dumps({
+        order_result = _api_call('POST', '/v5/order/create', {
             'category': 'linear',
             'symbol': symbol,
             'side': side,
@@ -723,14 +692,17 @@ class RPCHandler(BaseHTTPRequestHandler):
             'positionIdx': 0,
         })
 
-        order_result = _run_bybit('raw', 'POST', '/v5/order/create', order_body)
-
         # Retry with positionIdx=1 если hedge mode
         if order_result.get('retCode') != 0 and 'position idx' in order_result.get('retMsg', ''):
-            order_body_dict = json.loads(order_body)
-            order_body_dict['positionIdx'] = 1
-            order_body = json.dumps(order_body_dict)
-            order_result = _run_bybit('raw', 'POST', '/v5/order/create', order_body)
+            order_result = _api_call('POST', '/v5/order/create', {
+                'category': 'linear',
+                'symbol': symbol,
+                'side': side,
+                'orderType': 'Market',
+                'qty': qty_str,
+                'timeInForce': 'IOC',
+                'positionIdx': 1,
+            })
 
         if order_result.get('retCode') != 0:
             err_msg = order_result.get('retMsg', 'Unknown error')
@@ -766,17 +738,13 @@ class RPCHandler(BaseHTTPRequestHandler):
             sl_side = 'Sell' if side == 'Buy' else 'Buy'
             # Use actual positionIdx (hedge-safe)
             actual_idx = pos.get('positionIdx', 0) if pos else 0
-            sl_body = json.dumps({
+            sl_result = _api_call('POST', '/v5/position/trading-stop', {
                 'category': 'linear',
                 'symbol': symbol,
-                'side': sl_side,
                 'positionIdx': actual_idx,
-                'orderType': 'Market',
-                'qty': qty_str,
                 'stopLoss': str(_round_price(sl)),
                 'slTriggerBy': 'MarkPrice',
             })
-            sl_result = _run_bybit('raw', 'POST', '/v5/position/trading-stop', sl_body)
             if sl_result.get('retCode') == 0:
                 result['sl'] = {'price': _round_price(sl), 'status': 'placed'}
             else:
@@ -789,7 +757,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         if tp is not None and tp > 0:
             tp_side = 'Sell' if side == 'Buy' else 'Buy'
             if (side == 'Buy' and tp > sl) or (side == 'Sell' and tp < sl) or sl is None:
-                tp_body = json.dumps({
+                tp_result = _api_call('POST', '/v5/order/create', {
                     'category': 'linear',
                     'symbol': symbol,
                     'side': tp_side,
@@ -800,7 +768,6 @@ class RPCHandler(BaseHTTPRequestHandler):
                     'timeInForce': 'GTC',
                     'reduceOnly': True,
                 })
-                tp_result = _run_bybit('raw', 'POST', '/v5/order/create', tp_body)
                 if tp_result.get('retCode') == 0:
                     result['tp'] = {'price': _round_price(tp), 'status': 'placed'}
                 else:
@@ -833,7 +800,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         close_side = 'Sell' if pos['side'] == 'Buy' else 'Buy'
         qty_str = str(int(pos['size'])) if pos['size'] == int(pos['size']) else str(pos['size'])
 
-        close_body = json.dumps({
+        close_result = _api_call('POST', '/v5/order/create', {
             'category': 'linear',
             'symbol': symbol,
             'side': close_side,
@@ -843,8 +810,6 @@ class RPCHandler(BaseHTTPRequestHandler):
             'timeInForce': 'IOC',
             'reduceOnly': True,
         })
-
-        close_result = _run_bybit('raw', 'POST', '/v5/order/create', close_body)
 
         if close_result.get('retCode') != 0:
             return _error(self, 'Close failed',

@@ -111,13 +111,12 @@ def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref='', strategy=
 # ── Аудит стратегии + сводка покрытия ──
 
 def check_strategy_compliance(positions, orders):
-    """Аудит TP/SL покрытия для отдельных позиций."""
+    """Аудит TP/SL покрытия для всех позиций (LONG и SHORT)."""
     alerts = []
     for sym, p in positions.items():
-        # Ручные позиции — не проверяем на compliance (пользователь сам решает)
         if is_manual_position(sym):
             continue
-        if p['side'] != 'Buy' or p['size'] <= 0:
+        if p['size'] <= 0:
             continue
         size = p['size']
         sl = p.get('stopLoss', '')
@@ -125,24 +124,24 @@ def check_strategy_compliance(positions, orders):
                      if o['kind'] == 'TP' and o['symbol'] == sym
                      and o['status'] in ('New', 'PartiallyFilled', 'Untriggered'))
         tp_pct = tp_qty / size * 100 if size > 0 else 0
+        side_icon = '🔴 SHORT' if p['side'] == 'Sell' else '🟢 LONG'
         if tp_pct < 90:
-            alerts.append(f'⚠️ {sym}: TP покрытие {tp_pct:.0f}% — проверь ордера')
+            alerts.append(f'⚠️ {sym} ({side_icon}): TP покрытие {tp_pct:.0f}% — проверь ордера')
         if not sl:
-            alerts.append(f'🚨 {sym}: НЕТ стоп-лосса!')
+            alerts.append(f'🚨 {sym} ({side_icon}): НЕТ стоп-лосса!')
     return alerts
 
 def check_coverage_summary(positions, orders):
-    """Полная сводка TP/SL покрытия — отправляется раз в 4 часа."""
+    """Полная сводка TP/SL покрытия для всех позиций (LONG + SHORT)."""
     if not positions:
         return None
     lines = ['🛡 **TP/SL покрытие:**', '']
     protected = 0
     total = len(positions)
     for sym, p in positions.items():
-        # Ручные позиции — пропускаем в сводке покрытия
         if is_manual_position(sym):
             continue
-        if p['side'] != 'Buy' or p['size'] <= 0:
+        if p['size'] <= 0:
             total -= 1
             continue
         size = p['size']
@@ -151,6 +150,7 @@ def check_coverage_summary(positions, orders):
                      if o['kind'] == 'TP' and o['symbol'] == sym
                      and o['status'] in ('New', 'PartiallyFilled', 'Untriggered'))
         tp_pct = tp_qty / size * 100 if size > 0 else 0
+        side_icon = '🔴' if p['side'] == 'Sell' else '🟢'
         issues = []
         if not sl:
             issues.append('нет SL')
@@ -159,6 +159,6 @@ def check_coverage_summary(positions, orders):
         if not issues:
             protected += 1
         else:
-            lines.append(f'  ⚠️ {sym}: {", ".join(issues)}')
+            lines.append(f'  ⚠️ {side_icon} {sym}: {", ".join(issues)}')
     lines.insert(1, f'  {protected}/{total} позиций защищены')
-    return '\n'.join(lines) if protected < total else None
+    return '\\n'.join(lines) if protected < total else None
