@@ -2,28 +2,29 @@
 
 **Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
-[![Version](https://img.shields.io/badge/version-3.10.1-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![Version](https://img.shields.io/badge/version-3.12.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py)
 
 ---
 
-## Архитектура модулей (v3.10.1)
+## Архитектура модулей (v3.12.0)
 
 ```
 ┌─────────────────── MAIN LOOP (30s) ───────────────────┐
 │                                                        │
 │  Каждый цикл:                                          │
+│    • state_db.py        — SQLite (WAL, 8 таблиц)      │
 │    • auto_sl.py         — проверка/фикс стоп-лоссов    │
-│    • trailing_sl.py     — подтяжка SL (LONG >15%)      │
+│    • trailing_sl.py     — подтяжка SL (LONG + SHORT)   │
 │    • junk_trail.py      — трейлинг TP (JUNK-шорты)    │
 │    • auto_tp.py         — авто-TP на Middle/Upper BB   │
 │    • dca.py             — DCA-докупки                  │
-│    • auto_entry.py      — авто-входы (LONG)            │
+│    • reporting.py       — compliance-аудит (LONG+SHORT)│
 │                                                        │
 │  Каждые 10 циклов (HEAVY):                              │
+│    • auto_entry.py      — авто-входы (LONG scoring)    │
 │    • auto_short.py      — авто-SHORT + JUNK-шорты      │
 │    • pump_detect.py     — детект пампов (24ч/нед)      │
 │    • correlation.py     — корреляционная матрица       │
-│    • reporting.py       — сводки, триггеры прибыли     │
 │                                                        │
 │  Мониторинг:                                           │
 │    • health.py          — ликвидации, сквизы, фондинг  │
@@ -38,16 +39,17 @@
 
 | Файл | Назначение |
 |------|-----------|
+| `state_db.py` | SQLite (WAL, 8 таблиц) — trade_history, cooldowns, alert_dedup |
 | `main.py` | Главный цикл, RPC-сервер, оркестрация модулей |
 | `api.py` | Bybit REST API: позиции, ордера, SL/TP, BB-данные |
 | `config.py` | Конфиг: 8 стратегий, риск-менеджмент, tiers |
 | `position_sizing.py` | Динамический сайзинг (% депозита × score × multiplier) |
 | `auto_short.py` | Авто-SHORT: Tier A/B (обычный) + JUNK C/D (памп-шорты без SL) |
 | `auto_entry.py` | Авто-LONG: BB < порога, score ≥ мин |
-| `auto_tp.py` | Авто-TP: 20% на Middle BB + 80% на Upper BB (retry + backoff) |
-| `auto_sl.py` | Авто-SL: проверка и фикс стоп-лоссов (пропускает JUNK) |
-| `trailing_sl.py` | Трейлинг-SL для LONG: BB Weekly >75% и профит >15% |
-| **`junk_trail.py`** | 🆕 Трейлинг-TP для JUNK-шортов: фиксация 70% при +15%, 85% при +30% |
+| `auto_tp.py` | Авто-TP: 20% на Middle BB + 80% на Upper BB (LONG + SHORT) |
+| `auto_sl.py` | Авто-SL: проверка и фикс стоп-лоссов (LONG + SHORT, tier-based) |
+| `trailing_sl.py` | Трейлинг-SL: LONG (BB>75%) + SHORT (BB<25%), PnL>15% |
+| **`junk_trail.py`** | Трейлинг-TP для JUNK-шортов: фиксация 70% при +15%, 85% при +30% |
 | `pump_detect.py` | Детект пампов: 24ч ≥80%, недельный ≥230% |
 | `dca.py` | DCA-докупки LONG при −5/−10/−15% от входа |
 | `correlation.py` | Корреляционная матрица: блок при >80% корреляции |
@@ -55,13 +57,14 @@
 | `overbought.py` | Ротация вотчлиста перегретых монет |
 | `rsi.py` | RSI-дивергенции |
 | `squeeze.py` | BB-сквиз детектор |
-| `reporting.py` | Сводки, триггеры профита, compliance, coverage |
+| `reporting.py` | Сводки, compliance-аудит (LONG + SHORT), coverage summary |
 | `cleanup.py` | Чистка просроченных/старых ордеров |
 | `cost_tracker.py` | Учёт торговых комиссий |
 | `recycle.py` | Рециркуляция TP → ре-вход |
 | `metrics.py` | Запись метрик (алерты, авто-входы) |
 | `alerts.py` | Telegram-алерты, дедупликация |
 | `snapshot.py` | Снапшоты позиций/ордеров, детект изменений |
+| `rpc.py` | HTTP-RPC сервер (:8766) — прямые вызовы api.bybit() |
 
 ---
 
@@ -77,10 +80,11 @@
 - **DCA**: докупка при −5/−10/−15% от входа, макс 2 добавки
 - **Макс позиций**: 12
 
-### SHORT Tier A/B (обычный)
-- **Триггер**: BB Daily > 85%, Tier A/B монеты
+### SHORT (хедж)
+- **Триггер**: BB Daily > 85%, Tier A/B/C/D монеты
 - **Плечо**: 3x
-- **SL**: +5–7% от входа (trading-stop)
+- **SL**: +5% (Tier A/B), +7% (Tier C/D)
+- **Trailing SL**: BB Weekly < 25% + PnL > 15% → SL ползёт вниз
 - **TP**: Middle BB
 - **Макс позиций**: 3 (общий лимит с JUNK)
 
@@ -335,6 +339,7 @@ rpc:
 | Файл | Содержание |
 |------|-----------|
 | `README.md` | Этот файл — полное описание |
+| `DESIGN-STRATEGIES.md` | **Сводный:** архитектура + стратегии + риски (v3.12.0) |
 | `QUICKSTART.md` | 5-минутный старт |
 | `DESIGN.md` | Архитектура для разработчиков |
 | `STRATEGIES.md` | Все 8 стратегий с параметрами |
