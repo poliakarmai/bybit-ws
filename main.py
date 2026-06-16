@@ -365,8 +365,8 @@ def main_loop():
                     for sym, idx, side, size, price in trail_actions:
                         add_alert('INFO', f'🔺 Trailing SL {sym} подтянут до ${price:.4f}')
 
-                # Trailing TP для JUNK-шортов
-                if new_orders:
+                # Trailing TP для JUNK-шортов (только если enabled)
+                if new_orders and cfg.strategy.junk.get('enabled', False):
                     junk_trail_actions = trailing_junk_tp(new_positions, new_orders)
                     if junk_trail_actions:
                         for sym, pnl_pct, new_tp, reason in junk_trail_actions:
@@ -616,11 +616,13 @@ def main_loop():
                 if heavy_ok and not rpc_state.get("paused"):
                     msgs, err = _a(check_auto_short, new_positions or {})
                     if err: log_event(f'⏱️ check_auto_short: таймаут — {err}')
-                    # Шлак DCA — проверяем уровни после auto_short
-                    junk_msgs, junk_err = _a(check_junk_dca, new_positions or {})
-                    if junk_err: log_event(f'⏱️ check_junk_dca: таймаут — {junk_err}')
-                    else:
-                        for msg in (junk_msgs or []): add_alert('ENTRY', msg)
+                    # JUNK-шорты: только если strategy.junk.enabled
+                    if cfg.strategy.junk.get('enabled', False):
+                        junk_msgs, junk_err = _a(check_junk_dca, new_positions or {})
+                        if junk_err:
+                            log_event(f'⏱️ check_junk_dca: таймаут — {junk_err}')
+                        else:
+                            for msg in (junk_msgs or []): add_alert('ENTRY', msg)
                 for msg in check_bb_squeeze():
                     add_alert('INFO', msg)
                 if new_orders and new_positions is not None:
@@ -817,6 +819,12 @@ def main_loop():
             save_json(ORDERS_SNAPSHOT, new_orders or {})
             old_orders = new_orders or {}
 
+            # Тайминг цикла — алерт при >20s
+            cycle_duration = time.time() - now_ts
+            rpc_update_health(alive=True, cycle_count=cycle_count, cycle_duration=cycle_duration)
+            if cycle_duration > 20:
+                log_event(f'⚠️ Цикл {cycle_duration:.1f}s — превышен порог 20s')
+
             # Статус каждые 5 мин
             if cycle_count % HEAVY_CYCLE == 0:
                 alerts = get_alerts()
@@ -947,6 +955,7 @@ def run_once():
 
     if new_positions:
         save_json(POSITIONS_SNAPSHOT, new_positions)
+        db.save_positions(new_positions)  # SQLite SSOT
     if new_orders:
         save_json(ORDERS_SNAPSHOT, new_orders)
 

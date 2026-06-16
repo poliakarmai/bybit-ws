@@ -38,6 +38,7 @@ from collections import defaultdict
 
 from .api import bybit as _bybit_api
 from .api import fetch_positions as _fetch_positions
+from .state_db import db as _db
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 HOME = Path.home()
@@ -127,16 +128,27 @@ def _get_position(symbol: str) -> dict | None:
 
 
 def _get_auth_token() -> str:
-    """Получить RPC токен из конфига (если есть). Пустая строка = без auth."""
+    """Получить RPC токен. Автогенерация при первом запуске (SQLite)."""
     try:
         from .config import Config
         cfg = Config()
         token = cfg.rpc.get('auth_token', '')
-        if token.startswith('${') or token == '':
-            return ''
+        if token and not token.startswith('${'):
+            return token
+    except Exception:
+        pass
+    # Автогенерация: сохраняем в state.db/kv_store
+    try:
+        from .state_db import db
+        token = db.get_kv('rpc_auth_token')
+        if not token:
+            import uuid
+            token = str(uuid.uuid4())
+            db.set_kv('rpc_auth_token', token)
         return token
     except Exception:
-        return ''
+        import uuid
+        return str(uuid.uuid4())
 
 
 def _check_rate_limit(client_ip: str, max_per_min: int = 60) -> bool:
@@ -178,20 +190,10 @@ class RPCHandler(BaseHTTPRequestHandler):
         pass  # тихий режим
 
     def _check_auth(self) -> bool:
-        """Проверить Bearer-токен (обязателен при bind=0.0.0.0)."""
+        """Проверить Bearer-токен (обязателен всегда)."""
         token = _get_auth_token()
         if not token:
-            # Проверяем bind — если 0.0.0.0, отказ в обслуживании
-            try:
-                from .config import Config
-                cfg = Config()
-                bind = cfg.rpc.get('bind', '127.0.0.1')
-                if bind == '0.0.0.0':
-                    return False  # внешний доступ без токена запрещён
-            except Exception as e:
-                import logging
-                logging.getLogger('bybit.rpc').warning(f'_check_auth config: {e}')
-            return True  # localhost — ок
+            return False
         auth = self.headers.get('Authorization', '')
         return auth == f'Bearer {token}'
 
@@ -236,6 +238,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             return self._handle_risk()
         if path == "/balance":
             return self._handle_balance()
+        if path == "/metrics":
+            return self._handle_metrics_prometheus()
         if path == "/signals":
             return self._handle_signals()
         if path == "/config":
@@ -342,8 +346,10 @@ class RPCHandler(BaseHTTPRequestHandler):
             _error(self, 'Config read error', str(e), 500)
 
     def _handle_all(self):
-        """Все данные одним запросом — для дашборда."""
-        positions_raw = _load_json(DATA_DIR / "positions.json")
+        """Все данные одним запросом — для дашборда (из SQLite SSOT)."""
+        # Позиции из SQLite (SSOT), алерты/метрики из JSON (backup)
+        positions_db = _db.get_positions()
+        positions_raw = positions_db if positions_db else _load_json(DATA_DIR / "positions.json")
         orders_raw = _load_json(DATA_DIR / "orders.json")
         metrics = _load_json(DATA_DIR / "metrics.json")
 
@@ -407,7 +413,8 @@ class RPCHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_positions(self):
-        positions = _load_json(DATA_DIR / "positions.json")
+        positions_db = _db.get_positions()
+        positions = positions_db if positions_db else _load_json(DATA_DIR / "positions.json")
         result = []
         if isinstance(positions, dict):
             for sym, p in positions.items():
@@ -486,6 +493,57 @@ class RPCHandler(BaseHTTPRequestHandler):
     def _handle_metrics(self):
         metrics = _load_json(DATA_DIR / "metrics.json")
         _json_response(self, metrics)
+
+    def _handle_metrics_prometheus(self):
+        """GET /metrics — Prometheus-совместимый текстовый формат."""
+        lines = []
+        # Позиции
+        positions = _db.get_positions() or _load_json(DATA_DIR / "positions.json")
+        if isinstance(positions, dict):
+            longs = sum(1 for p in positions.values() if p.get('side') == 'Buy')
+            shorts = sum(1 for p in positions.values() if p.get('side') == 'Sell')
+            total_upnl = sum(float(p.get('upnl', 0)) for p in positions.values())
+            lines.append(f'# HELP bybit_ws_active_positions Current open positions')
+            lines.append(f'# TYPE bybit_ws_active_positions gauge')
+            lines.append(f'bybit_ws_active_positions{{side="long"}} {longs}')
+            lines.append(f'bybit_ws_active_positions{{side="short"}} {shorts}')
+            lines.append(f'# HELP bybit_ws_unrealized_pnl Unrealized PnL')
+            lines.append(f'# TYPE bybit_ws_unrealized_pnl gauge')
+            lines.append(f'bybit_ws_unrealized_pnl {total_upnl:.2f}')
+
+        # Health
+        lines.append(f'# HELP bybit_ws_uptime_seconds Monitor uptime')
+        lines.append(f'# TYPE bybit_ws_uptime_seconds gauge')
+        lines.append(f'bybit_ws_uptime_seconds {int(time.time() - rpc_state["started_at"])}')
+        lines.append(f'# HELP bybit_ws_cycle_duration_seconds Last cycle duration')
+        lines.append(f'# TYPE bybit_ws_cycle_duration_seconds gauge')
+        lines.append(f'bybit_ws_cycle_duration_seconds {rpc_state["cycle_duration"]:.3f}')
+        lines.append(f'# HELP bybit_ws_cycle_count Total cycles')
+        lines.append(f'# TYPE bybit_ws_cycle_count counter')
+        lines.append(f'bybit_ws_cycle_count {rpc_state["cycle_count"]}')
+
+        # Daily PnL
+        metrics = _load_json(DATA_DIR / "metrics.json")
+        today_key = None
+        import datetime
+        for k in sorted(metrics.keys(), reverse=True):
+            if k.startswith("20") and len(k) >= 8:
+                try:
+                    d = datetime.datetime.strptime(k[:10], "%Y-%m-%d")
+                    if d.date() == datetime.date.today():
+                        today_key = k
+                        break
+                except Exception:
+                    pass
+        daily_pnl = metrics.get(today_key, {}).get("pnl_total", 0) if today_key else 0
+        lines.append(f'# HELP bybit_ws_daily_pnl Daily realized PnL')
+        lines.append(f'# TYPE bybit_ws_daily_pnl gauge')
+        lines.append(f'bybit_ws_daily_pnl {daily_pnl:.2f}')
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4")
+        self.end_headers()
+        self.wfile.write(('\n'.join(lines) + '\n').encode())
 
     def _handle_risk(self):
         """GET /rpc/risk — risk limits and current usage."""
