@@ -238,10 +238,11 @@ def fetch_orders():
 
 
 def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
-    sl_side = 'Sell' if side == 'Buy' else 'Buy'
-    body = {'category': 'linear', 'symbol': symbol, 'side': sl_side,
-            'positionIdx': positionIdx, 'orderType': 'Market', 'qty': str(qty),
-            'stopLoss': str(stop_price), 'triggerBy': 'LastPrice', 'slTriggerBy': 'MarkPrice'}
+    # Bybit v5 trading-stop: только category, symbol, positionIdx, stopLoss, slTriggerBy
+    # НЕ передаём side/orderType/qty/triggerBy — это параметры /v5/order/create
+    body = {'category': 'linear', 'symbol': symbol,
+            'positionIdx': positionIdx,
+            'stopLoss': str(stop_price), 'slTriggerBy': 'MarkPrice'}
     data = bybit('POST', '/v5/position/trading-stop', body)
     if data and data.get('retCode') == 0:
         log_event(f'✅ SL поставлен {symbol} @ ${stop_price:.4f}')

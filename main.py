@@ -102,15 +102,16 @@ def _check_risk_limits(positions: dict, risk_cfg) -> tuple[bool, list]:
         log_event(f'⚠️ _check_risk_limits error: {e}')
         pass
     max_loss = risk_cfg.get('max_daily_loss', 50)
-    if daily_loss > max_loss:
-        alerts.append(f'🚨 Дневной убыток превышен: -${daily_loss:.0f} > -${max_loss}')
+    if daily_loss < -max_loss:
+        alerts.append(f'🚨 Дневной убыток превышен: -${abs(daily_loss):.0f} > -${max_loss}')
         blocked = True
 
     # Лимит LONG позиций
     long_count = sum(1 for p in positions.values() if p.get('side') == 'Buy')
     max_long = risk_cfg.get('max_long_positions', 12)
     if long_count > max_long:
-        alerts.append(f'⚠️ Превышен лимит LONG: {long_count} > {max_long}')
+        alerts.append(f'⚠️ Превышен лимит LONG: {long_count} > {max_long} (entry blocked)')
+        blocked = True
 
     return blocked, alerts
 
@@ -219,20 +220,12 @@ def main_loop():
 
             time.sleep(CYCLE_SECONDS)
             now_wd = time.time()
-            if now_wd - WATCHDOG_LAST > WATCHDOG_SECONDS:
-                log_event(f'🚨 Watchdog: главный цикл завис ({now_wd - WATCHDOG_LAST:.0f}с) — аварийный выход')
-                # Сохранить снепшоты перед выходом
-                try:
-                    if new_positions:
-                        save_json(POSITIONS_SNAPSHOT, new_positions)
-                    if new_orders:
-                        save_json(ORDERS_SNAPSHOT, new_orders)
-                except Exception as e:
-                    log_event(f'⚠️ Watchdog snapshot save error: {e}')
-                sys.exit(1)
-            WATCHDOG_LAST = now_wd
             cycle_count += 1
             now_ts = time.time()
+
+            # Заранее инициализируем для watchdog
+            new_positions = {}
+            new_orders = []
 
             # Health-check: timestamp последнего успешного цикла
             try:
@@ -245,6 +238,19 @@ def main_loop():
 
             new_positions = fetch_positions()
             new_orders = fetch_orders()
+
+            if now_wd - WATCHDOG_LAST > WATCHDOG_SECONDS:
+                log_event(f'🚨 Watchdog: главный цикл завис ({now_wd - WATCHDOG_LAST:.0f}с) — аварийный выход')
+                # Сохранить снепшоты перед выходом
+                try:
+                    if new_positions:
+                        save_json(POSITIONS_SNAPSHOT, new_positions)
+                    if new_orders:
+                        save_json(ORDERS_SNAPSHOT, new_orders)
+                except Exception as e:
+                    log_event(f'⚠️ Watchdog snapshot save error: {e}')
+                sys.exit(1)
+            WATCHDOG_LAST = now_wd
 
             pos_changes = check_position_changes(old_positions, new_positions)
             ord_changes = check_order_changes(old_orders, new_orders)

@@ -111,28 +111,28 @@ def _place_pump_short(sym, price, level_label, state, peak_price):
     tp_price = _round_to_tick(entry * (1 - TP_PCT), sym)
 
     try:
-        order = bybit('POST', '/v5/order/create', {
+        # Build body without price for Market orders (null not valid)
+        body = {
             'category': 'linear',
             'symbol': sym,
             'side': 'Sell',
             'orderType': 'Market' if level_label == 'init' else 'Limit',
             'qty': str(qty),
-            'price': str(entry) if level_label != 'init' else None,
             'positionIdx': 2,
             'timeInForce': 'IOC' if level_label == 'init' else 'GTC',
-        })
+        }
+        if level_label != 'init':
+            body['price'] = str(entry)
+        order = bybit('POST', '/v5/order/create', body)
         if order.get('retCode') != 0:
             log_event(f'⚠️ Pump-SHORT {sym} [{level_label}]: {order.get("retMsg","?")}')
             return False
 
-        # SL
+        # SL — Bybit v5 trading-stop: только нужные параметры
         bybit('POST', '/v5/position/trading-stop', {
             'category': 'linear',
             'symbol': sym,
-            'side': 'Buy',
             'positionIdx': 2,
-            'orderType': 'Market',
-            'qty': str(qty),
             'stopLoss': str(sl_price),
             'slTriggerBy': 'MarkPrice',
         })

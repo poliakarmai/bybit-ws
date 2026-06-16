@@ -11,9 +11,12 @@
 """
 
 import json
+import logging
 import os
 import time
 from datetime import datetime
+
+_log = logging.getLogger('bybit.x10_limits')
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 X10_STATE_FILE = os.path.join(DATA_DIR, 'x10_limits.json')
@@ -26,7 +29,7 @@ def _load():
             with open(X10_STATE_FILE) as f:
                 return json.load(f)
     except Exception as e:
-        log_event(f'⚠️ x10_limits: {e}')
+        _log.warning(f'⚠️ x10_limits: {e}')
     return {}
 
 
@@ -129,7 +132,7 @@ def track_x10_entry(sym: str, strategy: str):
         with open(X10_POSITIONS_FILE, 'w') as f:
             json.dump(data, f, indent=2)
     except Exception as e:
-        log_event(f'⚠️ x10_limits: {e}')
+        _log.warning(f'⚠️ x10_limits: {e}')
 
 
 def get_x10_strategy(sym: str) -> str:
@@ -140,7 +143,7 @@ def get_x10_strategy(sym: str) -> str:
                 data = json.load(f)
             return data.get(sym, {}).get('strategy', '')
     except Exception as e:
-        log_event(f'⚠️ x10_limits: {e}')
+        _log.warning(f'⚠️ x10_limits: {e}')
     return ''
 
 
@@ -155,4 +158,4 @@ def clear_x10_position(sym: str):
                 with open(X10_POSITIONS_FILE, 'w') as f:
                     json.dump(data, f, indent=2)
     except Exception as e:
-        log_event(f'⚠️ x10_limits: {e}')
+        _log.warning(f'⚠️ x10_limits: {e}')

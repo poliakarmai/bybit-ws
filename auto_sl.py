@@ -109,16 +109,12 @@ def check_and_fix_sl():
         if side == 'Sell' and sl_price <= mark:
             continue
 
-        sl_side = 'Sell' if side == 'Buy' else 'Buy'
+        # Bybit v5 trading-stop: только category, symbol, positionIdx, stopLoss, slTriggerBy
         body = {
             'category': 'linear',
             'symbol': sym,
-            'side': sl_side,
             'positionIdx': idx,
-            'orderType': 'Market',
-            'qty': str(size),
             'stopLoss': str(sl_price),
-            'triggerBy': 'LastPrice',
             'slTriggerBy': 'MarkPrice',
         }
 
