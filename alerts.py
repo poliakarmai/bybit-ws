@@ -14,6 +14,7 @@ import time
 from datetime import datetime
 from . import ALERTS, EVENTS_LOG, ALERTS_LOG, HERMES_BIN, ALERT_DEDUP_FILE, ALERT_DEDUP_TTL
 from . import safe_run
+from .state_db import db  # SQLite-дедупликация (persistent)
 
 # Минимальный интервал между алертами одного типа на один символ
 CATEGORY_COOLDOWN = {
@@ -128,6 +129,12 @@ def _is_duplicate(msg, level="INFO"):
 
         # Очистка старых записей
         dedup = {k: v for k, v in dedup.items() if now - v < max(ALERT_DEDUP_TTL, cooldown)}
+
+        # Уровень 0: persistent SQLite-дедупликация (выживает рестарты)
+        if sym and level in ('STOP', 'TP', 'ENTRY'):
+            db_key = f"{level}:{sym}:{_normalize_msg(msg)[:40]}"
+            if not db.should_alert(db_key, cooldown):
+                return True
 
         # Уровень 1: категорийный кулдаун по символу
         if sym:
