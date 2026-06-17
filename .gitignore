@@ -36,3 +36,6 @@ docker-compose.override.yml
 bybit_ws.egg-info/
 .venv2/
 build/
+
+# Graphify knowledge graph
+graphify-out/
