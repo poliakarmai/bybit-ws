@@ -1188,7 +1188,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not symbol:
         return  # silently ignore invalid symbols
     try:
-        result = subprocess.run(
+        result = await asyncio.to_thread(subprocess.run,
             ['python3', '-c', f'''\nimport json, subprocess, sys
 sys.path.insert(0, "{os.path.dirname(SCANNER_SCRIPT)}")
 from gridsignal_scanner import score_coin, get_top_tickers
@@ -1208,7 +1208,7 @@ if tickers:
     s = score_coin("{symbol}", tickers[0])
     if s:
         print(json.dumps(s))
-'''], capture_output=True, text=True, timeout=40)
+'''], capture_output=True, text=True, timeout=15)
         if result.stdout.strip():
             s = json.loads(result.stdout)
             entry = s['lower_bb'] * 0.97
