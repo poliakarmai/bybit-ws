@@ -288,6 +288,23 @@ def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]
     if rsi_val is not None and rsi_val < 30 and bb['pos'] < 25:
         score += 0.3
 
+    # ── ML Score (вес ×1, макс 5) — Phase 3 ──
+    ml_score_val = None
+    try:
+        from bybit_ws.ml_scorer import predict
+        ml_prob = predict(symbol, bb['pos'])
+        if ml_prob is not None:
+            ml_score_val = round(ml_prob, 3)
+            # Интеграция: ML_prob → бонус к score
+            if ml_prob > 0.7:    ml_bonus = 5
+            elif ml_prob > 0.6:  ml_bonus = 4
+            elif ml_prob > 0.5:  ml_bonus = 3
+            elif ml_prob > 0.4:  ml_bonus = 2
+            else:                ml_bonus = 1
+            score += ml_bonus * 0.2  # деликатный бонус, не перевешивает
+    except ImportError:
+        pass
+
     return {
         'symbol': symbol,
         'score': round(score, 1),
@@ -302,6 +319,7 @@ def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]
         'funding': funding,
         'tier': tier,
         'rsi': round(rsi_val, 1) if rsi_val is not None else None,
+        'ml_score': ml_score_val,
         'mode': 'LONG',
         'interval': interval,
     }
