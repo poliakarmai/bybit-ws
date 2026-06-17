@@ -23,6 +23,7 @@ Endpoints:
     POST /scan            — запустить GridSignal-сканер
     POST /enter           — ручной вход в позицию
     POST /close           — закрыть позицию
+    POST /reset-token     — сбросить RPC-токен (генерирует новый UUID)
 
 Все ответы содержат api_version: "v1".
 При ошибке: {"error": "...", "detail": "...", "api_version": "v1", "status": код}.
@@ -88,10 +89,33 @@ def _json_response(handler, data, status=200):
     handler.wfile.write(body.encode())
 
 
-def _error(handler, error: str, detail: str = "", status: int = 400):
-    """Стандартный error-ответ."""
+# ── RPC error codes (MONITOR.md §5) ─────────────────────────
+ERROR_CODES = {
+    400: 'bad_request',
+    401: 'unauthorized',
+    402: 'insufficient_margin',
+    404: 'symbol_not_found',
+    409: 'position_exists',
+    422: 'invalid_qty',
+    429: 'rate_limit',
+    500: 'internal_error',
+}
+
+def _error(handler, error: str, detail: str = "", status: int = 400, error_code: str = None):
+    """Стандартный error-ответ с кодом ошибки.
+
+    Args:
+        handler: HTTP handler
+        error: краткое описание
+        detail: расширенная информация
+        status: HTTP-статус
+        error_code: код из ERROR_CODES (авто по status если не указан)
+    """
+    if error_code is None:
+        error_code = ERROR_CODES.get(status, 'unknown_error')
     return _json_response(handler, {
         "error": error,
+        "error_code": error_code,
         "detail": detail,
         "status": status,
     }, status)
@@ -304,6 +328,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_resume()
         elif path == "/logs":
             self._handle_logs(body)
+        elif path == "/reset-token":
+            self._handle_reset_token(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -322,7 +348,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 "/rpc/health", "/rpc/trades", "/rpc/alerts", "/rpc/metrics", "/rpc/risk",
                 "/rpc/signals", "/rpc/config",
                 "/health", "/positions", "/orders", "/metrics", "/risk", "/signals", "/config",
-                "POST /scan", "POST /enter", "POST /close",
+                "POST /scan", "POST /enter", "POST /close", "POST /reset-token",
                 "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
             ]
         })
@@ -681,19 +707,19 @@ class RPCHandler(BaseHTTPRequestHandler):
         # ── Валидация ──
         symbol = body.get('symbol', '').strip().upper()
         if not symbol or not symbol.endswith('USDT'):
-            return _error(self, 'Invalid symbol', 'symbol must be like XRPUSDT', 400)
+            return _error(self, 'Invalid symbol', 'symbol must be like XRPUSDT', 400, 'invalid_symbol')
 
         side = body.get('side', '').strip()
         if side not in ('Buy', 'Sell'):
-            return _error(self, 'Invalid side', "side must be 'Buy' (LONG) or 'Sell' (SHORT)", 400)
+            return _error(self, 'Invalid side', "side must be 'Buy' (LONG) or 'Sell' (SHORT)", 400, 'invalid_side')
 
         try:
             qty = float(body.get('qty', 0))
         except (ValueError, TypeError):
-            return _error(self, 'Invalid qty', 'qty must be a number', 400)
+            return _error(self, 'Invalid qty', 'qty must be a number', 422, 'invalid_qty')
 
         if qty <= 0:
-            return _error(self, 'Invalid qty', 'qty must be positive', 400)
+            return _error(self, 'Invalid qty', 'qty must be positive', 422, 'invalid_qty')
 
         sl = body.get('sl')
         if sl is not None:
@@ -713,7 +739,8 @@ class RPCHandler(BaseHTTPRequestHandler):
         existing = _get_position(symbol)
         if existing:
             return _error(self, 'Position already exists',
-                          f'{symbol} already has an open {existing["side"]} position of size {existing["size"]}', 409)
+                          f'{symbol} already has an open {existing["side"]} position of size {existing["size"]}',
+                          409, 'position_exists')
 
         # ── Подтверждение (двухэтапный вход) ──
         confirm = body.get('confirm', False)
@@ -793,14 +820,18 @@ class RPCHandler(BaseHTTPRequestHandler):
         if order_result.get('retCode') != 0:
             err_msg = order_result.get('retMsg', 'Unknown error')
             status = 400
+            error_code = 'order_failed'
             if 'margin' in err_msg.lower() or 'balance' in err_msg.lower() or 'insufficient' in err_msg.lower():
                 status = 402
+                error_code = 'insufficient_margin'
                 err_msg = f'Insufficient margin: {err_msg}'
             elif '110001' in err_msg:
                 status = 422
+                error_code = 'invalid_qty'
             elif 'symbol' in err_msg.lower() or 'not found' in err_msg.lower():
                 status = 404
-            return _error(self, 'Order failed', err_msg, status)
+                error_code = 'symbol_not_found'
+            return _error(self, 'Order failed', err_msg, status, error_code)
 
         order_id = order_result.get('result', {}).get('orderId', 'unknown')
         result = {
@@ -944,6 +975,25 @@ class RPCHandler(BaseHTTPRequestHandler):
                 _json_response(self, {"lines": len(last), "log": "".join(last)})
         except FileNotFoundError:
             _error(self, 'Log file not found', str(log_path), 404)
+
+    def _handle_reset_token(self, body: dict):
+        """POST /reset-token — сбросить RPC-токен (генерирует новый UUID).
+
+        MONITOR.md §7: генерация/сброс токена через UUID.
+        Требует действующий токен для авторизации.
+        """
+        import uuid
+        new_token = str(uuid.uuid4())
+        try:
+            from .state_db import db
+            db.set_kv('rpc_auth_token', new_token)
+            _json_response(self, {
+                'status': 'ok',
+                'message': 'Token reset successful. Update your Authorization header.',
+                'new_token': new_token,
+            })
+        except Exception as e:
+            _error(self, 'Token reset failed', str(e), 500)
 
 
 def start_rpc_server(port=8766, bind='127.0.0.1'):

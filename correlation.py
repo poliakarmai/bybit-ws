@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 
 from . import DATA_DIR
-from .api import bybit
+from .api import bybit, place_stop_loss
 
 CORRELATION_SNAPSHOT = os.path.join(DATA_DIR, 'correlation.json')
 CORRELATION_THRESHOLD = 0.80
@@ -201,3 +201,91 @@ def load_correlation_snapshot():
             return json.load(f)
     except (json.JSONDecodeError, IOError):
         return None
+
+
+def tighten_correlation_sl(positions, flagged_pairs, dedup_state=None):
+    """Ужесточить SL на 1% ближе к марку для позиций с высокой корреляцией.
+
+    MONITOR.md §4: при r > ±0.8 SL поджимается на 1% ближе к текущей цене.
+    Для LONG:  new_sl = sl + 0.01 * (mark - sl)
+    Для SHORT: new_sl = sl - 0.01 * (sl - mark)
+
+    Args:
+        positions: dict {symbol: position_data} из fetch_positions()
+        flagged_pairs: list of (sym1, sym2, corr) с |corr| > 0.8
+        dedup_state: dict для дедупликации (12ч кулдаун на пару)
+
+    Returns:
+        list of alert strings
+    """
+    alerts = []
+    if not flagged_pairs or not positions:
+        return alerts
+
+    if dedup_state is None:
+        dedup_state = {}
+
+    now = time.time()
+    CORR_SL_COOLDOWN = 43200  # 12 часов между ужесточениями на пару
+    CORR_SL_STEP = 0.01       # 1% шаг к марку
+
+    for sym1, sym2, corr in flagged_pairs:
+        # Дедупликация: не чаще раза в 12ч на пару
+        pair_key = f"{min(sym1, sym2)}_{max(sym1, sym2)}"
+        last = dedup_state.get(pair_key, 0)
+        if now - last < CORR_SL_COOLDOWN:
+            continue
+
+        p1 = positions.get(sym1)
+        p2 = positions.get(sym2)
+        if not p1 or not p2:
+            continue
+
+        # Ужесточаем только если оба в одну сторону (синхронный риск)
+        if p1['side'] != p2['side']:
+            continue
+
+        for sym, p in [(sym1, p1), (sym2, p2)]:
+            current_sl = p.get('stopLoss')
+            if not current_sl or current_sl <= 0:
+                continue
+
+            mark = p['mark']
+            side = p['side']
+
+            if side == 'Buy':  # LONG
+                if current_sl >= mark:
+                    continue  # SL уже выше/равен марку — некуда двигать
+                new_sl = current_sl + CORR_SL_STEP * (mark - current_sl)
+            else:  # SHORT
+                if current_sl <= mark:
+                    continue
+                new_sl = current_sl - CORR_SL_STEP * (current_sl - mark)
+
+            # Защита: не двигаем SL за марк
+            if side == 'Buy' and new_sl > mark:
+                new_sl = mark * 0.999
+            elif side == 'Sell' and new_sl < mark:
+                new_sl = mark * 1.001
+
+            # Округляем до тика
+            new_sl = round(new_sl, 4)
+
+            # Отправляем на биржу
+            try:
+                place_stop_loss(
+                    sym, p.get('positionIdx', 0),
+                    'Sell' if side == 'Buy' else 'Buy',
+                    p['size'], new_sl
+                )
+                alerts.append(
+                    f'🔒 Корреляция SL {sym}: ${current_sl:.4f} → ${new_sl:.4f} '
+                    f'(r={corr:+.3f} с {sym1 if sym != sym1 else sym2}, '
+                    f'дист. до марка {abs(mark - new_sl) / mark * 100:.2f}%)'
+                )
+            except Exception as e:
+                alerts.append(f'⚠️ Корреляция SL {sym}: ошибка — {e}')
+
+        dedup_state[pair_key] = now
+
+    return alerts

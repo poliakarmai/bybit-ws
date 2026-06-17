@@ -62,7 +62,7 @@ from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .state_db import db  # SQLite trade_history
 from .auto_short import check_auto_short, check_junk_dca
 from .regime import check_regime
-from .correlation import check_correlation, load_correlation_snapshot
+from .correlation import check_correlation, load_correlation_snapshot, tighten_correlation_sl
 from .bb_scalp import check_scalp_signals, execute_scalp
 from .mean_revert import check_mean_revert, execute_mean_revert
 from .funding_entry import check_funding_signals, execute_funding_entry
@@ -254,6 +254,16 @@ def _run_heavy_cycle(cfg, new_positions, new_orders, cycle_count, now_ts):
                 add_alert('STOP', msg)
                 corr_dedup[pair_hash] = now_ts2
         save_json(CORR_DEDUP_FILE, corr_dedup)
+
+        # Ужесточение SL для коррелирующих позиций (MONITOR.md §4)
+        if corr_result.get('flagged'):
+            sl_alerts = tighten_correlation_sl(
+                new_positions, corr_result['flagged'], corr_dedup
+            )
+            for msg in sl_alerts:
+                add_alert('STOP', msg)
+            if sl_alerts:
+                save_json(CORR_DEDUP_FILE, corr_dedup)
 
 
 def _run_x10_cycle(cfg, new_positions, cycle_count, correlation_stop):

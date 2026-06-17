@@ -99,6 +99,46 @@ def _count_active_pump_shorts(positions):
     return sum(1 for v in state.values() if v.get('short_entry_ts'))
 
 
+def _confirm_volume_spike(sym):
+    """Проверить всплеск объёма на 5m перед пампа-шортом.
+
+    MONITOR.md §4: защита от flash crash — шорт только если
+    объём текущей 5m свечи > 2× среднего за 4 часа (48 свечей).
+
+    Returns:
+        (confirmed: bool, detail: str)
+    """
+    try:
+        # 48 свечей по 5 минут = 4 часа
+        data = bybit('GET',
+                     f'/v5/market/kline?category=linear&symbol={sym}'
+                     f'&interval=5&limit=49')
+        if not data or data.get('retCode') != 0:
+            return False, 'API error'
+
+        candles = data['result'].get('list', [])
+        if len(candles) < 10:
+            return False, f'мало свечей ({len(candles)})'
+
+        # Свечи newest-first: candles[0] = текущая (незакрытая)
+        # Берём candles[1:49] = 48 закрытых свечей для среднего
+        hist_volumes = [float(c[5]) for c in candles[1:49] if len(c) > 5]
+        if len(hist_volumes) < 10:
+            return False, 'мало исторических объёмов'
+
+        current_vol = float(candles[0][5]) if len(candles[0]) > 5 else 0
+        avg_vol = sum(hist_volumes) / len(hist_volumes) if hist_volumes else 1
+
+        ratio = current_vol / avg_vol if avg_vol > 0 else 0
+        if ratio >= 2.0:
+            return True, f'объём {ratio:.1f}× (${current_vol:,.0f} vs avg ${avg_vol:,.0f})'
+        else:
+            return False, f'объём {ratio:.1f}× (< 2×, пропускаем)'
+
+    except Exception as e:
+        return False, f'ошибка: {e}'
+
+
 def _place_pump_short(sym, price, level_label, state, peak_price):
     """Поставить один пампа-шорт ордер."""
     now = time.time()
@@ -232,11 +272,15 @@ def check_pumps(positions=None):
                 f'(цена ${last_price:.4f}, оборот ${turnover:,.0f})'
             )
 
-            # Вход #1 — немедленный шорт
+            # Вход #1 — шорт только при подтверждении объёма на 5m
             if sym not in live_syms and active_pump_shorts < MAX_PUMP_SHORTS and sym not in ONE_WAY:
-                if _place_pump_short(sym, last_price, 'init', prev, last_price):
-                    alerts.append(f'🐻 Pump-SHORT {sym}: вход #1 @ ${last_price:.4f}')
-                    active_pump_shorts += 1
+                vol_ok, vol_detail = _confirm_volume_spike(sym)
+                if vol_ok:
+                    if _place_pump_short(sym, last_price, 'init', prev, last_price):
+                        alerts.append(f'🐻 Pump-SHORT {sym}: вход #1 @ ${last_price:.4f} ({vol_detail})')
+                        active_pump_shorts += 1
+                else:
+                    alerts.append(f'⏸️ Pump-SHORT {sym}: пропущен — {vol_detail}')
 
         # Уже отслеживаем — DCA-уровни
         elif last_price > prev_peak * (1 + DCA_STEP) and now - last_alert_ts > ALERT_COOLDOWN:
@@ -250,13 +294,17 @@ def check_pumps(positions=None):
                 f'DCA уровень #{dca_level} @ ${last_price:.4f}'
             )
 
-            # Ставим DCA-шорт если ещё не ставили этот уровень
+            # Ставим DCA-шорт с подтверждением объёма
             if (sym not in live_syms and active_pump_shorts < MAX_PUMP_SHORTS
                     and level_label not in prev.get('dca_placed', [])
                     and sym not in ONE_WAY):
-                if _place_pump_short(sym, last_price, level_label, prev, prev_peak):
-                    alerts.append(f'🐻 Pump-DCA {sym}: уровень #{dca_level} @ ${last_price:.4f}')
-                    active_pump_shorts += 1
+                vol_ok, vol_detail = _confirm_volume_spike(sym)
+                if vol_ok:
+                    if _place_pump_short(sym, last_price, level_label, prev, prev_peak):
+                        alerts.append(f'🐻 Pump-DCA {sym}: уровень #{dca_level} @ ${last_price:.4f} ({vol_detail})')
+                        active_pump_shorts += 1
+                else:
+                    alerts.append(f'⏸️ Pump-DCA {sym}: пропущен — {vol_detail}')
 
         elif chg_pct >= PUMP_THRESHOLD and now - last_alert_ts > ALERT_COOLDOWN:
             prev['alerts'].append(now)
