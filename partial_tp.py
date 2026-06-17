@@ -153,12 +153,15 @@ def check_partial_tp() -> list[str]:
         if not bb:
             continue
 
-        # Время в позиции
+        # Время в позиции (openTime из API — миллисекунды!)
         open_time = int(pos.get("openTime", 0))
         if open_time > 0:
-            hours_open = (time.time() - open_time) / 3600
+            hours_open = (time.time() - open_time / 1000) / 3600
         else:
             hours_open = 0
+
+        # Реализованная прибыль (уже снятые сливки)
+        cum_rpnl = float(pos.get("cumRealisedPnl", 0))
 
         # Рассчитываем новый сплит
         new_mid, new_up = calculate_split(entry, mark, bb["sma"], bb["bb_pct"], hours_open)
@@ -212,7 +215,8 @@ def check_partial_tp() -> list[str]:
         alerts.append(
             f"🎯 Partial TP {sym}: {prev_mid*100:.0f}/{100-prev_mid*100:.0f} → "
             f"{new_mid*100:.0f}/{new_up*100:.0f} "
-            f"(прогресс {state[sym]['progress']:.0f}%, {hours_open:.0f}ч)"
+            f"(прогресс {state[sym]['progress']:.0f}%, {hours_open:.0f}ч, "
+            f"сливки: ${cum_rpnl:+.2f})"
         )
 
     _save_state(state)
