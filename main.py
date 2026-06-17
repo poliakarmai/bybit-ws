@@ -685,6 +685,16 @@ def main_loop():
                         f'(Δ{rot["delta"]}%), BB={rot["bb_pct"]}%'
                     )
 
+            # Partial TP: динамический сплит (каждые 4 HEAVY_CYCLE = ~8 мин)
+            if cycle_count % (HEAVY_CYCLE * 4) == 0 and new_positions:
+                try:
+                    from partial_tp import check_partial_tp
+                    ptp_alerts = check_partial_tp()
+                    for msg in ptp_alerts:
+                        add_alert('INFO', msg)
+                except Exception as e:
+                    add_alert('WARN', f'Partial TP error: {e}')
+
             # Агрессивный авто-SL: каждые 4 цикла (2 мин)
             if cycle_count % 4 == 0 and new_positions:
                 sl_alerts = check_and_fix_sl()

@@ -19,10 +19,11 @@ import os
 import sys
 import time
 from pathlib import Path
+from statistics import mean, stdev
 
 sys.path.insert(0, str(Path.home()))
 sys.path.insert(0, str(Path(__file__).parent))
-from .api import bybit, fetch_positions, fetch_orders, cancel_order, place_order
+from api import bybit, fetch_positions, fetch_orders, cancel_order, place_order
 
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
@@ -58,10 +59,9 @@ def get_bb_data(symbol: str, interval: str = "D", limit: int = 30):
                 return None
 
             closes = [float(k[4]) for k in klines]
-            import numpy as np
 
-            sma_20 = float(np.mean(closes[-20:]))
-            std_20 = float(np.std(closes[-20:]))
+            sma_20 = mean(closes[-20:])
+            std_20 = stdev(closes[-20:]) if len(closes[-20:]) > 1 else 0.0
             upper = sma_20 + 2 * std_20
             lower = sma_20 - 2 * std_20
             price = closes[-1]
