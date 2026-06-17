@@ -46,6 +46,17 @@ def check_and_fix_sl():
 
         sl = p.get('stopLoss')
         if sl is not None and sl != '' and sl != '0' and float(sl or 0) > 0:
+            sl_val = float(sl)
+            entry = p['entry']
+            side = p['side']
+            # 🔒 Правило: SL выше точки входа (LONG) / ниже точки входа (SHORT) — не перезатирать!
+            # Пользователь вручную зафиксировал прибыль
+            if side == 'Buy' and sl_val > entry:
+                log_event(f'🔒 {sym}: SL ${sl_val:.4f} > entry ${entry:.4f} — ручная фиксация, не трогаем')
+                continue
+            if side == 'Sell' and sl_val < entry:
+                log_event(f'🔒 {sym}: SL ${sl_val:.4f} < entry ${entry:.4f} — ручная фиксация, не трогаем')
+                continue
             continue  # SL уже есть
 
         mark = p['mark']
@@ -54,7 +65,7 @@ def check_and_fix_sl():
         size = p['size']
         entry = p['entry']
 
-        # Не ставить SL на прибыльные позиции — пусть работает TP
+        # 🔒 Не ставить SL на прибыльные позиции — пусть работает TP
         if side == 'Buy' and mark > entry:
             continue
         if side == 'Sell' and mark < entry:
@@ -126,5 +137,85 @@ def check_and_fix_sl():
             err = data.get('retMsg', '?') if data else 'no response'
             msg = f'⚠️ Авто-SL {sym} НЕ встал: {err}'
             alerts.append(msg)
+
+    return alerts
+
+
+def check_breakeven_sl():
+    """Автомат: при росте >10% — поставить SL выше точки входа (безубыток).
+    
+    Для LONG:  mark > entry × 1.10  →  SL = entry × 1.01 (+1% буфер)
+    Для SHORT: mark < entry × 0.90  →  SL = entry × 0.99 (−1% буфер)
+    
+    Не перезатирает ручные SL (manual_sl в pumps.json).
+    """
+    alerts = []
+    positions = fetch_positions()
+    if not positions:
+        return alerts
+
+    try:
+        state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')
+        with open(state_file) as f:
+            pump_state = json.loads(f.read())
+    except Exception:
+        pump_state = {}
+
+    for sym, p in positions.items():
+        # Ручные позиции — не трогаем
+        if is_manual_position(sym):
+            continue
+
+        entry = p['entry']
+        mark = p['mark']
+        side = p['side']
+        idx = p['positionIdx']
+        sl = p.get('stopLoss')
+        sl_val = float(sl) if sl and sl != '' and sl != '0' else None
+
+        if side == 'Buy':
+            # LONG: +10% от входа
+            if mark < entry * 1.10:
+                continue
+            
+            # Уже есть SL выше входа — не трогаем
+            if sl_val and sl_val > entry:
+                continue
+            
+            sl_price = round(entry * 1.01, 4)
+            sl_desc = f'безубыток +1% (рост +{(mark/entry-1)*100:.0f}%)'
+        else:
+            # SHORT: −10% от входа
+            if mark > entry * 0.90:
+                continue
+            
+            # Уже есть SL ниже входа — не трогаем
+            if sl_val and sl_val < entry:
+                continue
+            
+            sl_price = round(entry * 0.99, 4)
+            sl_desc = f'безубыток −1% (падение −{(1-mark/entry)*100:.0f}%)'
+
+        # Не ставить SL если он на неправильной стороне
+        if side == 'Buy' and sl_price >= mark:
+            continue
+        if side == 'Sell' and sl_price <= mark:
+            continue
+
+        body = {
+            'category': 'linear',
+            'symbol': sym,
+            'positionIdx': idx,
+            'stopLoss': str(sl_price),
+            'slTriggerBy': 'MarkPrice',
+        }
+
+        data = bybit('POST', '/v5/position/trading-stop', body)
+        if data and data.get('retCode') == 0:
+            msg = f'🛡 Б/у-SL {sym}: ${sl_price:.4f} ({sl_desc}, вход ${entry:.4f})'
+            alerts.append(msg)
+        else:
+            err = data.get('retMsg', '?') if data else 'no response'
+            log_event(f'⚠️ Б/у-SL {sym} НЕ встал: {err}')
 
     return alerts

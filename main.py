@@ -45,7 +45,7 @@ from .health import (check_liquidation, check_bb_squeeze, check_funding_flip,
 from .correlation import check_correlation
 from .rsi import check_rsi_divergence
 from .squeeze import check_squeeze
-from .auto_sl import check_and_fix_sl
+from .auto_sl import check_and_fix_sl, check_breakeven_sl
 from .dca import check_dca
 from .cleanup import check_expired_orders, apply_cancel_expired, clean_stale_orders
 from .reporting import (should_send_summary, send_summary, check_profit_triggers,
@@ -458,6 +458,11 @@ def main_loop():
             if sl_alerts:
                 for a in sl_alerts:
                     add_alert('SL', a)
+            # Б/у-SL: рост >10% → SL на безубыток
+            be_alerts = check_breakeven_sl()
+            if be_alerts:
+                for a in be_alerts:
+                    add_alert('SL', a)
         except Exception as e:
             log_event(f'⚠️ startup SL check error: {e}')
         meta = load_json(ORDERS_METADATA)
@@ -658,6 +663,10 @@ def main_loop():
                         add_alert('INFO', msg)
                     elif msg.startswith('⚠️'):
                         add_alert('STOP', msg)
+                # Б/у-SL: рост >10% → SL на безубыток
+                be_alerts = check_breakeven_sl()
+                for msg in be_alerts:
+                    add_alert('INFO', msg)
             if cycle_count % 2 == 0 and new_orders:
                 expired = check_expired_orders(new_orders, old_orders, now_ts)
                 if expired:
@@ -908,7 +917,7 @@ def handle_sigterm(signum, frame):
 
     # Проверить все позиции имеют SL
     try:
-        from .auto_sl import check_and_fix_sl
+        from .auto_sl import check_and_fix_sl, check_breakeven_sl
         sl_alerts = check_and_fix_sl()
         for msg in sl_alerts:
             log_event(f'  Shutdown SL check: {msg}')
