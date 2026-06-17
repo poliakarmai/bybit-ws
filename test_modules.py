@@ -35,7 +35,7 @@ def test_drawdown_cooldown():
     try:
         with open(dd_file) as f:
             last_alert = json.load(f).get('last_alert', 0)
-    except:
+    except Exception:
         pass
     check("Нет файла кулдауна — last_alert=0", last_alert == 0)
     
@@ -50,7 +50,7 @@ def test_drawdown_cooldown():
         with open(dd_file) as f:
             dd_state = json.load(f)
         last_alert = dd_state.get('last_alert', 0)
-    except:
+    except Exception:
         last_alert = 0
     
     elapsed = time.time() - last_alert
@@ -65,7 +65,7 @@ def test_drawdown_cooldown():
         with open(dd_file) as f:
             dd_state = json.load(f)
         last_alert = dd_state.get('last_alert', 0)
-    except:
+    except Exception:
         last_alert = 0
     
     elapsed = time.time() - last_alert

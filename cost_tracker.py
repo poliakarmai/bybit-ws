@@ -26,7 +26,7 @@ def _load_seen():
     try:
         with open(SEEN_FILE) as f:
             return set(json.load(f))
-    except:
+    except Exception:
         return set()
 
 

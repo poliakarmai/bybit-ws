@@ -50,7 +50,7 @@ def _parse_ticker_line(line: str) -> dict:
             'turnover24h': float(parts[-1].replace(',','')) if parts[-1].replace(',','').replace('.','').isdigit() else 0,
             'fundingRate': 0.0,  # bybit-cli tickers не показывает funding, берём из REST
         }
-    except:
+    except Exception:
         return {}
 
 
@@ -182,7 +182,7 @@ def auto_entry_scan(positions):
         if r.returncode != 0:
             return entries
         ticker_lines = r.stdout.split('\n')
-    except:
+    except Exception:
         return entries
 
     candidates = []

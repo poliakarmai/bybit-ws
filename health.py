@@ -68,7 +68,7 @@ def check_funding_flip():
                     except Exception as e:
                         log_event(f'⚠️ health: {e}')
                     break
-        except:
+        except Exception:
             continue
     for sym, new_val in new_funding.items():
         old_val = old_funding.get(sym)
@@ -106,7 +106,7 @@ def check_daily_drawdown(new_positions):
                 break
         if equity is None:
             return None
-    except:
+    except Exception:
         return None
     if DAILY_START_EQUITY is None:
         DAILY_START_EQUITY = equity
@@ -172,7 +172,7 @@ def check_funding_pump():
                 f'Цена ${bb["cur"]:.4f}, Upper ${bb["upper"]:.4f}'
             )
 
-        except:
+        except Exception:
             continue
 
     save_json(os.path.join(DATA_DIR, 'funding_pump.json'), state)

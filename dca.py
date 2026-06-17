@@ -58,7 +58,7 @@ def _get_lot_step(sym):
     try:
         ls = data['result']['list'][0]['lotSizeFilter']
         return float(ls['qtyStep'])
-    except:
+    except Exception:
         return 0.1
 
 

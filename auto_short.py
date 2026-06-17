@@ -142,7 +142,7 @@ def check_auto_short(positions):
         if not data or data.get('retCode') != 0:
             return actions
         tickers = data['result'].get('list', [])
-    except:
+    except Exception:
         return actions
 
     # Сортируем по обороту, берём кандидатов (все Tier'ы, кроме one-way)
@@ -178,7 +178,7 @@ def check_auto_short(positions):
             if upper <= 0 or upper == lower:
                 continue
             bb_pct = (last_price - lower) / (upper - lower) * 100 if upper != lower else 0
-        except:
+        except Exception:
             continue
 
         # Early exit: если time budget исчерпан — не тратим время на threshold-проверки

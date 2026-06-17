@@ -564,7 +564,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                     if d.date() == datetime.date.today():
                         last_trade_date = date_key
                         break
-                except:
+                except Exception:
                     pass
 
         daily_loss = metrics.get(last_trade_date, {}).get("pnl_total", 0) if last_trade_date else 0

@@ -37,7 +37,7 @@ def send_summary(label):
         balance_out = r.stdout.strip()
         r = safe_run([BYBIT_CLI, 'positions'], timeout=10)
         pos_out = r.stdout.strip()
-    except:
+    except Exception:
         return
     lines = [f'**{label}**', '', '💰 *Баланс:*', balance_out, '', '📊 *Позиции:*', pos_out]
     msg = '\n'.join(lines)

@@ -866,6 +866,11 @@ def main_loop():
                     log_event('🛑 SL re-entry заблокирован: risk-лимит')
                 else:
                     check_sl_reentry(new_positions or {}, False)
+                # Очистка _SL_DEDUP от записей старше 24ч (memory leak fix)
+                _SL_DEDUP.clear() if len(_SL_DEDUP) > 1000 else [
+                    _SL_DEDUP.pop(sym, None) for sym in list(_SL_DEDUP)
+                    if now_ts - _SL_DEDUP.get(sym, 0) > 86400
+                ]
 
             # X10 стратегии каждые HEAVY_CYCLE*2 циклов
             _run_x10_cycle(cfg, new_positions, cycle_count, correlation_stop)

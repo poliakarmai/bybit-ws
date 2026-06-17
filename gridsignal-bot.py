@@ -66,31 +66,31 @@ def init_db():
     conn.execute('CREATE INDEX IF NOT EXISTS idx_signals_ts ON signals(ts)')
     try:
         conn.execute('ALTER TABLE signals ADD COLUMN outcome TEXT DEFAULT NULL')
-    except:
+    except Exception:
         pass  # уже есть
     try:
         conn.execute('ALTER TABLE signals ADD COLUMN outcome_ts REAL DEFAULT NULL')
-    except:
+    except Exception:
         pass
     try:
         conn.execute('ALTER TABLE signals ADD COLUMN pnl_pct REAL DEFAULT NULL')
-    except:
+    except Exception:
         pass
     try:
         conn.execute('ALTER TABLE signals ADD COLUMN timeframe TEXT DEFAULT "D"')
-    except:
+    except Exception:
         pass
     try:
         conn.execute('ALTER TABLE signals ADD COLUMN user_id INTEGER DEFAULT NULL')
-    except:
+    except Exception:
         pass
     try:
         conn.execute('ALTER TABLE users ADD COLUMN lang TEXT DEFAULT "ru"')
-    except:
+    except Exception:
         pass
     try:
         conn.execute('ALTER TABLE signals ADD COLUMN mode TEXT DEFAULT "long"')
-    except:
+    except Exception:
         pass
     conn.execute('''CREATE TABLE IF NOT EXISTS alerts (\n        user_id INTEGER NOT NULL, symbol TEXT NOT NULL,
         lower_bb REAL DEFAULT 0, active INTEGER DEFAULT 1,
@@ -98,7 +98,7 @@ def init_db():
     )''')
     try:
         conn.execute('ALTER TABLE alerts ADD COLUMN bb_zone REAL DEFAULT 100')
-    except:
+    except Exception:
         pass  # already exists
     conn.commit()
     return conn
@@ -1157,7 +1157,7 @@ if not tickers:
     try:
         data = json.loads(r.stdout)
         tickers = data.get("result", {{}}).get("list", [])
-    except: pass
+    except Exception: pass
 
 if tickers:
     s = score_coin("{symbol}", tickers[0])
@@ -1347,7 +1347,7 @@ async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
             vol = float(t.get('turnover24h', 0))
             if vol > 1_000_000:  # отсекаем мусор
                 with_change.append((sym, chg, price, vol))
-        except:
+        except Exception:
             continue
 
     with_change.sort(key=lambda x: x[1], reverse=True)
