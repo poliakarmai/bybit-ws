@@ -139,10 +139,17 @@ curl http://localhost:8380/metrics
 - main_loop разбит на 3 функции
 - Smoke-тесты 45/45
 
-## Что дальше (Фаза 3)
+## Что сделано (Фаза 3 ✅ завершена)
 
-- [ ] ML-скоринг сигналов
-- [ ] Trailing Stop для x10
-- [ ] Partial TP
-- [ ] Бэктестинг на исторических данных
-- [ ] Авто-фандинг-ротация
+- [x] ML-скоринг сигналов — RandomForest F1=0.69, 70/30 вес
+- [x] Trailing Stop для x10 — HEAVY_CYCLE, фильтр leverage≥10
+- [x] Partial TP — динамический сплит 20/80→50/50, без numpy
+- [x] Бэктестинг — walk-forward на исторических klines (REST API)
+- [x] Авто-фандинг-ротация — check + execute + алерты
+
+## Что дальше (Фаза 4)
+
+- [ ] ATR-based риск-сайзинг
+- [ ] Multi-timeframe конфлюенс (D/W/M согласованность)
+- [ ] Алерты в Telegram при входе/выходе
+- [ ] Дашборд Grafana
