@@ -7,7 +7,7 @@ v4.0: SHORT-сигналы, Multi-TF (D/5/3/W/M), RSI(14), батчевый chec
 Бесплатная версия: до 10 /scan в сутки на пользователя.
 """
 
-import os, sys, json, time, sqlite3, subprocess, threading, urllib.parse
+import os, sys, json, time, asyncio, sqlite3, subprocess, threading, urllib.parse
 from datetime import datetime, timezone
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, InlineQueryHandler, CallbackQueryHandler
