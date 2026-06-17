@@ -23,7 +23,7 @@ from statistics import mean, stdev
 
 sys.path.insert(0, str(Path.home()))
 sys.path.insert(0, str(Path(__file__).parent))
-from api import bybit, fetch_positions, fetch_orders, cancel_order, place_order
+from .api import bybit, fetch_positions, fetch_orders, cancel_order, place_order
 
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"

@@ -688,7 +688,6 @@ def main_loop():
             # Partial TP: динамический сплит (каждые 4 HEAVY_CYCLE = ~8 мин)
             if cycle_count % (HEAVY_CYCLE * 4) == 0 and new_positions:
                 try:
-                    from partial_tp import check_partial_tp
                     ptp_alerts = check_partial_tp()
                     for msg in ptp_alerts:
                         add_alert('INFO', msg)
