@@ -730,8 +730,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             }
             return _json_response(self, preview)
 
-        # ── Размещение рыночного ордера ──
-        # Валидация qty: должно быть положительным числом
+        # ── Размещение ордера ──
+        # Валидация qty
         if not isinstance(qty, (int, float)) or qty <= 0:
             return _error(self, 'Invalid qty', 'qty must be a positive number')
         try:
@@ -740,18 +740,35 @@ class RPCHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError):
             qty_str = str(qty)
 
-        order_result = _api_call('POST', '/v5/order/create', {
-            'category': 'linear',
-            'symbol': symbol,
-            'side': side,
-            'orderType': 'Market',
-            'qty': qty_str,
-            'timeInForce': 'IOC',
-            'positionIdx': 0,
-        })
-
-        # Retry with positionIdx=1 если hedge mode
-        if order_result.get('retCode') != 0 and 'position idx' in order_result.get('retMsg', ''):
+        order_type = body.get('order_type', 'Market')
+        limit_price = body.get('price')
+        
+        if order_type == 'Limit' and limit_price:
+            # Limit order
+            order_result = _api_call('POST', '/v5/order/create', {
+                'category': 'linear',
+                'symbol': symbol,
+                'side': side,
+                'orderType': 'Limit',
+                'qty': qty_str,
+                'price': str(limit_price),
+                'timeInForce': 'GTC',
+                'positionIdx': 0,
+            })
+            # Retry with positionIdx=1 для hedge mode
+            if order_result.get('retCode') != 0 and 'position idx' in order_result.get('retMsg', ''):
+                order_result = _api_call('POST', '/v5/order/create', {
+                    'category': 'linear',
+                    'symbol': symbol,
+                    'side': side,
+                    'orderType': 'Limit',
+                    'qty': qty_str,
+                    'price': str(limit_price),
+                    'timeInForce': 'GTC',
+                    'positionIdx': 1,
+                })
+        else:
+            # Market order
             order_result = _api_call('POST', '/v5/order/create', {
                 'category': 'linear',
                 'symbol': symbol,
@@ -759,8 +776,19 @@ class RPCHandler(BaseHTTPRequestHandler):
                 'orderType': 'Market',
                 'qty': qty_str,
                 'timeInForce': 'IOC',
-                'positionIdx': 1,
+                'positionIdx': 0,
             })
+            # Retry with positionIdx=1 если hedge mode
+            if order_result.get('retCode') != 0 and 'position idx' in order_result.get('retMsg', ''):
+                order_result = _api_call('POST', '/v5/order/create', {
+                    'category': 'linear',
+                    'symbol': symbol,
+                    'side': side,
+                    'orderType': 'Market',
+                    'qty': qty_str,
+                    'timeInForce': 'IOC',
+                    'positionIdx': 1,
+                })
 
         if order_result.get('retCode') != 0:
             err_msg = order_result.get('retMsg', 'Unknown error')
