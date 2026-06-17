@@ -290,18 +290,22 @@ def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]
 
     # ── ML Score (вес ×1, макс 5) — Phase 3 ──
     ml_score_val = None
+    ml_adjusted = None
     try:
-        from bybit_ws.ml_scorer import predict
-        ml_prob = predict(symbol, bb['pos'])
-        if ml_prob is not None:
-            ml_score_val = round(ml_prob, 3)
-            # Интеграция: ML_prob → бонус к score
-            if ml_prob > 0.7:    ml_bonus = 5
-            elif ml_prob > 0.6:  ml_bonus = 4
-            elif ml_prob > 0.5:  ml_bonus = 3
-            elif ml_prob > 0.4:  ml_bonus = 2
-            else:                ml_bonus = 1
-            score += ml_bonus * 0.2  # деликатный бонус, не перевешивает
+        from bybit_ws.ml_scorer import ml_adjusted_score
+        # Строим сигнал-дикт для ML
+        signal_dict = {
+            'lower_bb': bb['lower'], 'upper_bb': bb['upper'],
+            'middle_bb': bb['middle'], 'price': float(ticker.get('lastPrice', 0)),
+            'entry': bb['lower'] * 0.97, 'score': score,
+            'timeframe': interval, 'mode': 'long',
+        }
+        ml_adjusted = ml_adjusted_score(signal_dict)
+        if ml_adjusted and ml_adjusted != score:
+            ml_score_val = round(ml_adjusted, 1)
+            # ML-бонус: мягкая коррекция
+            ml_bonus = ml_adjusted - score
+            score = ml_adjusted  # заменяем на ML-скорректированный
     except ImportError:
         pass
 

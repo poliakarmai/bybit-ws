@@ -1,335 +1,232 @@
 """
-Phase 3: ML Scoring Module — машинное обучение для оценки сигналов.
+ML Scorer v1.0 — машинное обучение для предсказания TP сигналов.
 
-Предсказывает вероятность успеха (TP) для LONG-сигналов на основе
-исторических данных из бэктестов.
+Обучается на исторических сигналах из users.db, предсказывает
+вероятность TP для новых сигналов. Добавляет ML-вес к существующему score.
 
-Использование:
-    python3 ml_scorer.py --train              # обучить модель
-    python3 ml_scorer.py --predict SYM BB_PCT  # предсказать для одного сигнала
+Зависимости: scikit-learn, numpy (pip install scikit-learn numpy)
 """
 
 import json
-import math
 import os
+import pickle
+import re
+import sqlite3
 import sys
-import time
-import joblib
-from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
-sys.path.insert(0, str(Path.home()))
-sys.path.insert(0, str(Path(__file__).parent))
-from bybit_ws.api import bybit
+DB_PATH = Path.home() / ".local" / "share" / "gridsignal-bot" / "users.db"
+MODEL_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_scorer.pkl"
+FEATURES_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_features.json"
 
-ML_DIR = Path.home() / ".local" / "share" / "bybit-ws" / "ml"
-ML_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_PATH = ML_DIR / "scorer_v1.joblib"
-SCALER_PATH = ML_DIR / "scaler_v1.joblib"
-FEATURES_PATH = ML_DIR / "features.json"
 
-# ─── Feature Engineering ────────────────────────────────────
-
-def compute_features(symbol: str, interval: str = "D") -> dict | None:
+def _extract_features(signals: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     """
-    Собирает признаки для ML-модели из текущих рыночных данных.
+    Извлекает признаки из исторических сигналов.
+
+    Признаки:
+    - bb_width_pct: (upper - lower) / lower * 100 — ширина полос
+    - entry_discount_pct: (lower - entry) / lower * 100 — насколько ниже lower вход
+    - price_vs_lower_pct: (price - lower) / lower * 100 — где цена относительно lower
+    - score: существующий composite score
+    - mid_slope: (middle - lower) / (upper - lower) — наклон средней
+    - tf_D, tf_W, tf_M: one-hot таймфрейма
+    - mode_long, mode_short, mode_scalp: one-hot режима
     """
-    try:
-        # Дневные свечи для BB
-        resp = bybit(
-            "GET",
-            f"/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit=100",
-        )
-        if isinstance(resp, dict) and resp.get("retCode") == 0:
-            klines = resp["result"]["list"]
-            klines.reverse()  # старые → новые
-            
-            closes = [float(k[4]) for k in klines]
-            highs = [float(k[2]) for k in klines]
-            lows = [float(k[3]) for k in klines]
-            volumes = [float(k[5]) for k in klines]
+    features = []
+    targets = []
 
-            if len(closes) < 30:
-                return None
+    for s in signals:
+        try:
+            lower = float(s.get("lower_bb", 0))
+            upper = float(s.get("upper_bb", 0))
+            middle = float(s.get("middle_bb", 0))
+            price = float(s.get("price", 0))
+            entry = float(s.get("entry", 0))
+            score = float(s.get("score", 0))
+            tf = s.get("timeframe", "D")
+            mode = s.get("mode", "long")
 
-            price = closes[-1]
+            if lower <= 0 or upper <= 0 or upper == lower:
+                continue
 
-            # BB%
-            sma_20 = np.mean(closes[-20:])
-            std_20 = np.std(closes[-20:])
-            upper = sma_20 + 2 * std_20
-            lower = sma_20 - 2 * std_20
-            bb_pct = (price - lower) / (upper - lower) * 100 if upper != lower else 50.0
+            bb_width_pct = (upper - lower) / lower * 100
+            entry_discount_pct = (lower - entry) / lower * 100 if lower > 0 else 0
+            price_vs_lower_pct = (price - lower) / lower * 100 if lower > 0 else 0
+            mid_slope = (middle - lower) / (upper - lower) if upper != lower else 0.5
 
-            # BB Width
-            bb_width = (upper - lower) / sma_20 * 100 if sma_20 > 0 else 0
+            tf_D = 1 if tf == "D" else 0
+            tf_W = 1 if tf == "W" else 0
+            tf_M = 1 if tf in ("M", "5", "3") else 0
 
-            # RSI 14
-            gains, losses = [], []
-            for i in range(-14, 0):
-                delta = closes[i] - closes[i-1]
-                gains.append(max(delta, 0))
-                losses.append(max(-delta, 0))
-            avg_gain = np.mean(gains)
-            avg_loss = np.mean(losses)
-            rsi = 100 - (100 / (1 + avg_gain / avg_loss)) if avg_loss > 0 else 100
+            mode_long = 1 if mode == "long" else 0
+            mode_short = 1 if mode == "short" else 0
+            mode_scalp = 1 if mode == "scalp" else 0
 
-            # Волатильность (стандартное отклонение доходностей, annualized)
-            returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
-            volatility = np.std(returns[-20:]) * math.sqrt(365) * 100 if returns else 0
+            feat = [
+                bb_width_pct,
+                entry_discount_pct,
+                price_vs_lower_pct,
+                score,
+                mid_slope,
+                tf_D, tf_W, tf_M,
+                mode_long, mode_short, mode_scalp,
+            ]
+            features.append(feat)
 
-            # Тренд: SMA20 / SMA50
-            sma_50 = np.mean(closes[-50:]) if len(closes) >= 50 else sma_20
-            trend_strength = (sma_20 / sma_50 - 1) * 100
+            outcome = s.get("outcome", "")
+            target = 1 if outcome in ("TP1", "TP2") else 0
+            targets.append(target)
+        except (ValueError, TypeError):
+            continue
 
-            # Объём (нормированный к среднему)
-            avg_vol = np.mean(volumes[-20:]) if len(volumes) >= 20 else volumes[-1]
-            vol_norm = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
-
-            # High-Low range (%)
-            hl_range = (highs[-1] - lows[-1]) / price * 100
-
-            # Поддержка/сопротивление: расстояние до SMA в сигмах
-            dist_to_sma = (price - sma_20) / std_20 if std_20 > 0 else 0
-
-            # Фандинг
-            funding = 0.0
-            try:
-                resp_f = bybit("GET", f"/v5/market/funding/history?category=linear&symbol={symbol}&limit=1")
-                if isinstance(resp_f, dict) and resp_f.get("retCode") == 0:
-                    items = resp_f["result"]["list"]
-                    if items:
-                        funding = float(items[0].get("fundingRate", 0)) * 100
-            except Exception:
-                pass
-
-            return {
-                "symbol": symbol,
-                "price": price,
-                "bb_pct": round(bb_pct, 2),
-                "bb_width": round(bb_width, 2),
-                "rsi": round(rsi, 2),
-                "volatility": round(volatility, 2),
-                "trend_strength": round(trend_strength, 2),
-                "vol_norm": round(vol_norm, 2),
-                "hl_range": round(hl_range, 2),
-                "dist_to_sma": round(dist_to_sma, 2),
-                "funding": round(funding, 4),
-                "timestamp": int(time.time()),
-            }
-    except Exception as e:
-        print(f"  ⚠️ Ошибка признаков {symbol}: {e}")
-    return None
-
-# ─── Feature Vector ─────────────────────────────────────────
-
-FEATURE_NAMES = [
-    "bb_pct",       # BB% (0-100) — чем ниже, тем перепроданнее
-    "bb_width",     # ширина полос (%)
-    "rsi",          # RSI 14
-    "volatility",   # годовая волатильность (%)
-    "trend_strength",  # SMA20/SMA50 - 1 (%)
-    "vol_norm",     # объём относительно среднего
-    "hl_range",     # дневной диапазон (%)
-    "dist_to_sma",  # расстояние до SMA в сигмах
-    "funding",      # ставка фандинга (%)
-]
-
-def features_to_vector(features: dict) -> np.ndarray:
-    return np.array([features.get(name, 0.0) for name in FEATURE_NAMES])
+    return np.array(features), np.array(targets)
 
 
-# ─── Training ────────────────────────────────────────────────
+def _load_signals() -> list[dict]:
+    """Загружает все сигналы с известным исходом."""
+    conn = sqlite3.connect(str(DB_PATH))
+    rows = conn.execute(
+        "SELECT * FROM signals WHERE outcome IS NOT NULL AND lower_bb IS NOT NULL"
+    ).fetchall()
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(signals)")]
+    conn.close()
+    return [dict(zip(cols, r)) for r in rows]
 
-def train_model(data_path: str | None = None):
+
+def train():
     """
-    Обучает ML-модель на исторических данных.
-    
-    Если data_path не указан — генерирует синтетические данные на основе
-    эвристик стратегии (холодный старт).
+    Обучает модель на исторических данных.
+    Сохраняет модель и метрики.
     """
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import cross_val_score, train_test_split
+    from sklearn.metrics import classification_report
 
-    X, y = [], []
+    signals = _load_signals()
+    if len(signals) < 20:
+        print(f"❌ Мало данных: {len(signals)} сигналов, нужно ≥20")
+        return None
 
-    if data_path and Path(data_path).exists():
-        # Реальные данные из бэктестов
-        with open(data_path) as f:
-            backtest_data = json.load(f)
-        
-        for result in backtest_data.get("results", []):
-            for trade in result.get("trades", []):
-                if trade["type"] == "entry":
-                    # Ищем следующий exit для этого входа
-                    features = compute_features(result["symbol"])
-                    if features:
-                        X.append(features_to_vector(features))
-                        # Целевая: был ли профит при выходе? (определяем по ближайшему tp/sl)
-                        y.append(1)  # временно — нужна логика сопоставления entry→exit
-    else:
-        # Холодный старт: синтетические данные на основе эвристик
-        print("⚡ Холодный старт: генерирую синтетические данные...")
-        np.random.seed(42)
-        n_samples = 500
+    X, y = _extract_features(signals)
 
-        for _ in range(n_samples):
-            bb_pct = np.random.uniform(0, 30)  # перепроданная зона
-            rsi = np.random.uniform(20, 45)
-            volatility = np.random.uniform(30, 120)
-            trend = np.random.uniform(-15, 10)
-            vol_norm = np.random.uniform(0.5, 3.0)
-            hl_range = np.random.uniform(1, 8)
-            dist = np.random.uniform(-2.5, -0.5)
-            funding = np.random.uniform(-0.1, 0.05)
-            bb_width = np.random.uniform(5, 40)
+    # Балансировка классов
+    n_pos = int(np.sum(y))
+    n_neg = int(len(y) - n_pos)
+    print(f"📊 Сигналов: {len(signals)}, TP: {n_pos} ({n_pos/len(signals)*100:.1f}%), non-TP: {n_neg}")
 
-            features = np.array([bb_pct, bb_width, rsi, volatility, trend,
-                                 vol_norm, hl_range, dist, funding])
+    if n_pos < 5:
+        print("❌ Слишком мало положительных примеров (нужно ≥5 TP)")
+        return None
 
-            # Эвристика: чем ниже BB% и RSI — тем выше вероятность успеха
-            success_prob = (
-                0.3 * (1 - bb_pct / 30) +
-                0.2 * (1 - rsi / 50) +
-                0.15 * max(0, (trend + 15) / 25) +
-                0.15 * (1 - abs(funding + 0.01) * 100) +
-                0.1 * max(0, 1 - volatility / 200) +
-                0.1 * max(0, -dist / 2.5)
-            )
-            success = 1 if np.random.random() < success_prob else 0
+    class_weight = "balanced" if n_pos / len(y) < 0.3 else None
 
-            X.append(features)
-            y.append(success)
-
-    X = np.array(X)
-    y = np.array(y)
-
-    if len(X) < 10:
-        print("❌ Недостаточно данных для обучения")
-        return None, None
-
-    # StandardScaler
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    # Logistic Regression
-    model = LogisticRegression(
-        penalty="l2",
-        C=1.0,
-        solver="liblinear",
-        class_weight="balanced",
+    # Кросс-валидация
+    model = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=5,
+        class_weight=class_weight,
         random_state=42,
     )
+    cv_scores = cross_val_score(model, X, y, cv=min(5, n_pos), scoring="f1")
+    print(f"📈 CV F1: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
 
-    # TimeSeriesSplit кросс-валидация
-    tscv = TimeSeriesSplit(n_splits=3)
-    cv_scores = cross_val_score(model, X_scaled, y, cv=tscv, scoring="accuracy")
-    print(f"  Cross-val accuracy: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
-
-    model.fit(X_scaled, y)
-
-    # Сохранение
-    joblib.dump(model, MODEL_PATH)
-    joblib.dump(scaler, SCALER_PATH)
-
-    # Сохраняем имена признаков
-    with open(FEATURES_PATH, "w") as f:
-        json.dump({"feature_names": FEATURE_NAMES, "trained_at": datetime.now().isoformat(),
-                    "samples": len(X), "cv_accuracy": float(cv_scores.mean())}, f, indent=2)
+    # Полное обучение
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    model.fit(X_train, y_train)
 
     # Важность признаков
-    print(f"\n📊 Важность признаков:")
-    coefs = model.coef_[0]
-    sorted_idx = np.argsort(np.abs(coefs))[::-1]
-    for i in sorted_idx:
-        print(f"  {FEATURE_NAMES[i]:20s}: {coefs[i]:+.4f}")
+    feature_names = [
+        "bb_width_pct", "entry_discount_pct", "price_vs_lower_pct",
+        "score", "mid_slope",
+        "tf_D", "tf_W", "tf_M",
+        "mode_long", "mode_short", "mode_scalp",
+    ]
+    importances = sorted(
+        zip(feature_names, model.feature_importances_),
+        key=lambda x: x[1], reverse=True
+    )
+    print("🔝 Важность признаков:")
+    for name, imp in importances[:5]:
+        print(f"  {name}: {imp:.3f}")
 
-    return model, scaler
+    # Сохраняем
+    os.makedirs(MODEL_PATH.parent, exist_ok=True)
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump(model, f)
+
+    with open(FEATURES_PATH, "w") as f:
+        json.dump({
+            "feature_names": feature_names,
+            "cv_f1_mean": float(cv_scores.mean()),
+            "cv_f1_std": float(cv_scores.std()),
+            "n_samples": len(signals),
+            "n_tp": n_pos,
+            "model_type": "RandomForestClassifier",
+        }, f, indent=2)
+
+    print(f"✅ Модель сохранена: {MODEL_PATH}")
+    return model
 
 
-# ─── Prediction ──────────────────────────────────────────────
-
-def predict(symbol: str, bb_pct: float | None = None) -> float | None:
+def predict(signal_data: dict) -> Optional[float]:
     """
-    Предсказывает вероятность успеха (TP) для сигнала.
-    
-    Возвращает ML-оценку от 0 до 1.
-    Если модель не обучена — возвращает None.
+    Предсказывает вероятность TP для нового сигнала.
+    Возвращает ML-вес от 0 до 1, или None если модель не обучена.
     """
-    if not MODEL_PATH.exists() or not SCALER_PATH.exists():
+    if not MODEL_PATH.exists():
         return None
 
-    model = joblib.load(MODEL_PATH)
-    scaler = joblib.load(SCALER_PATH)
+    try:
+        with open(MODEL_PATH, "rb") as f:
+            model = pickle.load(f)
 
-    # Получаем признаки
-    features = compute_features(symbol)
-    if features is None:
+        X, _ = _extract_features([signal_data])
+        if len(X) == 0:
+            return None
+
+        proba = model.predict_proba(X)[0]
+        return float(proba[1])  # вероятность TP
+    except Exception as e:
+        print(f"[ML] predict error: {e}", file=sys.stderr)
         return None
 
-    # Если передан bb_pct — используем его вместо вычисленного
-    if bb_pct is not None:
-        features["bb_pct"] = bb_pct
 
-    X = features_to_vector(features).reshape(1, -1)
-    X_scaled = scaler.transform(X)
-    proba = model.predict_proba(X_scaled)[0][1]
-
-    return float(proba)
-
-
-def ml_score_coin(symbol: str) -> dict | None:
+def ml_adjusted_score(signal_data: dict) -> float:
     """
-    Полный ML-скоринг монеты.
-    Возвращает словарь с базовыми метриками + ml_score.
+    Возвращает скорректированный score: 0.7 × original_score + 0.3 × ML_weight × 10.
+    Если ML недоступен → возвращает исходный score.
     """
-    features = compute_features(symbol)
-    if features is None:
-        return None
+    original = float(signal_data.get("score", 5.0))
+    ml_prob = predict(signal_data)
+    if ml_prob is None:
+        return original
 
-    ml_prob = predict(symbol, features["bb_pct"]) if MODEL_PATH.exists() else None
-
-    return {
-        "symbol": symbol,
-        **features,
-        "ml_score": ml_prob,
-        "ml_verdict": (
-            "🟢 STRONG" if ml_prob and ml_prob > 0.7
-            else "🟡 MODERATE" if ml_prob and ml_prob > 0.5
-            else "🔴 WEAK" if ml_prob is not None
-            else "⚪ NO_MODEL"
-        ),
-    }
+    ml_weight = ml_prob * 10  # переводим в шкалу 0-10
+    adjusted = 0.7 * original + 0.3 * ml_weight
+    return round(adjusted, 1)
 
 
 # ─── CLI ─────────────────────────────────────────────────────
-
-def main():
+if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="ML Scoring for Bollinger Grid")
+    parser = argparse.ArgumentParser(description="ML Scorer for GridSignal")
     parser.add_argument("--train", action="store_true", help="Обучить модель")
-    parser.add_argument("--predict", nargs=2, metavar=("SYM", "BB_PCT"), help="Предсказать для символа")
-    parser.add_argument("--data", default=None, help="JSON с данными бэктеста для обучения")
+    parser.add_argument("--info", action="store_true", help="Инфо о модели")
     args = parser.parse_args()
 
     if args.train:
-        print("🤖 Обучение ML-модели...")
-        train_model(args.data)
-        print(f"\n✅ Модель сохранена: {MODEL_PATH}")
-    elif args.predict:
-        sym, bb = args.predict[0], float(args.predict[1])
-        prob = predict(sym, bb)
-        if prob is not None:
-            print(f"🎯 {sym} (BB={bb}%): ML_score={prob:.3f} → {'🟢' if prob > 0.5 else '🔴'}")
+        train()
+    elif args.info:
+        if FEATURES_PATH.exists():
+            with open(FEATURES_PATH) as f:
+                info = json.load(f)
+            print(json.dumps(info, indent=2))
         else:
-            print("❌ Модель не обучена. Запустите --train")
+            print("Модель не обучена. Запустите --train")
     else:
-        parser.print_help()
-
-
-if __name__ == "__main__":
-    main()
+        train()
