@@ -33,7 +33,10 @@ def trailing_sl(positions):
             if bb_pos > 75 and pnl_pct > 15:
                 sl_target = entry + TRAIL_SL_PERCENT * (mark - entry)
                 sl_target = round(sl_target, 4)
-                if current_sl is None or abs(current_sl - sl_target) > (mark * 0.005):
+                # Защита: не опускаем SL, если он уже в прибыли
+                if current_sl is not None and current_sl > entry:
+                    continue  # SL уже зафиксирован выше входа — не трогаем
+                if current_sl is None or sl_target > (current_sl or 0):
                     if mark > sl_target > entry:
                         actions.append((sym, idx, side, size, sl_target))
                         log_event(f'🔺 Trailing SL {sym}: entry=${entry:.4f} mark=${mark:.4f} pnl={pnl_pct:.1f}% W_bb={bb_pos:.0f}% → SL=${sl_target:.4f}')
@@ -47,7 +50,10 @@ def trailing_sl(positions):
             if bb_pos < 25 and pnl_pct > 15:
                 sl_target = entry - TRAIL_SL_PERCENT * (entry - mark)
                 sl_target = round(sl_target, 4)
-                if current_sl is None or abs(current_sl - sl_target) > (mark * 0.005):
+                # Защита: не поднимаем SL для SHORT, если он уже в прибыли
+                if current_sl is not None and current_sl < entry:
+                    continue  # SL уже зафиксирован ниже входа — не трогаем
+                if current_sl is None or sl_target < (current_sl or float('inf')):
                     if entry > sl_target > mark:
                         actions.append((sym, idx, side, size, sl_target))
                         log_event(f'🔻 Trailing SL {sym}: entry=${entry:.4f} mark=${mark:.4f} pnl={pnl_pct:.1f}% W_bb={bb_pos:.0f}% → SL=${sl_target:.4f}')
@@ -98,7 +104,10 @@ def trailing_sl_x10(positions):
 
             sl_target = round(sl_target, 4)
 
-            if current_sl is None or abs(current_sl - sl_target) > (mark * 0.005):
+            # Защита: не опускаем SL, если он уже в прибыли (ручная фиксация)
+            if current_sl is not None and current_sl > entry:
+                continue
+            if current_sl is None or sl_target > (current_sl or 0):
                 if mark > sl_target > entry:
                     actions.append((sym, idx, side, size, sl_target))
                     log_event(
@@ -120,7 +129,10 @@ def trailing_sl_x10(positions):
 
             sl_target = round(sl_target, 4)
 
-            if current_sl is None or abs(current_sl - sl_target) > (mark * 0.005):
+            # Защита: не поднимаем SL для SHORT, если он уже в прибыли
+            if current_sl is not None and current_sl < entry:
+                continue
+            if current_sl is None or sl_target < (current_sl or float('inf')):
                 if entry > sl_target > mark:
                     actions.append((sym, idx, side, size, sl_target))
                     log_event(

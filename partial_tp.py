@@ -23,7 +23,7 @@ from statistics import mean, stdev
 
 sys.path.insert(0, str(Path.home()))
 sys.path.insert(0, str(Path(__file__).parent))
-from .api import bybit, fetch_positions, fetch_orders, cancel_order, place_order
+from .api import bybit, fetch_positions, fetch_orders, cancel_order, place_order, fetch_funding_total
 
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
@@ -163,6 +163,10 @@ def check_partial_tp() -> list[str]:
         # Реализованная прибыль (уже снятые сливки)
         cum_rpnl = float(pos.get("cumRealisedPnl", 0))
 
+        # Фандинг отдельно — чтобы не смешивать с TP-профитом
+        funding_total = fetch_funding_total(sym, open_time)
+        tp_only = cum_rpnl - funding_total  # чистый TP-профит без фандинга
+
         # Рассчитываем новый сплит
         new_mid, new_up = calculate_split(entry, mark, bb["sma"], bb["bb_pct"], hours_open)
 
@@ -216,7 +220,7 @@ def check_partial_tp() -> list[str]:
             f"🎯 Partial TP {sym}: {prev_mid*100:.0f}/{100-prev_mid*100:.0f} → "
             f"{new_mid*100:.0f}/{new_up*100:.0f} "
             f"(прогресс {state[sym]['progress']:.0f}%, {hours_open:.0f}ч, "
-            f"сливки: ${cum_rpnl:+.2f})"
+            f"TP: ${tp_only:+.2f}, фандинг: ${funding_total:+.2f})"
         )
 
     _save_state(state)

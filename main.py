@@ -250,7 +250,7 @@ def _run_heavy_cycle(cfg, new_positions, new_orders, cycle_count, now_ts):
             pair_key = pair_match.group(1) if pair_match else msg
             pair_hash = hashlib.md5(pair_key.encode()).hexdigest()[:16]
             last = corr_dedup.get(pair_hash, 0)
-            if now_ts2 - last > 86400:
+            if now_ts2 - last > 43200:  # 12 часов
                 add_alert('STOP', msg)
                 corr_dedup[pair_hash] = now_ts2
         save_json(CORR_DEDUP_FILE, corr_dedup)

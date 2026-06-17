@@ -370,3 +370,39 @@ def get_bb_data(symbol, interval='D'):
         return {'lower': lower, 'middle': middle, 'upper': upper, 'cur': cur, 'bb_pos': bb_pos}
     except Exception:
         return None
+
+
+def fetch_funding_total(symbol, since_ms):
+    """Суммировать фандинг-выплаты по символу с openTime.
+
+    Endpoint: GET /v5/account/funding-history
+    Docs: https://bybit-exchange.github.io/docs/v5/account/funding-history
+
+    Args:
+        symbol: e.g. DOTUSDT
+        since_ms: openTime позиции в миллисекундах (начало окна)
+
+    Returns:
+        float: суммарный фандинг (отрицательный = платил, положительный = получал)
+    """
+    total = 0.0
+    cursor = ''
+    while True:
+        path = (
+            f'/v5/account/funding-history?category=linear'
+            f'&symbol={symbol}&startTime={since_ms}&limit=50'
+        )
+        if cursor:
+            path += f'&cursor={cursor}'
+        data = bybit('GET', path)
+        if not data or data.get('retCode') != 0:
+            break
+        items = data['result'].get('list', [])
+        if not items:
+            break
+        for item in items:
+            total += float(item.get('fundingFee', 0))
+        cursor = data['result'].get('nextPageCursor', '')
+        if not cursor:
+            break
+    return total
