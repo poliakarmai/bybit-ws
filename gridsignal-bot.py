@@ -31,6 +31,7 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("📊 Скан"), KeyboardButton("🔴 Шорт"), KeyboardButton("📈 График")],
         [KeyboardButton("⚡ Скальп x10"), KeyboardButton("🔄 Mean Revert"), KeyboardButton("💰 Фандинг")],
+        [KeyboardButton("🔄 Ротация"), KeyboardButton("📊 LONG"), KeyboardButton("📉 SHORT")],
         [KeyboardButton("🟢 Покупка"), KeyboardButton("📋 История"), KeyboardButton("🔔 Алерты")],
         [KeyboardButton("🌐 Язык"), KeyboardButton("📐 Правила"), KeyboardButton("😱 Страх")],
         [KeyboardButton("🔮 Гороскоп"), KeyboardButton("💬 Связь"), KeyboardButton("❓ Помощь"), KeyboardButton("🔍 DEX")],
@@ -243,6 +244,7 @@ T = {
             f"⚡ `/scan scalp` — BB Scalping x10\n"
             f"🔄 `/scan mean` — Mean Reversion x10\n"
             f"💰 `/scan funding` — Funding Momentum x10\n"
+            f"🔄 `/scan rotation` — Funding rotation\n"
             f"🏆 `/top` — лидерборд по винрейту\n"
             f"📊 `/scan TIAUSDT` — скан по тикеру\n"
             f"🟢 `/scan green` — только зона покупки\n"
@@ -692,6 +694,8 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 mode = 'mean_revert'
             elif a in ('funding', 'fund', 'fm'):
                 mode = 'funding'
+            elif a in ('rotation', 'rot', 'rotate'):
+                mode = 'rotation'
             elif a == 'long':
                 mode = 'long'
             else:
@@ -714,10 +718,34 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     tf_label = {'D': 'Daily', 'W': 'Weekly', 'M': 'Monthly', '5': 'M5', '3': 'M3'}.get(interval, interval)
-    mode_label = {'long': 'LONG', 'short': 'SHORT', 'scalp': 'SCALP x10', 'mean_revert': 'MEAN REVERT x10', 'funding': 'FUNDING x10'}.get(mode, mode)
+    mode_label = {'long': 'LONG', 'short': 'SHORT', 'scalp': 'SCALP x10', 'mean_revert': 'MEAN REVERT x10', 'funding': 'FUNDING x10', 'rotation': '🔄 РОТАЦИЯ'}.get(mode, mode)
     scanning_text = t('scanning', lang)
     if mode == 'short':
         scanning_text = scanning_text.replace('сканирую', 'сканирую SHORT').replace('Scanning', 'Scanning SHORT')
+    elif mode == 'rotation':
+        scanning_text = scanning_text.replace('сканирую', 'проверяю ротации').replace('Scanning', 'Checking rotations')
+        status_msg = await update.message.reply_text(f"{scanning_text}...")
+        from .funding_rotation import check_funding_rotation
+        from .api import fetch_positions
+        pos = fetch_positions()
+        rotations = check_funding_rotation(pos or {})
+        if not rotations:
+            await status_msg.edit_text('✅ Нет позиций с невыгодным фандингом. Все ок.')
+        else:
+            lines = ['💰 **Ротации фандинга:**\n']
+            for i, r in enumerate(rotations, 1):
+                side_emoji = '🟢' if r['side'] == 'Buy' else '🔴'
+                _from = r['from']; _to = r['to']; _cf = r['current_funding']
+                _nf = r['new_funding']; _d = r['delta']; _bb = r['bb_pct']; _p = r['price']
+                lines.append(
+                    f"{i}. {side_emoji} {_from} → **{_to}**\n"
+                    f"   Фандинг: {_cf}% → {_nf}% (Δ{_d}%)\n"
+                    f"   BB: {_bb}% · Цена: ${_p:.4f}"
+                )
+            lines.append(f"\n⚡ Всего кандидатов: {len(rotations)}. `/scan rotation` — обновить.")
+            await status_msg.edit_text('\n'.join(lines), parse_mode='Markdown')
+        conn.close()
+        return
     elif mode in ('scalp', 'mean_revert', 'funding'):
         mode_names = {'scalp': 'SCALP x10', 'mean_revert': 'MEAN REVERT x10', 'funding': 'FUNDING x10'}
         scanning_text = scanning_text.replace('сканирую', f'сканирую {mode_names[mode]}').replace('Scanning', f'Scanning {mode_names[mode]}')
@@ -1935,6 +1963,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_scan(update, context)
     elif text == "💰 Фандинг":
         context.args = ['funding']
+        await cmd_scan(update, context)
+    elif text == "🔄 Ротация":
+        context.args = ['rotation']
         await cmd_scan(update, context)
     elif text == "🔍 DEX":
         await cmd_dex_start(update, context)
