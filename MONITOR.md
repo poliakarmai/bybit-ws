@@ -1,7 +1,9 @@
 # MONITOR.md — bybit-ws
 
 > Полная документация трейдинг-монитора Bybit.  
-> **Версия:** 3.12.0+ | **Дата:** 17.06.2026 | **Автор:** Поляков А.Ю.
+> **Версия:** 3.12.0+ | **Дата:** 18.06.2026 | **Автор:** Поляков А.Ю.
+> 
+> ⚠️ **Раздел 10 (Текущее состояние)** — исторический снимок. Актуальные данные: `mcp_bybit_ws_get_positions()`.
 
 ---
 
@@ -144,23 +146,32 @@
 7. **Funding Rotation** — ротация позиций по ставкам фандинга
 8. **Pump Detect** — детектор пампов: резкое падение → шорт
 
-### Неактивные (feature flag `enabled: false`)
+### Неактивные (feature flag `enabled: false` в `config.yaml` → `strategy.junk`)
 
 - JUNK-стратегии (DCA junk, junk trail)
 
 ### Параметры стратегий
 
-| Параметр | Значение |
+| Параметр | Значение | Примечание |
+|----------|---------|-----------|
+| Плечо по умолчанию | 10x | |
+| Интервал BB | D (дневной) | |
+| BB-период | 20 свечей | |
+| ML-скоринг | RandomForest, F1=0.69, вес 70/30 | Модель: `data/ml_scorer.pkl` |
+| Порог безубытка | +10% профита → SL = entry × 1.01 | |
+| Порог корреляции | r > ±0.8 → алерт | |
+| Дедупликация корреляций | 12 часов | |
+| Макс. дневной убыток | -$50 | Блокирует *новые* входы, не закрывает текущие позиции |
+| Макс. общая маржа | $500 | |
+
+### Поведение при рисках
+
+| Ситуация | Действие |
 |----------|---------|
-| Плечо по умолчанию | 10x |
-| Интервал BB | D (дневной) |
-| BB-период | 20 свечей |
-| ML-скоринг | RandomForest, F1=0.69, вес 70/30 |
-| Порог безубытка | +10% профита → SL = entry × 1.01 |
-| Порог корреляции | r > ±0.8 → алерт |
-| Дедупликация корреляций | 12 часов |
-| Макс. дневной убыток | -$50 |
-| Макс. общая маржа | $500 |
+| Достигнут `max_daily_loss` (-$50) | 🛑 Блокировка новых входов. Текущие позиции остаются, SL/TP работают. `get_risk_status` → `blocked: true, reasons: ["daily_loss_limit"]` |
+| Достигнут `max_total_margin` ($500) | 🛑 Блокировка новых входов. `get_risk_status` → `blocked: true, reasons: ["margin_limit"]` |
+| Корреляция r > ±0.8 | ⚠️ Алерт. SL поджимается на 1% ближе к марку. Пример: SL был $5.00, стал $5.05 (LONG) |
+| Памп -46% за 15m | 🚀 Сигнал на шорт. Защита от flash crash: шорт только если объём > среднего за 4h. Ждём подтверждения на 5m таймфрейме перед входом |
 
 ## 5. MCP-инструменты
 
@@ -183,11 +194,76 @@ ADAUSDT  Score=6.6  Tier=A  BB=35%  RSI=33  $0.1697 → entry $0.1249
 ### get_positions
 Текущие позиции с нереализованным PnL, стоп-лоссами и плечом.
 
+**Пример ответа:**
+```json
+[
+  {
+    "symbol": "LINKUSDT",
+    "side": "Buy",
+    "entry": 8.289,
+    "mark": 8.315,
+    "upnl": 0.36,
+    "size": 14.0,
+    "stopLoss": 5.311,
+    "leverage": 10,
+    "positionIdx": 1,
+    "liqPrice": 0.01,
+    "positionIM": 11.61,
+    "cumRealisedPnl": 0.0,
+    "openTime": 1781711576
+  }
+]
+```
+
 ### get_metrics
 Дневные метрики: TP/SL счёт, входы, авто-входы.
 
+**Пример ответа:**
+```json
+{
+  "tp_real": 1,
+  "sl_real": 4,
+  "entry": 0,
+  "auto_entry_filled": 0,
+  "auto_entry_pnl": 0.0
+}
+```
+
 ### get_risk_status
 Лимиты риска: дневной PnL, маржа, блокировки.
+
+**Пример ответа (норма):**
+```json
+{
+  "blocked": false,
+  "daily_loss": 0.0,
+  "max_daily_loss": 50,
+  "total_margin": 84.96,
+  "max_total_margin": 500,
+  "position_count": 8,
+  "remaining_daily_loss": 50.0,
+  "remaining_margin": 415.04,
+  "reasons": []
+}
+```
+
+**Пример ответа (блокировка):**
+```json
+{
+  "blocked": true,
+  "daily_loss": -52.30,
+  "max_daily_loss": 50,
+  "total_margin": 140.0,
+  "max_total_margin": 500,
+  "position_count": 5,
+  "remaining_daily_loss": 0.0,
+  "remaining_margin": 360.0,
+  "reasons": ["daily_loss_limit"]
+}
+```
+
+### place_entry
+Вход в позицию (Market или Limit). **Важно:** если позиция по `symbol` уже существует, RPC вернёт ошибку `409 Conflict` и не удвоит объём.
 
 ### place_entry
 Вход в позицию (Market или Limit).
@@ -251,6 +327,20 @@ JSON-RPC сервер на `127.0.0.1:8766`. Авторизация: `Authorizat
 }
 ```
 
+### Коды ошибок RPC
+
+| HTTP | Код | Описание | Действие AI-агента |
+|------|-----|---------|-------------------|
+| 400 | `invalid_symbol` | Неверный символ | Проверить тикер |
+| 400 | `invalid_side` | side не Buy/Sell | Исправить параметр |
+| 400 | `order_failed` | Биржа отклонила ордер | Проверить qty/price, повторить |
+| 401 | `unauthorized` | Неверный Bearer-токен | Проверить `RPC_TOKEN` |
+| 402 | `insufficient_margin` | Недостаточно маржи | Уменьшить qty или закрыть позицию |
+| 404 | `symbol_not_found` | Тикер не найден | Проверить тикер |
+| 409 | `position_exists` | По этому символу уже есть позиция | Не входить повторно |
+| 422 | `invalid_qty` | Неверное количество | Проверить lot size |
+| 429 | `rate_limit` | Слишком много запросов | Подождать 1 сек |
+
 ## 7. Конфигурация
 
 ### Файлы
@@ -290,6 +380,35 @@ strategy:
 | `RPC_TOKEN` | Bearer-токен для RPC |
 | `TELEGRAM_BOT_TOKEN` | Токен Telegram-бота |
 | `TELEGRAM_CHAT_ID` | ID чата для алертов |
+| `DEEPSEEK_API_KEY` | API-ключ DeepSeek (для ML-скоринга и graphify) |
+
+### Бэкап SQLite (SSOT)
+
+```bash
+# Создать резервную копию
+sqlite3 ~/.local/share/bybit-ws/data/bybit_state.db ".backup ~/bybit-ws/backups/state_$(date +%Y%m%d_%H%M).db"
+
+# Или через WAL-чекпоинт + копирование
+sqlite3 ~/.local/share/bybit-ws/data/bybit_state.db "PRAGMA wal_checkpoint(TRUNCATE)"
+cp ~/.local/share/bybit-ws/data/bybit_state.db ~/backups/
+```
+
+JSON-снепшоты (`positions_snapshot.json`) — резервный канал. SSOT — SQLite. Бэкап обеих копий рекомендуется.
+
+### Генерация/сброс RPC-токена
+
+```bash
+# Посмотреть текущий токен
+python3 -c "import sqlite3; print(sqlite3.connect('$HOME/.local/share/bybit-ws/state.db').execute(\"SELECT value FROM kv_store WHERE key='rpc_auth_token'\").fetchone()[0])"
+
+# Сбросить (сгенерировать новый)
+python3 -c "
+import sqlite3, uuid
+conn = sqlite3.connect('$HOME/.local/share/bybit-ws/state.db')
+conn.execute(\"INSERT OR REPLACE INTO kv_store (key, value) VALUES ('rpc_auth_token', ?)\", (str(uuid.uuid4()),))
+conn.commit()
+print('New token generated. Restart bybit-ws and hermes gateway.')
+"
 
 ## 8. Запуск и управление
 
@@ -301,8 +420,11 @@ sudo systemctl restart bybit-ws
 sudo systemctl status bybit-ws
 
 # Логи
-journalctl -u bybit-ws -f        #实时
+# events.log — для AI-агентов и RPC (/logs)
+# journalctl — для системного администрирования
+journalctl -u bybit-ws -f        # follow (в реальном времени)
 journalctl -u bybit-ws --since "1 hour ago"
+tail -f ~/.local/share/bybit-ws/events.log  # RPC-лог (тот же что в /logs)
 
 # Тесты (venv2)
 cd ~/bybit-ws && source .venv2/bin/activate
@@ -447,6 +569,63 @@ bybit-ws — часть экосистемы Hermes (Море):
 | `mail-sort` | 10 мин | Автосортировка писем по папкам |
 | `crypto-daily-digest` | 09:00 MSK | Ежедневный крипто-дайджест |
 | `system-improvement-loop` | 09:00 MSK | Анализ логов → предложения по скиллам |
+
+## 14. Словарь терминов
+
+| Термин | Расшифровка |
+|--------|------------|
+| **BB** | Bollinger Bands (полосы Боллинджера): SMA ± 2σ |
+| **BB%** | Позиция цены внутри BB-полос: 0% = нижняя, 100% = верхняя |
+| **SSOT** | Single Source of Truth — единственный источник истины (SQLite) |
+| **WAL** | Write-Ahead Logging — режим SQLite для конкурентного доступа |
+| **MCP** | Model Context Protocol — протокол для AI-инструментов |
+| **RPC** | Remote Procedure Call — JSON-RPC сервер на :8766 |
+| **GTC** | Good-Til-Cancelled — ордер активен пока не отменят |
+| **IOC** | Immediate-Or-Cancel — исполнить немедленно или отменить |
+| **DCA** | Dollar Cost Averaging — усреднение позиции докупками |
+| **TP** | Take Profit — тейк-профит |
+| **SL** | Stop Loss — стоп-лосс |
+| **heavy_cycle** | Основной цикл (120 сек): SL/TP, трейлинг, пампы |
+| **x10_cycle** | Цикл для плеча ≥10x (отдельная логика) |
+| **Tier** | Тир ликвидности монеты (S/A/B/C/D): S = BTC/ETH, A = топ-альты |
+| **Score** | ML-скор (RandomForest) × вес 0.7 + Tier-бонус × 0.3 |
+| **PnL** | Profit and Loss — прибыль/убыток |
+| **upnl** | Unrealized PnL — нереализованный (бумажный) |
+| **cumRealisedPnl** | Накопленный реализованный PnL по позиции |
+
+## 15. Жизненный цикл сделки (Lifecycle of a Trade)
+
+```
+1. СИГНАЛ
+   gridsignal_scanner.py → сканирует рынок (BB, RSI, объём)
+   ml_scorer.py → применяет RandomForest + Tier-бонус
+   → Candidate: {symbol, score, tier, entry_price, sl, tp}
+
+2. ВХОД
+   auto_entry.py → проверяет риск-лимиты (max_daily_loss, margin)
+   → Если блокировка: пропускает
+   api.py → place_order(Limit, entry_price)
+   → Ордер размещён на бирже (GTC)
+
+3. МОНИТОРИНГ (каждые 120 сек — heavy_cycle)
+   main.py → _run_heavy_cycle():
+   ├── api.py → fetch_positions() → получает текущие позиции
+   ├── auto_sl.py → check_and_fix_sl() → ставит SL
+   ├── trailing_sl.py → trailing_sl() → поджимает SL
+   ├── partial_tp.py → check_partial_tp() → частичный TP
+   ├── pump_detect.py → check_pumps() → детектирует пампы
+   └── correlation.py → проверяет корреляции
+
+4. ВЫХОД
+   Вариант А (TP): цена достигает TP-ордера → биржа закрывает → reporting.py логирует
+   Вариант Б (SL): цена достигает SL → биржа закрывает → reporting.py логирует
+   Вариант В (Ручной): RPC /close → api.py → close_position()
+
+5. ПОСТ-АНАЛИЗ
+   metrics.py → обновляет дневную статистику (TP/SL счёт)
+   reporting.py → проверяет триггеры (daily PnL alert)
+   state_db.py → сохраняет историю сделки в trades
+```
 
 ## 13. Устранение неисправностей
 
