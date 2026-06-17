@@ -111,7 +111,7 @@ curl http://localhost:8380/metrics
 
 | Данные | Место |
 |--------|-------|
-| Позиции (SSOT) | `data/bybit_state.db` (SQLite, WAL) |
+| Позиции (SSOT) | `data/state.db` (SQLite, WAL) |
 | Резервные снепшоты | `data/positions_snapshot.json` (раз в час) |
 | Метрики | `data/metrics.json` |
 | Пампы | `data/pumps.json` |

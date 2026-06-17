@@ -57,7 +57,7 @@
 
 | Данные | Путь | Формат |
 |--------|------|--------|
-| Позиции (SSOT) | `data/bybit_state.db` | SQLite, WAL |
+| Позиции (SSOT) | `data/state.db` | SQLite, WAL |
 | Резервные снепшоты | `data/positions_snapshot.json` | JSON (раз в час) |
 | Метрики | `data/metrics.json` | JSON |
 | Пампы | `data/pumps.json` | JSON |
@@ -386,7 +386,7 @@ strategy:
 
 ```bash
 # Создать резервную копию
-sqlite3 ~/.local/share/bybit-ws/data/bybit_state.db ".backup ~/bybit-ws/backups/state_$(date +%Y%m%d_%H%M).db"
+sqlite3 ~/.local/share/bybit-ws/state.db ".backup ~/bybit-ws/backups/state_$(date +%Y%m%d_%H%M).db"
 
 # Или через WAL-чекпоинт + копирование
 sqlite3 ~/.local/share/bybit-ws/data/bybit_state.db "PRAGMA wal_checkpoint(TRUNCATE)"

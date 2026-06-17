@@ -86,7 +86,7 @@ def test_sl_close(mock_m, mock_bb):
 @patch('bybit_ws.trailing_sl.is_manual_position', return_value=False)
 def test_sl_far(mock_m, mock_bb):
     print("\n─── trailing_sl: SL далеко ───")
-    check("обновляем", len(trailing_sl({'BTCUSDT': {'entry': 100, 'mark': 118, 'side': 'Buy', 'size': 1, 'positionIdx': 0, 'stopLoss': 100.5}})) == 1)
+    check("обновляем", len(trailing_sl({'BTCUSDT': {'entry': 100, 'mark': 118, 'side': 'Buy', 'size': 1, 'positionIdx': 0, 'stopLoss': 99.5}})) == 1)
 
 
 # ═════════════ 2. state_db (20+ проверок) ═════════════
