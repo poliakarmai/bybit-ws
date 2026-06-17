@@ -153,3 +153,38 @@ curl http://localhost:8380/metrics
 - [ ] Multi-timeframe конфлюенс (D/W/M согласованность)
 - [ ] Алерты в Telegram при входе/выходе
 - [ ] Дашборд Grafana
+
+## MCP-инструменты (как AI-агенты взаимодействуют с bybit-ws)
+
+MCP-сервер: `/home/openclaw/.local/bin/bybit-mcp-server.py` (порт 8766 через RPC)
+
+| Инструмент | Назначение | Пример |
+|-----------|-----------|--------|
+| `scan_market` | Скан сигналов Bollinger Grid | `scan_market(mode="long", interval="D")` |
+| `get_positions` | Текущие позиции + PnL | `get_positions()` |
+| `get_metrics` | Дневные метрики (TP/SL/входы) | `get_metrics()` |
+| `get_risk_status` | Лимиты риска (маржа, дневной убыток) | `get_risk_status()` |
+| **`place_entry`** | **Вход в позицию (Market/Limit)** | `place_entry(symbol="LINKUSDT", side="Buy", qty=14)` |
+
+### `place_entry` — полная сигнатура
+
+```python
+mcp_bybit_ws_place_entry(
+    symbol="LINKUSDT",   # Торговая пара
+    side="Buy",          # Buy=LONG, Sell=SHORT
+    qty=14,              # Количество в базовых единицах
+    sl=5.31,             # Стоп-лосс (опционально)
+    tp=None,             # Тейк-профит (опционально)
+    order_type="Market", # Market или Limit
+    price=6.774,         # Цена для Limit-ордера (опционально)
+)
+```
+
+**Market** — мгновенное исполнение. **Limit** — GTC-ордер по указанной цене (обычно на BB-полосе).
+SL и TP ставятся автоматически после исполнения.
+
+### Типичный воркфлоу для AI-агента
+1. `scan_market` → выбрать кандидатов
+2. `get_risk_status` → проверить лимиты
+3. `get_positions` → нет ли уже позиции по символу
+4. `place_entry` → войти (Market — сразу, Limit — на BB-полосе)
