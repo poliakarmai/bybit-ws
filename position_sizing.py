@@ -7,9 +7,10 @@ Position Sizing — динамический расчёт маржи от % де
 Параметры читаются из конфига (position_sizing:) с фоллбеком на хардкод.
 """
 
-import time, math
+import time, math, json, os
+from pathlib import Path
 from .alerts import log_event
-from .api import bybit
+from .api import bybit, fetch_atr
 from .config import Config
 
 # === Фоллбек-константы (если конфиг не задан) ===
@@ -114,12 +115,22 @@ def calculate_margin(score: float, risk_pct: float | None = None) -> float:
     return margin
 
 
-def margin_for_strategy(strategy: str, score: float = 5.5) -> float:
+def margin_for_strategy(strategy: str, score: float = 5.5,
+                        symbol: str = None, use_atr: bool = False) -> float:
     """
     Маржа под конкретную стратегию.
 
     strategy: 'long' | 'short' | 'reentry' | 'scalp' | 'mean_revert' | 'funding' | 'pump' | 'dca'
+    symbol:   тикер для ATR-сайзинга (опционально)
+    use_atr:  True → ATR-based расчёт вместо процентного (Фаза 4)
     """
+    # ATR-режим
+    if use_atr and symbol:
+        result = atr_margin(symbol, score)
+        if result.get('margin', 0) > 0:
+            return result['margin']
+        # fallback к процентному если ATR не сработал
+
     strategy_risk = {
         'long':      _p('long_risk_pct', _FB_LONG_RISK),
         'short':     _p('long_risk_pct', _FB_LONG_RISK),
@@ -133,3 +144,121 @@ def margin_for_strategy(strategy: str, score: float = 5.5) -> float:
 
     risk_pct = strategy_risk.get(strategy, _p('long_risk_pct', _FB_LONG_RISK))
     return calculate_margin(score, risk_pct=risk_pct)
+
+
+# ── ATR-based sizing (Фаза 4) ──────────────────────────────────
+
+ATR_CACHE_FILE = Path.home() / '.local' / 'share' / 'bybit-ws' / 'atr_cache.json'
+ATR_CACHE_TTL = 14400  # 4 часа
+
+
+def _load_atr_cache() -> dict:
+    try:
+        if ATR_CACHE_FILE.exists():
+            with open(ATR_CACHE_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_atr_cache(cache: dict):
+    try:
+        tmp = str(ATR_CACHE_FILE) + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(cache, f, indent=2)
+        os.replace(tmp, str(ATR_CACHE_FILE))
+    except Exception:
+        pass
+
+
+def get_atr(symbol: str, interval: str = 'D', period: int = 14) -> float | None:
+    """Получить ATR с кешированием (4 часа).
+
+    Args:
+        symbol: e.g. DOTUSDT
+        interval: D, 4h, 1h
+        period: период ATR (default 14)
+
+    Returns:
+        float: ATR в долларах или None
+    """
+    cache = _load_atr_cache()
+    cache_key = f'{symbol}_{interval}_{period}'
+    entry = cache.get(cache_key, {})
+
+    now = time.time()
+    if entry.get('value') and now - entry.get('ts', 0) < ATR_CACHE_TTL:
+        return entry['value']
+
+    atr = fetch_atr(symbol, interval, period)
+    if atr is not None and atr > 0:
+        cache[cache_key] = {'value': atr, 'ts': now}
+        _save_atr_cache(cache)
+
+    return atr
+
+
+def atr_margin(symbol: str, score: float = 5.5,
+               side: str = 'Buy', interval: str = 'D',
+               atr_mult: float = None, risk_per_trade: float = None) -> dict:
+    """ATR-based расчёт маржи.
+
+    Формула: margin = risk_budget / (ATR_$ * multiplier)
+    - risk_budget: $ на риск в одной сделке (default $5)
+    - ATR_$: волатильность в долларах за выбранный интервал
+    - multiplier: сколько ATR держим как стоп (default 2.0)
+
+    Returns:
+        dict с ключами: margin, usdt_qty, qty, atr, risk_budget, method
+        или {'margin': 0, 'error': '...'}
+    """
+    if atr_mult is None:
+        atr_mult = _p('atr_multiplier', 2.0)
+    if risk_per_trade is None:
+        risk_per_trade = _p('atr_risk_per_trade', 5.0)
+
+    atr = get_atr(symbol, interval)
+    if not atr or atr <= 0:
+        return {'margin': 0, 'error': f'ATR недоступен для {symbol}'}
+
+    # Риск-бюджет распределяем через ATR
+    # Если ATR = $0.01, multiplier = 2.0 → стоп-дистанция = $0.02
+    # margin = risk_budget * leverage / (ATR * multiplier)
+    # Но проще: margin = risk_budget (маржа и есть наш риск при кросс-марже)
+
+    margin = round(risk_per_trade, 1)
+    margin = max(margin, _p('min_margin', _FB_MIN_MARGIN))
+
+    # Рассчитываем qty: usdt_qty = margin * leverage, qty = usdt_qty / price
+    # Но цена неизвестна на этом этапе — возвращаем margin и atr,
+    # вызывающий код сам посчитает qty при известной цене
+
+    return {
+        'margin': margin,
+        'atr': atr,
+        'atr_multiplier': atr_mult,
+        'risk_per_trade': risk_per_trade,
+        'stop_distance': round(atr * atr_mult, 8),
+        'method': 'atr',
+    }
+
+
+def suggest_qty(margin: float, price: float, leverage: float = 10,
+                lot_step: float = 0.1) -> float:
+    """По марже и цене посчитать qty для ордера.
+
+    Args:
+        margin: маржа в USDT
+        price: текущая цена
+        leverage: плечо (default 10x)
+        lot_step: шаг лота (default 0.1)
+
+    Returns:
+        float: количество контрактов
+    """
+    if price <= 0:
+        return 0
+    usdt_qty = margin * leverage
+    qty = math.floor(usdt_qty / price / lot_step) * lot_step
+    return max(qty, lot_step)

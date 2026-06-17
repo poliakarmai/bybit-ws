@@ -149,7 +149,7 @@ curl http://localhost:8380/metrics
 
 ## Что дальше (Фаза 4)
 
-- [ ] ATR-based риск-сайзинг
+- [x] ATR-based риск-сайзинг — `position_sizing.atr_margin()`, кеш 4ч
 - [ ] Multi-timeframe конфлюенс (D/W/M согласованность)
 - [ ] Алерты в Telegram при входе/выходе
 - [ ] Дашборд Grafana

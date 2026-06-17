@@ -406,3 +406,57 @@ def fetch_funding_total(symbol, since_ms):
         if not cursor:
             break
     return total
+
+
+def fetch_atr(symbol, interval='D', period=14):
+    """Рассчитать ATR (Average True Range) через klines.
+
+    Endpoint: GET /v5/market/kline
+    Использует Wilder's smoothing: ATR = (prev_ATR*(period-1) + TR) / period
+
+    Args:
+        symbol: e.g. DOTUSDT
+        interval: D, 4h, 1h, 15m, 5m
+        period: число свечей для расчёта (default 14)
+
+    Returns:
+        float: ATR в долларах, или None при ошибке
+    """
+    try:
+        # Нужно period+1 свечей (первая даёт prevClose для TR)
+        data = bybit('GET',
+                     f'/v5/market/kline?category=linear&symbol={symbol}'
+                     f'&interval={interval}&limit={period + 1}')
+        if not data or data.get('retCode') != 0:
+            return None
+
+        candles = data['result'].get('list', [])
+        if len(candles) < period:
+            return None
+
+        # candles newest-first → разворачиваем для хронологического порядка
+        candles = candles[:period + 1][::-1]
+
+        # True Range для каждой свечи (кроме первой — нужен prevClose)
+        tr_values = []
+        for i in range(1, len(candles)):
+            high = float(candles[i][2])
+            low = float(candles[i][3])
+            prev_close = float(candles[i - 1][4])
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            tr_values.append(tr)
+
+        if not tr_values:
+            return None
+
+        # Wilder's smoothing
+        atr = sum(tr_values) / len(tr_values)  # начальное SMA
+        if len(tr_values) > 1:
+            # Рекурсивное сглаживание для консистентности с Wilder's
+            for tr in tr_values:
+                atr = (atr * (period - 1) + tr) / period
+
+        return round(atr, 8)
+
+    except Exception:
+        return None
