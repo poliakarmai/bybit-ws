@@ -7,7 +7,7 @@ v4.0: SHORT-сигналы, Multi-TF (D/5/3/W/M), RSI(14), батчевый chec
 Бесплатная версия: до 10 /scan в сутки на пользователя.
 """
 
-import os, sys, json, time, asyncio, sqlite3, subprocess, threading, urllib.parse
+import os, sys, json, time, asyncio, re, sqlite3, subprocess, threading, urllib.parse
 from datetime import datetime, timezone
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, InlineQueryHandler, CallbackQueryHandler
@@ -46,7 +46,8 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('''CREATE TABLE IF NOT EXISTS users (\n        user_id INTEGER PRIMARY KEY,
         username TEXT, first_name TEXT, deposit REAL DEFAULT 0,
         scans_today INTEGER DEFAULT 0, last_scan_ts REAL DEFAULT 0,
@@ -138,7 +139,11 @@ def check_scan_allowed(user: dict) -> tuple:
 
 
 def update_scan_count(conn, user_id: int):
-    conn.execute('UPDATE users SET scans_today=scans_today+1, last_scan_ts=? WHERE user_id=?', (time.time(), user_id))
+    """Atomically increment scan count — prevents race condition in limits."""
+    conn.execute(
+        'UPDATE users SET scans_today=scans_today+1, last_scan_ts=? WHERE user_id=? AND scans_today < ?',
+        (time.time(), user_id, MAX_SCANS_PER_DAY)
+    )
     conn.commit()
 
 
@@ -231,6 +236,18 @@ async def get_cached_scan(interval: str = 'D', user_id: int = None, symbol: str 
 def get_lang(conn, user_id: int) -> str:
     row = conn.execute('SELECT lang FROM users WHERE user_id=?', (user_id,)).fetchone()
     return (row[0] if row and row[0] else 'ru')
+
+
+def _valid_symbol(symbol: str) -> str:
+    """Validate and normalize trading symbol. Returns safe symbol or None."""
+    if not symbol or not isinstance(symbol, str):
+        return None
+    sym = symbol.strip().upper()
+    if not sym.endswith('USDT'):
+        sym += 'USDT'
+    if not re.fullmatch(r'^[A-Z0-9]+$', sym):
+        return None
+    return sym
 
 
 T = {
@@ -629,7 +646,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Начинайте с тестнета Bybit. Автор не несёт ответственности за ваши торговые решения."
         )
 
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(text, parse_mode='MarkdownV2')
 
 
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -727,8 +744,8 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_msg = await update.message.reply_text(f"{scanning_text}...")
         from funding_rotation import check_funding_rotation
         from api import fetch_positions
-        pos = fetch_positions()
-        rotations = check_funding_rotation(pos or {})
+        pos = await asyncio.to_thread(fetch_positions)
+        rotations = await asyncio.to_thread(check_funding_rotation, pos or {})
         if not rotations:
             await status_msg.edit_text('✅ Нет позиций с невыгодным фандингом. Все ок.')
         else:
@@ -743,7 +760,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"   BB: {_bb}% · Цена: ${_p:.4f}"
                 )
             lines.append(f"\n⚡ Всего кандидатов: {len(rotations)}. `/scan rotation` — обновить.")
-            await status_msg.edit_text('\n'.join(lines), parse_mode='Markdown')
+            await status_msg.edit_text('\n'.join(lines), parse_mode='MarkdownV2')
         conn.close()
         return
     elif mode in ('scalp', 'mean_revert', 'funding'):
@@ -1272,7 +1289,8 @@ async def cmd_fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if checked >= 10:
             break
         try:
-            r = subprocess.run(['bybit', 'bb', sym, 'D'], capture_output=True, text=True, timeout=10)
+            r = await asyncio.to_thread(subprocess.run, ['bybit', 'bb', sym, 'D'],
+                                       capture_output=True, text=True, timeout=10)
             m = re.search(r'Позиция:\s*([0-9.]+)%', r.stdout)
             if m:
                 bb = float(m.group(1))
@@ -1574,7 +1592,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     day_ago, week_ago, month_ago = now - 86400, now - 7*86400, now - 30*86400
 
 
-async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Лидерборд по винрейту (мин. 5 отработанных сигналов)."""
     user_id = update.effective_user.id
     conn_tmp = init_db()
@@ -1808,14 +1826,16 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💡 Вход: `${last['bb_lower']*0.97:.4f}` (−3% Lower)"
             )
 
-        with open(tmp_path, 'rb') as img:
-            await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=img,
-                caption=caption
-            )
-
-        os.unlink(tmp_path)
+        try:
+            with open(tmp_path, 'rb') as img:
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=img,
+                    caption=caption
+                )
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
         await status_msg.delete()
 
         conn2 = init_db()
@@ -1967,6 +1987,12 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🔄 Ротация":
         context.args = ['rotation']
         await cmd_scan(update, context)
+    elif text == "📊 LONG":
+        context.args = ['long']
+        await cmd_scan(update, context)
+    elif text == "📉 SHORT":
+        context.args = ['short']
+        await cmd_scan(update, context)
     elif text == "🔍 DEX":
         await cmd_dex_start(update, context)
 
@@ -2113,6 +2139,7 @@ def main():
     app.add_handler(CommandHandler('scan', cmd_scan))
     app.add_handler(CommandHandler('stats', cmd_stats))
     app.add_handler(CommandHandler('top', cmd_top))
+    app.add_handler(CommandHandler('leaderboard', cmd_leaderboard))
     app.add_handler(CommandHandler('setrisk', cmd_setrisk))
     app.add_handler(CommandHandler('history', cmd_history))
     app.add_handler(CommandHandler('subscribe', cmd_subscribe))
@@ -2121,7 +2148,6 @@ def main():
     app.add_handler(CommandHandler('contact', cmd_contact))
     app.add_handler(CommandHandler('fear', cmd_fear))
     app.add_handler(CommandHandler('horoscope', cmd_horoscope))
-    app.add_handler(CommandHandler('top', cmd_top))
     app.add_handler(CommandHandler('chart', cmd_chart))
     app.add_handler(CommandHandler('lang', cmd_lang))
     app.add_handler(CommandHandler('dex', cmd_dex))
