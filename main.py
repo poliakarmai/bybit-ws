@@ -34,8 +34,9 @@ from .api import fetch_positions, fetch_orders, bybit
 from .snapshot import load_json, save_json, check_position_changes, check_order_changes
 from .alerts import log_event, add_alert, get_alerts, send_telegram_alert, _is_duplicate
 from .auto_tp import auto_take_profit, apply_auto_tp
-from .trailing_sl import trailing_sl, apply_trailing_sl
+from .trailing_sl import trailing_sl, trailing_sl_x10, apply_trailing_sl
 from .junk_trail import trailing_junk_tp
+from .funding_rotation import check_funding_rotation, execute_rotation
 from .overbought import check_overbought, rotate_watchlist
 from .pump_detect import check_pumps, check_weekly_pumps
 from .file_utils import safe_json_write, locked_open
@@ -664,6 +665,25 @@ def main_loop():
                     if junk_trail_actions:
                         for sym, pnl_pct, new_tp, reason in junk_trail_actions:
                             add_alert('TP', f'🔒 JUNK TP {sym}: {reason} при +{pnl_pct:.1f}% → ${new_tp:.6f}')
+
+            # X10 агрессивный трейлинг (каждый HEAVY_CYCLE)
+            if cycle_count % HEAVY_CYCLE == 0 and new_positions:
+                x10_actions = trailing_sl_x10(new_positions)
+                if x10_actions:
+                    apply_trailing_sl(x10_actions)
+                    for sym, idx, side, size, price in x10_actions:
+                        add_alert('INFO', f'⚡ X10 Trail SL {sym} → ${price:.4f}')
+
+            # Funding Rate ротация: алерт при невыгодном фандинге (каждый HEAVY_CYCLE)
+            if cycle_count % HEAVY_CYCLE == 0 and new_positions:
+                rotations = check_funding_rotation(new_positions)
+                for rot in rotations:
+                    add_alert(
+                        'INFO',
+                        f'💰 Ротация {rot["from"]}→{rot["to"]}: '
+                        f'фандинг {rot["current_funding"]}%→{rot["new_funding"]}% '
+                        f'(Δ{rot["delta"]}%), BB={rot["bb_pct"]}%'
+                    )
 
             # Агрессивный авто-SL: каждые 4 цикла (2 мин)
             if cycle_count % 4 == 0 and new_positions:
