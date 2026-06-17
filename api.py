@@ -180,7 +180,7 @@ def fetch_positions():
             position_im = float(p.get('positionIM', 0))
             cum_rpnl = float(p.get('cumRealisedPnl', 0))
             open_time = int(p.get('openTime', 0) or 0)
-            margin = float(p.get('margin', 0))
+            margin = float(p.get('positionIM', p.get('margin', 0)))
             positions[sym] = {
                 'size': size,
                 'entry': float(p['avgPrice']),
@@ -257,7 +257,8 @@ def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
     """
     body = {'category': 'linear', 'symbol': symbol,
             'positionIdx': positionIdx,
-            'stopLoss': str(stop_price), 'slTriggerBy': 'MarkPrice'}
+            'stopLoss': str(stop_price), 'slTriggerBy': 'MarkPrice',
+            'tpslMode': 'Full'}
     data = bybit('POST', '/v5/position/trading-stop', body)
     if data and data.get('retCode') == 0:
         log_event(f'✅ SL поставлен {symbol} @ ${stop_price:.4f}')

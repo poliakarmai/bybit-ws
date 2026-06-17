@@ -15,6 +15,9 @@ def trailing_sl(positions):
         # Ручные позиции — не подтягиваем SL
         if is_manual_position(sym):
             continue
+        # X10 позиции — обслуживаются trailing_sl_x10, не трогаем
+        if p.get('leverage', 0) >= 10:
+            continue
         entry, mark, side, size, idx = p['entry'], p['mark'], p['side'], p['size'], p['positionIdx']
         current_sl = p.get('stopLoss')
         if size <= 0:
@@ -67,6 +70,9 @@ def trailing_sl_x10(positions):
     actions = []
     for sym, p in positions.items():
         if is_manual_position(sym):
+            continue
+        # Только x10 позиции (плечо ≥ 10)
+        if p.get('leverage', 0) < 10:
             continue
         entry, mark, side, size, idx = (
             p['entry'], p['mark'], p['side'], p['size'], p['positionIdx']

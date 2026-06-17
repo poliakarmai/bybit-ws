@@ -241,7 +241,11 @@ def check_funding_rotation(positions) -> list[dict]:
 
 
 def execute_rotation(rotation: dict, positions: dict) -> bool:
-    """Исполнить ротацию: закрыть from, открыть to того же размера/стороны."""
+    """Исполнить ротацию: открыть to + SL, затем закрыть from.
+
+    Порядок: сначала открываем новую → ставим SL → закрываем старую.
+    При сбое на любом шаге — rollback: закрываем новую, старую оставляем.
+    """
     from_sym = rotation['from']
     to_sym = rotation['to']
     side = rotation['side']
@@ -256,7 +260,42 @@ def execute_rotation(rotation: dict, positions: dict) -> bool:
         return False
 
     try:
-        # Закрываем старую
+        # 1. Открываем новую позицию (СНАЧАЛА!)
+        qty = str(size)
+        new_result = bybit('POST', '/v5/order/create', {
+            'category': 'linear',
+            'symbol': to_sym,
+            'side': side,
+            'orderType': 'Market',
+            'qty': qty,
+            'positionIdx': 0,
+        })
+        if new_result.get('retCode') != 0:
+            log_event(f'❌ Ротация: не удалось открыть {to_sym}: {new_result.get("retMsg")}')
+            return False  # старая позиция НЕ тронута
+
+        log_event(f'🔄 Ротация: открыт {to_sym} ({side}, {size} контрактов)')
+
+        # 2. Немедленно ставим SL на новую позицию
+        sl_price = _calc_rotation_sl(rotation, side)
+        from .api import place_stop_loss
+        sl_ok = place_stop_loss(to_sym, 0, side, size, sl_price)
+        if not sl_ok:
+            log_event(f'⚠️ Ротация: SL не выставлен на {to_sym}, закрываю новую')
+            # Rollback: закрываем новую
+            close_new_side = 'Sell' if side == 'Buy' else 'Buy'
+            bybit('POST', '/v5/order/create', {
+                'category': 'linear',
+                'symbol': to_sym,
+                'side': close_new_side,
+                'orderType': 'Market',
+                'qty': qty,
+                'positionIdx': 0,
+                'reduceOnly': True,
+            })
+            return False
+
+        # 3. Закрываем старую позицию
         close_side = 'Sell' if side == 'Buy' else 'Buy'
         idx = p.get('positionIdx', 0)
         result = bybit('POST', '/v5/order/create', {
@@ -269,30 +308,16 @@ def execute_rotation(rotation: dict, positions: dict) -> bool:
             'reduceOnly': True,
         })
         if result.get('retCode') != 0:
-            log_event(f'❌ Ротация: не удалось закрыть {from_sym}: {result.get("retMsg")}')
-            return False
-
-        log_event(f'🔄 Ротация: закрыт {from_sym} ({side}, {size} контрактов)')
-
-        # Открываем новую (тот же размер, та же сторона)
-        margin = margin_for_strategy('funding_rotation', rotation.get('price', 0))
-        qty = str(size)
-        new_result = bybit('POST', '/v5/order/create', {
-            'category': 'linear',
-            'symbol': to_sym,
-            'side': side,
-            'orderType': 'Market',
-            'qty': qty,
-            'positionIdx': 0,
-        })
-        if new_result.get('retCode') != 0:
-            log_event(f'❌ Ротация: не удалось открыть {to_sym}: {new_result.get("retMsg")}')
+            log_event(f'⚠️ Ротация: не удалось закрыть {from_sym}: {result.get("retMsg")}')
+            # Новая уже открыта и со SL — оставляем, старая висит (дублирование exposure)
+            # Это лучше чем потеря обеих позиций
+            add_alert('STOP', f'⚠️ Ротация {from_sym}→{to_sym}: дублирование! Старая не закрыта.')
             return False
 
         log_event(
             f'✅ Ротация {from_sym}→{to_sym}: '
             f'фандинг {rotation["current_funding"]}%→{rotation["new_funding"]}% '
-            f'(Δ{rotation["delta"]}%), BB={rotation["bb_pct"]}%'
+            f'(Δ{rotation["delta"]}%), BB={rotation["bb_pct"]}%, SL={sl_price:.4f}'
         )
 
         # Обновляем состояние
@@ -312,3 +337,14 @@ def execute_rotation(rotation: dict, positions: dict) -> bool:
     except Exception as e:
         log_event(f'❌ Ротация {from_sym}→{to_sym}: {e}')
         return False
+
+
+def _calc_rotation_sl(rotation: dict, side: str) -> float:
+    """Рассчитать SL для новой позиции после ротации: 2% от цены входа."""
+    price = rotation.get('price', 0)
+    if price <= 0:
+        return 0.0
+    if side == 'Buy':
+        return round(price * 0.98, 4)  # -2% SL
+    else:
+        return round(price * 1.02, 4)  # +2% SL
