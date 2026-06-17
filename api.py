@@ -328,6 +328,23 @@ def get_bb_lower(symbol, interval='D'):
         return None
 
 
+def place_order(symbol, side, order_type, qty, price=None, reduce_only=False, position_idx=0):
+    """Разместить ордер через Bybit v5 REST API."""
+    body = {
+        'category': 'linear',
+        'symbol': symbol,
+        'side': side,
+        'orderType': order_type,
+        'qty': str(qty),
+        'positionIdx': position_idx,
+    }
+    if price is not None:
+        body['price'] = str(price)
+    if reduce_only:
+        body['reduceOnly'] = True
+    return bybit('POST', '/v5/order/create', body)
+
+
 def get_bb_data(symbol, interval='D'):
     """Получить полные данные BB: lower, middle, upper, cur, bb_pos.
 

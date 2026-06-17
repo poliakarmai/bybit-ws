@@ -5,21 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/bybit-ws
-WorkingDirectory=%h/.local/lib/bybit_ws
+User=openclaw
+ExecStart=/home/openclaw/bybit-ws/.venv2/bin/python -c "from bybit_ws.main import run_cli; run_cli()"
+WorkingDirectory=/home/openclaw/bybit-ws
 Restart=always
 RestartSec=10
-Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=%h/.config/bybit-ws/.env
-
-# Security hardening
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=%h/.local/share/bybit-ws
-ReadWritePaths=%h/.config/bybit-ws
-ReadWritePaths=/opt/vpn-core/conf
+Environment="PATH=/home/openclaw/bybit-ws/.venv2/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/openclaw/bybit-ws"
 
 [Install]
 WantedBy=default.target
