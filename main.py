@@ -68,6 +68,7 @@ from .funding_entry import check_funding_signals, execute_funding_entry
 from .atr_sizer import check_position_risk, validate_entry
 from .x10_limits import record_x10_trade, x10_entry_allowed, get_x10_stats, track_x10_entry, get_x10_strategy, clear_x10_position
 from .manual_positions import is_manual_position, mark_manual_position
+from .partial_tp import check_partial_tp  # Phase 3
 
 # Дедупликация STOP-алертов: кулдаун 5 минут на символ
 # Предотвращает спам от hedge SL orderId race (orderId меняется каждый цикл)
@@ -204,6 +205,15 @@ def _run_heavy_cycle(cfg, new_positions, new_orders, cycle_count, now_ts):
                 add_alert("ENTRY", msg)
         else:
             log_event('🛑 DCA заблокирован: risk-лимит')
+
+        # Phase 3: Partial TP — каждые 4 цикла
+        if cycle_count % 4 == 0:
+            try:
+                ptp_alerts = check_partial_tp()
+                for a in ptp_alerts:
+                    add_alert("TP", a)
+            except Exception as e:
+                log_event(f'⚠️ partial_tp error: {e}')
 
     if heavy_ok and not rpc_state.get("paused"):
         msgs, err = _a(check_auto_short, new_positions or {})
