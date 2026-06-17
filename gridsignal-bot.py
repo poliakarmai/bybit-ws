@@ -23,6 +23,11 @@ _cache = {}  # {data_D_long: [...], data_5_long: [...], data_D_short: [...], ...
 _inline_cache = {}
 CACHE_TTL = 120
 INLINE_CACHE_TTL = 300
+
+def _escape_mdv2(text: str) -> str:
+    """Экранирует спецсимволы Telegram MarkdownV2."""
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 SCAN_COOLDOWN = 60
 MAX_SCANS_PER_DAY = 10
 MAX_ALERTS_PER_USER = 5
@@ -1214,12 +1219,12 @@ if tickers:
             entry = s['lower_bb'] * 0.97
             fire = "🔥" if s['score'] >= 7 else ("✅" if s['score'] >= 5.5 else "⚠️")
             text = (
-                f"🚀 **{s['symbol']}** · Score {s['score']}/10 {fire}\n\n"
-                f"💰 Цена: `${s['price']:.4f}`\n"
-                f"📥 Вход: `${entry:.4f}` (−3% ниже Lower)\n"
-                f"🎯 TP: `${s['middle_bb']:.4f}` / `${s['upper_bb']:.4f}`\n"
-                f"🛑 SL: `${s['lower_bb']*0.93:.4f}`\n"
-                f"📊 BB: {s['bb_pos']}% · Vol: `${s['turnover']:,.0f}`\n"
+                f"<b>🚀 {s['symbol']}</b> · Score {s['score']}/10 {fire}\n\n"
+                f"💰 Цена: ${s['price']:.4f}\n"
+                f"📥 Вход: ${entry:.4f} (−3% ниже Lower)\n"
+                f"🎯 TP: ${s['middle_bb']:.4f} / ${s['upper_bb']:.4f}\n"
+                f"🛑 SL: ${s['lower_bb']*0.93:.4f}\n"
+                f"📊 BB: {s['bb_pos']}% · Vol: ${s['turnover']:,.0f}\n"
                 f"📐 Фундамент: Tier {s['tier']}"
             )
             results = [
@@ -1227,7 +1232,7 @@ if tickers:
                     id=symbol,
                     title=f"{symbol} — Score {s['score']}/10 {fire}",
                     description=f"Вход: ${entry:.4f} | BB: {s['bb_pos']}% | Vol: ${s['turnover']:,.0f}",
-                    input_message_content=InputTextMessageContent(text, parse_mode="MarkdownV2")
+                    input_message_content=InputTextMessageContent(text, parse_mode="HTML")
                 )
             ]
             await update.inline_query.answer(results, cache_time=INLINE_CACHE_TTL)
@@ -1242,7 +1247,7 @@ if tickers:
             title=f"❌ {query} не найден",
             description="Проверь тикер или попробуй /scan в боте",
             input_message_content=InputTextMessageContent(
-                f"❌ {query} — монета не найдена в топ-100 по объёму.", parse_mode="MarkdownV2"
+                f"<b>❌ {query}</b> — монета не найдена в топ-100 по объёму.", parse_mode="HTML"
             )
         )
     ], cache_time=30)
