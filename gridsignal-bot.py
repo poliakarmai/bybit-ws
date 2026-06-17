@@ -725,8 +725,8 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif mode == 'rotation':
         scanning_text = scanning_text.replace('сканирую', 'проверяю ротации').replace('Scanning', 'Checking rotations')
         status_msg = await update.message.reply_text(f"{scanning_text}...")
-        from .funding_rotation import check_funding_rotation
-        from .api import fetch_positions
+        from funding_rotation import check_funding_rotation
+        from api import fetch_positions
         pos = fetch_positions()
         rotations = check_funding_rotation(pos or {})
         if not rotations:
