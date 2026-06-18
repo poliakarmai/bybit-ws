@@ -87,7 +87,7 @@ bybit-ws/
 │                           Запуск: python3 gridsignal-bot.py --mode long|short
 │
 │   # ── ML (Фаза 5) ──
-├── ml_scorer.py         ← ML Gate: RandomForest F1=0.921
+├── ml_scorer.py         ← ML Gate: RandomForest (⚠️ ОТКЛЮЧЁН — overfit, F1_oos=0.368)
 ├── ab_test.py           ← A/B-тест ML Gate vs baseline
 ├── lstm_regime.py       ← LSTM-классификатор рынка (5 классов)
 ├── rl_env.py            ← RL-среда (Gymnasium, 13 признаков)
