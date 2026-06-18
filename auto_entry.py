@@ -189,14 +189,35 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
 
     total = bb_score + vol_score + down_score + fund_score + vola_score + qscore
 
+    # ── Фаза 5.1: ML-скорректированный score ──
+    ml_adjusted = total
+    ml_breakdown = ''
+    try:
+        from .ml_scorer import ml_adjusted_score
+        signal_data = {
+            'score': total,
+            'price': cur,
+            'lower_bb': bb_data['lower'],
+            'upper_bb': bb_data['upper'],
+            'middle_bb': bb_data['middle'],
+            'entry': bb_data['lower'],  # LONG: вход на нижней полосе
+            'timeframe': 'D',
+            'mode': 'long',
+        }
+        ml_adjusted = ml_adjusted_score(signal_data)
+        if ml_adjusted != total:
+            ml_breakdown = f' ML={ml_adjusted:.1f}'
+    except Exception:
+        pass  # модель не обучена или ошибка — остаёмся на heuristic
+
     return {
         'symbol': sym,
-        'score': total,
+        'score': ml_adjusted,
         'max_score': 50,
         'bb_pos': bb_pos,
         'bb_width': bb_width,
         'cur': cur,
-        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore}',
+        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore}{ml_breakdown}',
     }
 
 
