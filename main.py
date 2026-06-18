@@ -1,6 +1,6 @@
-"""Главный цикл монитора и точка входа."""
-import os, sys, time, signal, threading, hashlib, re
-from datetime import datetime
+# DEPRECATED: use main_async.py for production (asyncio, цикл 30с)
+# Этот файл оставлен для совместимости и будет удалён в следующей версии
+import sys; sys.exit('Use main_async.py — синхронный main.py удалён. См. bybit-ws-full.md раздел 6.1')
 from . import (DATA_DIR, EVENTS_LOG, ALERTS, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
                ORDERS_METADATA, BYBIT_CLI, HERMES_BIN, WATCHDOG_LAST, SHUTDOWN_REQUESTED,
                COVERAGE_CHECK_INTERVAL, TRAIL_CHECK_INTERVAL, METRICS_FILE)

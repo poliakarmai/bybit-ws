@@ -271,7 +271,7 @@ bybit-ws/
 | Дашборд | proxy | — | 9999 |
 | RPC | встроен | — | 8766 |
 
-> **Async-статус:** продакшен работает на `main_async.py` (asyncio, цикл 30с). `main.py` — синхронная версия, оставлена для совместимости. `main_async.py` использует `asyncio.gather` для параллельных API-запросов, `run_in_executor` для CPU-bound.
+> **Async-статус:** продакшен работает на `main_async.py` (asyncio, цикл 30с). `main.py` — deprecated (вызывает `sys.exit()` с указанием использовать `main_async.py`). Удалён из активного кода.
 
 ### 6.2 Кроны (торговые)
 
@@ -312,7 +312,7 @@ bybit-ws/
 | `/v5/market/kline` | GET | Свечи |
 | `/v5/account/transaction-log` | GET | Фандинг (SETTLEMENT) |
 
-**Аутентификация:** HMAC-SHA256, ключи из `~/.config/bybit-cli/config`
+**Аутентификация:** HMAC-SHA256. Ключи из переменных окружения (`BYBIT_API_KEY`, `BYBIT_API_SECRET`), загружаемых через systemd `EnvironmentFile=/home/openclaw/.config/bybit-ws/env`. Legacy-путь `~/.config/bybit-cli/config` — fallback с предупреждением.
 
 ### 7.2 RPC (порт 8766)
 
@@ -416,6 +416,9 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | Walk-forward validation | `walk_forward_validate.py` | PR-кривая на out-of-sample данных для переоценки порога ML Gate |
 | ML smoke тесты | `test_ml_smoke.py` | 3 теста: RF load, HMAC sign/verify, LSTM fallback |
 | **HMAC production guard** | `ml_scorer.py`, `lstm_regime.py` | Убран fallback-ключ в production: `BYBIT_WS_PRODUCTION=1` → `sys.exit()` без ключа |
+| **EnvironmentFile** | `bybit-ws-async.service` | Ключи через `EnvironmentFile=~/.config/bybit-ws/env` (chmod 600) вместо голых `Environment=` |
+| **API credentials migration** | `api.py` | Приоритет: `os.environ` (systemd) → legacy `~/.config/bybit-cli/config` |
+| **main.py deprecated** | `main.py` | `sys.exit('Use main_async.py')` — мёртвый код удалён из активного использования |
 | Watchdog: зависание | `bybit-watchdog.sh` | Проверка возраста последней записи (>5 мин) |
 | Бэкап: конфиг + модели | `bybit-db-backup.py` | config.yaml, .joblib/.pt, trades.jsonl |
 

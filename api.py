@@ -16,19 +16,26 @@ def _load_credentials():
     global _API_KEY, _API_SECRET
     if _API_KEY:
         return
-    config_path = os.path.expanduser('~/.config/bybit-cli/config')
+    # Приоритет: env (systemd EnvironmentFile) → legacy config
+    _API_KEY = os.environ.get('BYBIT_API_KEY')
+    _API_SECRET = os.environ.get('BYBIT_API_SECRET')
+    if _API_KEY and _API_SECRET:
+        return
+    legacy = os.path.expanduser('~/.config/bybit-cli/config')
     try:
-        with open(config_path) as f:
+        with open(legacy) as f:
             for line in f:
                 line = line.strip()
                 if line.startswith('BYBIT_API_KEY='):
                     _API_KEY = line.split('=', 1)[1].strip()
                 elif line.startswith('BYBIT_API_SECRET='):
                     _API_SECRET = line.split('=', 1)[1].strip()
-    except Exception as e:
-        log_event(f'⚠️ api: cannot read credentials: {e}')
+        if _API_KEY and _API_SECRET:
+            log_event('migrate: loaded credentials from legacy path')
+    except Exception:
+        pass
     if not _API_KEY or not _API_SECRET:
-        log_event('⚠️ api: credentials not loaded — API calls will fail')
+        log_event('api: credentials not loaded')
 
 
 # === Session (connection reuse) ===

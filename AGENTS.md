@@ -12,6 +12,7 @@
 23/47 находок исправлено (7C + 12H + 4M). 24 MEDIUM/LOW осталось.
 **Документация:** `bybit-ws-full.md` v2.1 — единый источник истины. `DESIGN-STRATEGIES.md` архивирован → `docs/archive/`.
 **HMAC production guard:** `BYBIT_WS_PRODUCTION=1` + `BYBIT_HMAC_SECRET` обязателен. Без ключа — отказ старта.
+**Credentials:** `EnvironmentFile=/home/openclaw/.config/bybit-ws/env` (chmod 600). Legacy `~/.config/bybit-cli/config` — fallback.
 
 ## Структура (ключевые файлы)
 
@@ -273,3 +274,4 @@ HMAC-подпись моделей закрывает RCE-вектор.
 23/47 находок исправлено (7C + 12H + 4M). 24 MEDIUM/LOW осталось.
 **Документация:** `bybit-ws-full.md` v2.1 — единый источник истины. `DESIGN-STRATEGIES.md` архивирован → `docs/archive/`.
 **HMAC production guard:** `BYBIT_WS_PRODUCTION=1` + `BYBIT_HMAC_SECRET` обязателен. Без ключа — отказ старта.
+**Credentials:** `EnvironmentFile=/home/openclaw/.config/bybit-ws/env` (chmod 600). Legacy `~/.config/bybit-cli/config` — fallback.
