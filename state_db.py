@@ -388,3 +388,111 @@ class StateDB:
 
 # Глобальный экземпляр
 db = StateDB()
+
+
+# ═══════════════════════════════════════════════════════════
+# Async StateDB (Фаза 4.7 — asyncio-миграция)
+# ═══════════════════════════════════════════════════════════
+
+import asyncio
+
+class AsyncStateDB:
+    """Async-обёртка над SQLite через aiosqlite."""
+
+    def __init__(self):
+        self._db = None
+        self._lock = asyncio.Lock()
+
+    async def _ensure_db(self):
+        if self._db is None:
+            import aiosqlite
+            os.makedirs(DATA_DIR, exist_ok=True)
+            self._db = await aiosqlite.connect(DB_PATH)
+            await self._db.execute('PRAGMA journal_mode=WAL')
+            await self._db.execute('PRAGMA busy_timeout=5000')
+            await self._db.executescript(SCHEMA)
+        return self._db
+
+    async def get_positions(self):
+        db = await self._ensure_db()
+        db.row_factory = aiosqlite.Row
+        rows = await db.execute('SELECT * FROM positions')
+        return [dict(r) for r in await rows.fetchall()]
+
+    async def update_position(self, symbol, data):
+        db = await self._ensure_db()
+        await db.execute('''
+            INSERT OR REPLACE INTO positions (symbol, side, entry, mark, size, leverage,
+                stop_loss, take_profit, position_idx, upnl, liq_price, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            symbol, data.get('side'), data.get('entry'), data.get('mark'),
+            data.get('size'), data.get('leverage'), data.get('stopLoss'),
+            data.get('takeProfit'), data.get('positionIdx', 0),
+            data.get('upnl'), data.get('liqPrice'), int(time.time())
+        ))
+        await db.commit()
+
+    async def log_trade(self, symbol, side, strategy, entry_price, exit_price, size, pnl, fees=0):
+        db = await self._ensure_db()
+        now = int(time.time())
+        await db.execute('''
+            INSERT INTO trade_history (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+        ''', (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, now))
+        await db.commit()
+
+    async def get_metrics(self, date=None):
+        if date is None:
+            date = datetime.now().strftime('%Y-%m-%d')
+        db = await self._ensure_db()
+        rows = await db.execute('''
+            SELECT side, COUNT(*) as count, SUM(pnl) as total_pnl
+            FROM trade_history WHERE date(closed_at, 'unixepoch') = ?
+            GROUP BY side
+        ''', (date,))
+        result = {'tp_real': 0, 'sl_real': 0, 'entry': 0}
+        for r in await rows.fetchall():
+            side, count, pnl = r
+            if side == 'Buy':
+                result['entry'] = count
+            elif pnl and pnl > 0:
+                result['tp_real'] += count
+            else:
+                result['sl_real'] += count
+        return result
+
+    async def should_alert(self, key, cooldown_sec):
+        db = await self._ensure_db()
+        now = int(time.time())
+        row = await db.execute('SELECT last_at FROM alert_dedup WHERE key = ?', (key,))
+        existing = await row.fetchone()
+        if existing and (now - existing[0]) < cooldown_sec:
+            return False
+        await db.execute('INSERT OR REPLACE INTO alert_dedup (key, last_at) VALUES (?, ?)', (key, now))
+        await db.commit()
+        return True
+
+    async def set_kv(self, key, value):
+        db = await self._ensure_db()
+        await db.execute('INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)', (key, str(value)))
+        await db.commit()
+
+    async def get_kv(self, key, default=None):
+        db = await self._ensure_db()
+        row = await db.execute('SELECT value FROM kv_store WHERE key = ?', (key,))
+        result = await row.fetchone()
+        return result[0] if result else default
+
+    async def vacuum(self):
+        db = await self._ensure_db()
+        await db.execute('VACUUM')
+
+    async def close(self):
+        if self._db:
+            await self._db.close()
+            self._db = None
+
+
+# Глобальный async-экземпляр
+adb = AsyncStateDB()

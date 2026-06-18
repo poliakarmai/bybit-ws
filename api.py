@@ -470,3 +470,171 @@ def fetch_atr(symbol, interval='D', period=14):
 
     except Exception:
         return None
+
+
+# ═══════════════════════════════════════════════════════════
+# Async API (Фаза 4.7 — asyncio-миграция)
+# ═══════════════════════════════════════════════════════════
+
+import asyncio
+
+_async_client = None
+_async_client_lock = asyncio.Lock()
+
+
+async def _get_async_client():
+    """Ленивый httpx.AsyncClient (connection pooling, HTTP/2)."""
+    global _async_client
+    if _async_client is None:
+        async with _async_client_lock:
+            if _async_client is None:
+                _async_client = httpx.AsyncClient(
+                    headers={
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'bybit-ws/4.4',
+                    },
+                    timeout=httpx.Timeout(15.0),
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+                )
+    return _async_client
+
+
+async def bybit_async(method, path, body=None, retries=None):
+    """Async-версия bybit()."""
+    if retries is None:
+        retries = MAX_RETRIES
+
+    _load_credentials()
+    client = await _get_async_client()
+    url = _BASE_URL + path
+
+    for attempt in range(retries + 1):
+        try:
+            headers = _auth_headers(method, path, body)
+            if method == 'GET':
+                resp = await client.get(url, headers=headers)
+            else:
+                resp = await client.post(url, json=body, headers=headers)
+
+            if resp.status_code != 200:
+                if resp.status_code == 404:
+                    log_event(f'bybit-async 404: {path}')
+                    return None
+                if attempt < retries:
+                    delay = 2 ** attempt if resp.status_code == 429 else RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                    await asyncio.sleep(delay)
+                    continue
+                return None
+
+            return resp.json()
+
+        except httpx.TimeoutException:
+            if attempt < retries:
+                await asyncio.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
+                continue
+            return None
+
+        except Exception as e:
+            log_event(f'bybit-async error: {e}')
+            if attempt < retries:
+                await asyncio.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
+                continue
+            return None
+
+    return None
+
+
+async def fetch_positions_async():
+    """Async: получить все открытые позиции."""
+    data = await bybit_async('GET', '/v5/position/list?category=linear&settleCoin=USDT')
+    if not data or data.get('retCode') != 0:
+        return {}
+    positions = {}
+    for p in data['result'].get('list', []):
+        sym = p['symbol']
+        size = float(p.get('size', 0))
+        if size > 0:
+            stop = p.get('stopLoss')
+            liq = p.get('liqPrice', '')
+            positions[sym] = {
+                'size': size,
+                'entry': float(p['avgPrice']),
+                'mark': float(p['markPrice']),
+                'upnl': float(p['unrealisedPnl']),
+                'side': p['side'],
+                'stopLoss': float(stop) if stop else None,
+                'positionIdx': int(p.get('positionIdx', 0)),
+                'liqPrice': float(liq) if liq and liq != '' else None,
+                'leverage': float(p.get('leverage', '1')),
+                'positionIM': float(p.get('positionIM', 0)),
+                'cumRealisedPnl': float(p.get('cumRealisedPnl', 0)),
+                'openTime': int(p.get('openTime', 0) or 0),
+                'margin': float(p.get('positionIM', p.get('margin', 0))),
+            }
+    return positions
+
+
+async def fetch_orders_async():
+    """Async: получить активные ордера."""
+    orders = {}
+    cursor = ''
+    while True:
+        path = f'/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
+        if cursor:
+            path += f'&cursor={cursor}'
+        data = await bybit_async('GET', path)
+        if not data or data.get('retCode') != 0:
+            break
+        olist = data['result'].get('list', [])
+        if not olist:
+            break
+        for o in olist:
+            sym = o['symbol']
+            oid = o['orderId']
+            reduce = o.get('reduceOnly', False)
+            otype = o['orderType']
+            kind = 'SL' if (reduce and otype == 'Market') else ('TP' if (reduce and otype == 'Limit') else ('LIMIT_ENTRY' if o['side'] == 'Buy' else 'OTHER'))
+            key = f'{sym}_{oid}'
+            orders[key] = {
+                'symbol': sym, 'orderId': oid, 'status': o['orderStatus'],
+                'kind': kind, 'price': float(o.get('price', 0) or 0),
+                'trigger': float(o.get('triggerPrice', 0) or 0),
+                'qty': float(o['qty']), 'side': o['side'],
+                'createdTime': o.get('createdTime', ''),
+                'cumExecQty': float(o.get('cumExecQty', 0) or 0),
+            }
+        cursor = data['result'].get('nextPageCursor', '')
+        if not cursor:
+            break
+    return orders
+
+
+async def get_bb_data_async(symbol, interval='D'):
+    """Async: BB-данные."""
+    import math
+    data = await bybit_async('GET', f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit=20')
+    if not data or data.get('retCode') != 0:
+        return None
+    try:
+        candles = [float(c[4]) for c in data['result']['list'][:20]][::-1]
+        if len(candles) < 20:
+            return None
+        cur = candles[-1]
+        sma = sum(candles) / 20
+        std = math.sqrt(sum((x - sma) ** 2 for x in candles) / 20)
+        upper = sma + 2 * std
+        lower = sma - 2 * std
+        middle = sma
+        bb_pos = (cur - lower) / (upper - lower) * 100 if upper != lower else 50
+        return {'lower': lower, 'middle': middle, 'upper': upper, 'cur': cur, 'bb_pos': bb_pos}
+    except Exception:
+        return None
+
+
+async def fetch_positions_and_orders():
+    """Async: параллельная загрузка позиций и ордеров."""
+    positions, orders = await asyncio.gather(
+        fetch_positions_async(),
+        fetch_orders_async(),
+    )
+    return positions, orders
