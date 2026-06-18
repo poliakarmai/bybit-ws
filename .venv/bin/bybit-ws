@@ -1,8 +1,0 @@
-#!/home/openclaw/.local/lib/bybit_ws/.venv/bin/python3.11
-# -*- coding: utf-8 -*-
-import re
-import sys
-from bybit_ws.main import run_cli
-if __name__ == '__main__':
-    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
-    sys.exit(run_cli())

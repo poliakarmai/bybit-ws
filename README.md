@@ -2,7 +2,7 @@
 
 **Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
-[![Version](https://img.shields.io/badge/version-3.12.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py)
+[![Version](https://img.shields.io/badge/version-4.1.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py)
 
 ---
 
@@ -212,14 +212,12 @@ m.cancel_all()                     # отменить все ордера
 ```bash
 git clone https://github.com/poliakarmai/bybit-ws.git
 cd bybit-ws
-pip install -e .
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
-# Создать .env с ключами:
 cp .env.example ~/.config/bybit-ws/.env
-nano ~/.config/bybit-ws/.env    # BYBIT_API_KEY, BYBIT_API_SECRET, RPC_TOKEN
-# ⚠️ Первый запуск: testnet! (api.base_url: "https://api-testnet.bybit.com")
-bybit-ws                          # CLI (после pip install -e .)
-# или: python3 -m bybit_ws        # без установки
+nano ~/.config/bybit-ws/.env    # BYBIT_API_KEY, BYBIT_API_SECRET
+python3 -m bybit_ws              # запуск
 ```
 
 ### systemd (рекомендуется)
@@ -338,14 +336,15 @@ rpc:
 
 | Файл | Содержание |
 |------|-----------|
-| `README.md` | Этот файл — полное описание |
-| `DESIGN-STRATEGIES.md` | **Сводный:** архитектура + стратегии + риски (v3.12.0) |
-| `QUICKSTART.md` | 5-минутный старт |
-| `DESIGN.md` | Архитектура для разработчиков |
-| `STRATEGIES.md` | Все 8 стратегий с параметрами |
-| `CHANGELOG.md` | История версий |
-| `openapi.yaml` | OpenAPI 3.0 схема |
-| `config.example.yaml` | Полный конфиг с комментариями |
+| [`docs/README.md`](docs/README.md) | **Полная документация:** установка, работа, возможности, ошибки, логирование, проверки |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Архитектура: компоненты, потоки данных, модель данных, Mermaid-диаграммы |
+| [`docs/API.md`](docs/API.md) | API Reference: 20 RPC-эндпоинтов, 6 MCP-инструментов, curl-примеры |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | Безопасность: секреты, модель угроз, инциденты, аудит |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Решение проблем: 13 категорий, 60+ причин |
+| [`DESIGN-STRATEGIES.md`](DESIGN-STRATEGIES.md) | Дизайн стратегий: Bollinger Grid, scoring, риск-менеджмент |
+| [`AGENTS.md`](AGENTS.md) | Навигация для AI-агентов, авто-обнаружение путей |
+| [`CHANGELOG.md`](CHANGELOG.md) | История версий (Keep a Changelog) |
+| [`config.example.yaml`](config.example.yaml) | Полный конфиг с комментариями |
 
 ---
 

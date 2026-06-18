@@ -40,3 +40,4 @@ build/
 # Graphify knowledge graph
 graphify-out/
 .understand-anything/
+.venv/
