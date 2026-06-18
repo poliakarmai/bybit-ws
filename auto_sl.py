@@ -20,11 +20,13 @@ def _get_tiers(cfg):
     one_way = set()
     try:
         tier_ab = set(cfg.tiers.A) | set(cfg.tiers.B)
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ auto_sl tiers.A/B: {e}')
         tier_ab = set()
     try:
         one_way = set(cfg.tiers.one_way)
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ auto_sl tiers.one_way: {e}')
         one_way = set()
     return tier_ab, one_way
 
@@ -178,7 +180,8 @@ def check_breakeven_sl():
         state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')
         with open(state_file) as f:
             pump_state = json.loads(f.read())
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ auto_sl pumps.json: {e}')
         pump_state = {}
 
     for sym, p in positions.items():

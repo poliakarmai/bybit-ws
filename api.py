@@ -32,8 +32,8 @@ def _load_credentials():
                     _API_SECRET = line.split('=', 1)[1].strip()
         if _API_KEY and _API_SECRET:
             log_event('migrate: loaded credentials from legacy path')
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ api credentials load: {e}')
     if not _API_KEY or not _API_SECRET:
         log_event('api: credentials not loaded')
 
@@ -336,7 +336,8 @@ def get_bb_lower(symbol, interval='D'):
         var = sum((x - sma) ** 2 for x in candles) / 20
         std = math.sqrt(var)
         return sma - 2 * std
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ api bb_lower: {e}')
         return None
 
 
@@ -379,7 +380,8 @@ def get_bb_data(symbol, interval='D'):
         middle = sma
         bb_pos = (cur - lower) / (upper - lower) * 100 if upper != lower else 50
         return {'lower': lower, 'middle': middle, 'upper': upper, 'cur': cur, 'bb_pos': bb_pos}
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ api get_bb_data: {e}')
         return None
 
 
@@ -475,7 +477,8 @@ def fetch_atr(symbol, interval='D', period=14):
 
         return round(atr, 8)
 
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ api fetch_atr: {e}')
         return None
 
 
@@ -634,7 +637,8 @@ async def get_bb_data_async(symbol, interval='D'):
         middle = sma
         bb_pos = (cur - lower) / (upper - lower) * 100 if upper != lower else 50
         return {'lower': lower, 'middle': middle, 'upper': upper, 'cur': cur, 'bb_pos': bb_pos}
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ api get_bb_data: {e}')
         return None
 
 

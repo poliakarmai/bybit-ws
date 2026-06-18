@@ -54,8 +54,8 @@ def _get_regime_params():
         if data:
             regime = data.get('regime', 'NEUTRAL')
             confidence = data.get('confidence', 50)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ check_regime LSTM: {e}')
 
     if regime == 'NEUTRAL':
         try:
@@ -63,8 +63,8 @@ def _get_regime_params():
             data = check_regime()
             regime = data.get('regime', 'NEUTRAL')
             confidence = data.get('confidence', 50)
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ check_regime fallback: {e}')
 
     params = REGIME_PARAMS.get(regime, REGIME_PARAMS['NEUTRAL'])
     _regime_cache = {'params': params, 'regime': regime, 'conf': confidence, 'ts': now}
@@ -81,8 +81,8 @@ def _load_per_symbol_config():
         if os.path.exists(PER_SYMBOL_CONFIG_FILE):
             with open(PER_SYMBOL_CONFIG_FILE) as f:
                 PER_SYMBOL_CONFIG = json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ per-symbol config load: {e}')
 
 
 def _get_symbol_param(sym: str, key: str, default):
@@ -115,8 +115,8 @@ def _filter_by_mtf_confluence(scored: list, direction: str) -> list:
                 cur = s.get('cur', 0)
                 track_signal(sym, direction, cur, cur,
                            conf['confluence'], s.get('score'))
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ confluence_paper {sym} {direction}: {e}')
 
             # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа) ──
             if conf['confluence'] == 3:
@@ -167,7 +167,8 @@ def _parse_ticker_line(line: str) -> dict:
             'turnover24h': float(parts[-1].replace(',','')) if parts[-1].replace(',','').replace('.','').isdigit() else 0,
             'fundingRate': 0.0,  # bybit-cli tickers не показывает funding, берём из REST
         }
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ ticker_parse({sym}): {e}')
         return {}
 
 
@@ -185,8 +186,8 @@ def _count_down_days(sym: str) -> int:
                 else:
                     break
             return down
-    except Exception:
-        pass  # ticker parse error — return 0 (no down days detected)
+    except Exception as e:
+        log_event(f'⚠️ count_down_days({sym}): {e}')  # ticker parse error — return 0 (no down days detected)
     return 0
 
 
@@ -246,8 +247,8 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
                 elif abs_f < 0.0002:       fund_score = 3
                 elif abs_f < 0.0004:       fund_score = 2
                 else:                      fund_score = 0
-    except Exception:
-        pass  # funding rate parse error — default score 0
+    except Exception as e:
+        log_event(f'⚠️ funding_parse({sym}): {e}')  # funding rate parse error — default score 0
 
     # 5. BB Width / Volatility (0-5)
     if 3 <= bb_width <= 8:    vola_score = 5
@@ -291,8 +292,8 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
             }
             ml_passed, ml_prob = ml_gate_pass(signal_data)
         # else: группа B — пропускаем без ML Gate (ml_passed уже True)
-    except Exception:
-        pass  # модель недоступна → полагаемся на эвристику
+    except Exception as e:
+        log_event(f'⚠️ ml_gate({sym}): {e}')  # модель недоступна → полагаемся на эвристику
 
     if not ml_passed:
         return None  # ML gate: не входить
@@ -343,7 +344,8 @@ def auto_entry_scan(positions):
         if r.returncode != 0:
             return entries
         ticker_lines = r.stdout.split('\n')
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ auto_entry tickers: {e}')
         return entries
 
     candidates = []
@@ -445,9 +447,8 @@ def auto_entry_scan(positions):
                         log_event(f'🤖 Ensemble skip {sym}: score={ws:.2f}<{th}')
                         continue
                     ensemble_decision = f'Ensemble({ens_conf:.0%})'
-                except Exception:
-                    pass  # ансамбль недоступен → входим по эвристике
-                    log_event(f'⚠️ Ensemble error for {sym} — fallback to heuristic')
+                except Exception as e:
+                    log_event(f'⚠️ Ensemble error for {sym} — fallback to heuristic: {e}')
 
             # ── Повторная проверка: позиция могла появиться между снапшотом и ордером ──
             skip_symbol = False
@@ -503,8 +504,8 @@ def auto_entry_scan(positions):
                     try:
                         from .ab_test import record_entry as _record_entry
                         _record_entry(s['signal_id'], sym, 'Buy', qty, price, s['score'], s.get('ml_prob'))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_event(f'⚠️ ab_test record {sym}: {e}')
         except Exception as e:
             log_event(f'⚠️ auto_entry {sym}: {e}')
             continue

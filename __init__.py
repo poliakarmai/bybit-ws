@@ -123,3 +123,25 @@ COVERAGE_CHECK_INTERVAL = 480
 
 # Метрики
 METRICS_FILE = os.path.join(DATA_DIR, 'metrics.json')
+
+# ── Безопасные операции с логированием ──
+
+def safe_op(fn, *args, default=None, desc='', **kwargs):
+    """Выполнить fn(*args, **kwargs), логируя исключения в events.log.
+    
+    Возвращает результат fn или default при ошибке.
+    Не роняет вызывающий код.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        try:
+            from datetime import datetime
+            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            name = getattr(fn, '__name__', str(fn))
+            ctx = f' ({desc})' if desc else ''
+            with open(EVENTS_LOG, 'a') as f:
+                f.write(f'[{ts}] ⚠️ EXCEPTION {name}{ctx}: {e}\n')
+        except Exception:
+            pass
+        return default

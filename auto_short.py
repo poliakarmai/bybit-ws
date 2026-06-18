@@ -67,8 +67,8 @@ def _save_state(state):
     for sym, data in state.items():
         try:
             db.save_short_state(sym, data)
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ save_short_state({sym}): {e}')
 
 
 def _get_lot_step(sym):
@@ -119,8 +119,8 @@ def _check_short_mtf(sym: str):
         try:
             from .confluence_paper import track_signal
             track_signal(sym, 'SHORT', 0, 0, conf['confluence'])
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ confluence_paper SHORT {sym}: {e}')
 
         # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа) ──
         if conf['confluence'] == 3:
@@ -151,8 +151,8 @@ def _count_up_days(sym: str) -> int:
                 else:
                     break
             return up
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ count_up_days({sym}): {e}')
     return 0
 
 
@@ -301,7 +301,8 @@ def check_auto_short(positions):
         if not data or data.get('retCode') != 0:
             return actions
         tickers = data['result'].get('list', [])
-    except Exception:
+    except Exception as e:
+        log_event(f'⚠️ auto_short: tickers API error: {e}')
         return actions
 
     # Сортируем по обороту, берём кандидатов (все Tier'ы, кроме one-way)
@@ -337,7 +338,8 @@ def check_auto_short(positions):
             if upper <= 0 or upper == lower:
                 continue
             bb_pct = (last_price - lower) / (upper - lower) * 100 if upper != lower else 0
-        except Exception:
+        except Exception as e:
+            log_event(f'⚠️ auto_short BB {sym}: {e}')
             continue
 
         # Early exit: если time budget исчерпан — не тратим время на threshold-проверки
@@ -406,8 +408,8 @@ def check_auto_short(positions):
                 if pending_sells:
                     log_event(f'⏭️ Auto-SHORT {sym}: уже есть pending лимитка Sell, пропуск')
                     continue
-            except Exception:
-                pass  # не блокируем вход из-за ошибки проверки
+            except Exception as e:
+                log_event(f'⚠️ auto_short pending-check {sym}: {e}')
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
@@ -703,5 +705,6 @@ def _close_junk_position(sym, pos):
                 return
             if order.get('retCode') == 10001:
                 continue
-        except Exception:
+        except Exception as e:
+            log_event(f'⚠️ auto_short close_short({sym}): {e}')
             continue

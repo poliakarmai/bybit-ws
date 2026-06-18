@@ -159,6 +159,14 @@ def _is_duplicate(msg, level="INFO"):
 
 def send_telegram_alert(msg, level="INFO"):
     """Отправить алерт в Telegram с дедупликацией."""
+    # Проверить, разрешены ли Telegram-алерты в конфиге
+    try:
+        from .config import Config
+        cfg = Config()
+        if not cfg.alerts.get('telegram_enabled', False):
+            return  # молча — алерты выключены
+    except Exception:
+        pass  # если конфиг не читается — шлём (fail-open)
     if _is_duplicate(msg, level):
         log_event(f'🔇 Дедупликация [{level}]: пропущен алерт')
         return
