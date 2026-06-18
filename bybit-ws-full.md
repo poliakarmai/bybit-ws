@@ -39,16 +39,16 @@ version: "2.1"
 
 | Метрика | Значение |
 |---------|----------|
-| Модулей Python | 45+ |
+| Модулей Python | 62 |
 | Стратегий | 8 (Grid LONG/SHORT, Junk, DCA, SL Re-entry, x10 × 3) |
-| Память | ~35 MB |
+| Память | ~50 MB (peak до 265 MB) |
 | Цикл | 30 сек (async main loop) |
 | RPC порт | 8766 (localhost) |
 | Дашборд | 9999 (127.0.0.1) |
-| Тестов | 23 (smoke 16 + modules 5 + ML 3 + scanner) |
-| Позиций | 9 активных |
-| Дневной лимит убытка | $50 (~5% от депозита ~$1000) |
-| Макс. маржа | $500 |
+| Тестов | 24 (smoke 11 + modules 5 + ML 3 + scanner + mtf 1) |
+| Позиций | 11 активных |
+| Дневной лимит убытка | $50 |
+| Макс. маржа | **$300** |
 | ML фича-флаг | `BYBIT_ML_ENABLED=0` — быстрый откат |
 
 ### Пути
@@ -276,11 +276,11 @@ bybit-ws/
 
 ### 6.1 Сервисы
 
-| Сервис | Статус | PID | Порт |
-|--------|--------|-----|------|
-| `bybit-ws-async` | active | 391888 | — |
-| Дашборд | proxy | — | 9999 |
-| RPC | встроен | — | 8766 |
+| Сервис | Статус | Порт |
+|--------|--------|------|
+| `bybit-ws-async` | active | — |
+| Дашборд | proxy | 9999 |
+| RPC | встроен | 8766 |
 
 > **Async-статус:** продакшен работает на `main_async.py` (asyncio, цикл 30с). `main.py` — deprecated (вызывает `sys.exit()` с указанием использовать `main_async.py`). Удалён из активного кода.
 
@@ -539,16 +539,24 @@ bash ~/bybit-ws/deploy.sh
 ### Быстрый откат ML
 
 ```bash
+# Все RPC-эндпоинты (кроме /rpc/paths) требуют Bearer-токен из state.db
+# Получить токен: sqlite3 ~/.local/share/bybit-ws/state.db "SELECT value FROM kv_store WHERE key='rpc_auth_token'"
+
 # Отключить ML-конвейер
-curl -X POST http://127.0.0.1:8766/rpc/ml_toggle -d '{"enable":0}'
+curl -X POST http://127.0.0.1:8766/rpc/ml_toggle \
+  -H "Authorization: Bearer <RPC_TOKEN>" \
+  -d '{"enable":0}'
 systemctl --user restart bybit-ws-async
 
 # Включить обратно
-curl -X POST http://127.0.0.1:8766/rpc/ml_toggle -d '{"enable":1}'
+curl -X POST http://127.0.0.1:8766/rpc/ml_toggle \
+  -H "Authorization: Bearer <RPC_TOKEN>" \
+  -d '{"enable":1}'
 systemctl --user restart bybit-ws-async
 
 # Проверить статус
-curl http://127.0.0.1:8766/rpc/ml_toggle
+curl http://127.0.0.1:8766/rpc/ml_toggle \
+  -H "Authorization: Bearer <RPC_TOKEN>"
 ```
 
 ### Бэкап

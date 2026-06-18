@@ -651,7 +651,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         cfg = _load_json(DATA_DIR / "config.json") if os.path.exists(DATA_DIR / "config.json") else {}
         risk_cfg = cfg.get("risk", {})
         max_daily_loss = risk_cfg.get("max_daily_loss", 50)
-        max_total_margin = risk_cfg.get("max_total_margin", 500)
+        max_total_margin = risk_cfg.get("max_total_margin", 300)
 
         last_trade_date = None
         for date_key, entry in sorted(metrics.items(), reverse=True):

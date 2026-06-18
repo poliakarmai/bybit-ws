@@ -48,7 +48,7 @@ _DEFAULT_STRATEGY_LONG = {
     'sl_offset': 0.07,
     'tp_middle_pct': 0.20,
     'tp_upper_pct': 0.80,
-    'max_positions': 15,       # безопасный дефолт (было 0=unlimited)
+    'max_positions': 12,# безопасный дефолт (было 0=unlimited)
     'cooldown_after_sl': 14400,    # 4 часа после SL перед повторным входом
     'cooldown_after_tp': 3600,     # 1 час после TP
 }

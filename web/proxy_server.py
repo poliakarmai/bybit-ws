@@ -70,7 +70,7 @@ class P(BaseHTTPRequestHandler):
                 _proxy_rpc(self, path)
             except Exception as e:
                 self.send_response(502)
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', 'http://localhost:9999')
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
             return
