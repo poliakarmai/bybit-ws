@@ -409,30 +409,30 @@ def auto_entry_scan(positions):
                         idx = int(p.get('positionIdx', 0))
                         break
 
-            # ── Фаза 5.5: RL-агент — стоит ли входить? ──
-            rl_decision = None
+            # ── Фаза 5.6: Ансамбль RF+LSTM+RL — стоит ли входить? ──
+            ensemble_decision = None
             try:
-                from .rl_agent import should_enter as _rl_should_enter
-                rl_state = {
-                    'bb_pct': s.get('bb_pos', 50),
-                    'bb_width': s.get('bb_width', 10),
-                    'rsi': 50,
-                    'atr_pct': 2.0,
-                    'vol_ratio': 1.0,
-                    'funding': 0.0,
+                from .ensemble import ensemble_should_enter as _ensemble_check
+                market_state = {
+                    'regime': regime_name, 'regime_conf': regime_conf,
                     'mtf_confluence': s.get('mtf', {}).get('confluence', 2) if 'mtf' in s else 2,
-                    'days_since_entry': 0,
-                    'regime': regime_name,
-                    'score': s.get('score', 25),
-                    'daily_return': 0.0,
+                    'days_since_entry': 0, 'daily_return': 0.0,
                 }
-                rl_enter, rl_reason = _rl_should_enter(rl_state, direction='LONG')
-                if not rl_enter:
-                    log_event(f'🤖 RL skip {sym}: {rl_reason}')
+                signal_data = {
+                    'score': s.get('score', 25), 'bb_pos': s.get('bb_pos', 50),
+                    'bb_width': s.get('bb_width', 10), 'price': s.get('cur', 0),
+                    'lower_bb': 0, 'upper_bb': 0, 'middle_bb': 0,
+                    'entry': 0, 'timeframe': 'D', 'mode': 'long', 'funding': 0.0,
+                }
+                ens_enter, ens_conf, ens_details = _ensemble_check(signal_data, market_state)
+                if not ens_enter:
+                    ws = ens_details['weighted_score']
+                    th = ens_details['threshold']
+                    log_event(f'🤖 Ensemble skip {sym}: score={ws:.2f}<{th}')
                     continue
-                rl_decision = rl_reason
+                ensemble_decision = f'Ensemble({ens_conf:.0%})'
             except Exception:
-                pass  # RL недоступен → входим по эвристике
+                pass  # ансамбль недоступен → входим по эвристике
 
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
@@ -445,7 +445,7 @@ def auto_entry_scan(positions):
                     mtf = s['mtf']
                     mtf_info = f' | MTF:{mtf["confluence"]}/3({mtf["strength"]})'
                 regime_info = f' | 📊{regime_name}' if regime_name != 'NEUTRAL' else ''
-                rl_info = f' | 🧠RL' if rl_decision else ''
+                rl_info = f' | 🧠{ensemble_decision}' if ensemble_decision else ''
 
                 entries.append(
                     f'🤖 Авто-вход {sym} @ ${price:.4f} x{qty} '
