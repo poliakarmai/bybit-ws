@@ -189,35 +189,38 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
 
     total = bb_score + vol_score + down_score + fund_score + vola_score + qscore
 
-    # ── Фаза 5.1: ML-скорректированный score ──
-    ml_adjusted = total
-    ml_breakdown = ''
+    # ── Фаза 5.1: ML Gate — фильтр вместо бленда ──
+    ml_passed = True
+    ml_prob = None
     try:
-        from .ml_scorer import ml_adjusted_score
+        from .ml_scorer import ml_gate_pass
         signal_data = {
-            'score': total,
+            'score': total / 5,              # нормализация: 0-50 → 0-10 (шкала GridSignal)
             'price': cur,
             'lower_bb': bb_data['lower'],
             'upper_bb': bb_data['upper'],
             'middle_bb': bb_data['middle'],
-            'entry': bb_data['lower'],  # LONG: вход на нижней полосе
+            'entry': bb_data['lower'] * 0.98,  # 2% дисконт (как в GridSignal данных)
             'timeframe': 'D',
             'mode': 'long',
         }
-        ml_adjusted = ml_adjusted_score(signal_data)
-        if ml_adjusted != total:
-            ml_breakdown = f' ML={ml_adjusted:.1f}'
+        ml_passed, ml_prob = ml_gate_pass(signal_data)
     except Exception:
-        pass  # модель не обучена или ошибка — остаёмся на heuristic
+        pass  # модель недоступна → полагаемся на эвристику
+
+    if not ml_passed:
+        return None  # ML gate: не входить
+
+    ml_info = f' ML={ml_prob:.2f}' if ml_prob is not None else ''
 
     return {
         'symbol': sym,
-        'score': ml_adjusted,
+        'score': total,
         'max_score': 50,
         'bb_pos': bb_pos,
         'bb_width': bb_width,
         'cur': cur,
-        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore}{ml_breakdown}',
+        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore}{ml_info}',
     }
 
 

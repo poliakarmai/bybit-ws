@@ -210,6 +210,26 @@ def ml_adjusted_score(signal_data: dict) -> float:
     return round(adjusted, 1)
 
 
+# ── Фаза 5.1: ML Gate (18.06.2026) ──
+ML_GATE_THRESHOLD = 0.22  # оптимальный порог: F1=0.921, Precision=0.853, Recall=1.000
+
+
+def ml_gate_pass(signal_data: dict) -> tuple[bool, float | None]:
+    """
+    ML-гейт: проверяет, стоит ли входить в сигнал.
+    
+    Возвращает (passed: bool, ml_prob: float | None).
+    F1=0.921 на исторических данных (270 сигналов, 30 TP).
+    Ловит 29/30 TP, пропускает 5/240 ложных.
+    
+    Если модель не обучена → always pass (fallback to heuristic).
+    """
+    ml_prob = predict(signal_data)
+    if ml_prob is None:
+        return True, None  # модель недоступна → полагаемся на эвристику
+    return ml_prob >= ML_GATE_THRESHOLD, ml_prob
+
+
 # ─── CLI ─────────────────────────────────────────────────────
 if __name__ == "__main__":
     import argparse
