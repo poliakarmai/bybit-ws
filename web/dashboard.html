@@ -3,167 +3,312 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>bybit-ws Dashboard v4.0</title>
+<title>bybit-ws Dashboard v5.0</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-:root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --green:#3fb950; --red:#f85149; --yellow:#d2991d; }
+:root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --green:#3fb950; --red:#f85149; --yellow:#d2991d; --blue:#58a6ff; }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:var(--bg); color:var(--text); font:14px/1.5 'SF Mono',monospace; padding:16px; }
-.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; max-width:1400px; margin:0 auto; }
-.card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:14px; }
-.card h2 { font-size:13px; color:#8b949e; margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px; }
-.kpi { font-size:28px; font-weight:bold; }
+body { background:var(--bg); color:var(--text); font:13px/1.5 'SF Mono',monospace; padding:12px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:10px; max-width:1600px; margin:0 auto; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:12px; }
+.card.wide { grid-column:span 2; }
+.card h2 { font-size:12px; color:#8b949e; margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px; display:flex; justify-content:space-between; align-items:center; }
+.kpi { font-size:26px; font-weight:bold; }
 .kpi.green { color:var(--green); } .kpi.red { color:var(--red); } .kpi.yellow { color:var(--yellow); }
-.pos-row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); font-size:12px; }
-.pos-row:last-child { border-bottom:none; }
-.pos-sym { width:100px; font-weight:bold; }
-.pos-side { width:36px; }
-.pos-side.Buy { color:var(--green); } .pos-side.Sell { color:var(--red); }
-.pos-pnl { width:70px; text-align:right; }
-.pos-pnl.positive { color:var(--green); } .pos-pnl.negative { color:var(--red); }
-.header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; max-width:1400px; margin:0 auto 16px; }
-.status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
-.status-dot.alive { background:var(--green); } .status-dot.dead { background:var(--red); }
-#equity-chart { max-height:250px; }
-.metric { font-size:12px; padding:2px 0; }
-.refresh { color:#8b949e; font-size:11px; }
+.row { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid rgba(48,54,61,0.5); font-size:12px; }
+.row:last-child { border-bottom:none; }
+.sym { width:85px; font-weight:bold; }
+.side { width:32px; font-size:10px; }
+.side.Buy { color:var(--green); } .side.Sell { color:var(--red); }
+.pnl { width:75px; text-align:right; }
+.pnl.pos { color:var(--green); } .pnl.neg { color:var(--red); }
+.header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; max-width:1600px; margin:0 auto 10px; }
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:5px; }
+.dot.alive { background:var(--green); } .dot.dead { background:var(--red); }
+#equity-chart { max-height:220px; }
+.metric { font-size:11px; padding:1px 0; }
+.badge { font-size:10px; padding:1px 5px; border-radius:3px; }
+.badge.ok { background:#1a3a1a; color:var(--green); }
+.badge.warn { background:#3a2a1a; color:var(--yellow); }
+.badge.bad { background:#3a1a1a; color:var(--red); }
+.refresh { color:#8b949e; font-size:10px; }
+.progress-bar { height:6px; background:var(--border); border-radius:3px; margin-top:3px; overflow:hidden; }
+.progress-fill { height:100%; border-radius:3px; transition:width .5s; }
+.progress-fill.ok { background:var(--green); }
+.progress-fill.warn { background:var(--yellow); }
+.progress-fill.bad { background:var(--red); }
+.signal-row { font-size:11px; padding:2px 0; border-bottom:1px solid rgba(48,54,61,0.3); }
+.signal-row:last-child { border-bottom:none; }
+.tabs { display:flex; gap:4px; margin-bottom:8px; }
+.tab { font-size:11px; padding:3px 8px; background:var(--bg); border:1px solid var(--border); border-radius:3px; cursor:pointer; color:#8b949e; }
+.tab.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+.hidden { display:none; }
 </style>
 </head>
 <body>
 
 <div class="header">
   <div>
-    <span class="status-dot" id="status-dot"></span>
-    <strong>bybit-ws</strong> v4.0
+    <span class="dot" id="status-dot"></span>
+    <strong>bybit-ws</strong> v5.0
+    <span style="color:#8b949e;font-size:11px;margin-left:8px;">
+      Uptime: <span id="uptime">—</span> | WS: <span id="ws-status">—</span>
+    </span>
   </div>
   <div class="refresh">обновлено: <span id="updated">—</span></div>
 </div>
 
 <div class="grid">
+  <!-- РИСК-ПАНЕЛЬ -->
+  <div class="card">
+    <h2>⚠️ Риск-статус <span id="risk-badge" class="badge ok">OK</span></h2>
+    <div class="metric">Дневной PnL: <strong id="risk-pnl">—</strong> / лимит -$<span id="risk-limit">50</span></div>
+    <div class="progress-bar"><div class="progress-fill ok" id="risk-pnl-bar" style="width:0%"></div></div>
+    <div class="metric" style="margin-top:6px;">Маржа: <strong id="risk-margin">—</strong> / $<span id="risk-max-margin">500</span></div>
+    <div class="progress-bar"><div class="progress-fill ok" id="risk-margin-bar" style="width:0%"></div></div>
+    <div class="metric" style="margin-top:4px;">Позиций: <strong id="risk-pos-count">—</strong> | Входы: <span id="risk-blocked">—</span></div>
+  </div>
+
   <!-- KPI -->
   <div class="card">
-    <h2>💰 Equity</h2>
+    <h2>💰 Equity / PnL</h2>
     <div class="kpi" id="kpi-equity">—</div>
+    <div class="kpi" id="kpi-pnl" style="font-size:18px;">—</div>
   </div>
+
   <div class="card">
-    <h2>📊 PnL (нереализ.)</h2>
-    <div class="kpi" id="kpi-pnl">—</div>
-  </div>
-  <div class="card">
-    <h2>📈 Сегодня</h2>
-    <div>TP: <strong id="metric-tp">0</strong> | SL: <strong id="metric-sl">0</strong></div>
-    <div>Входов: <strong id="metric-entry">0</strong> | Авто: <strong id="metric-auto">0</strong></div>
+    <h2>📊 Сегодня</h2>
+    <div class="metric">TP: <strong id="metric-tp">0</strong> | SL: <strong id="metric-sl">0</strong></div>
+    <div class="metric">Входов: <strong id="metric-entry">0</strong> | Авто: <strong id="metric-auto">0</strong></div>
+    <div class="metric">Авто-PnL: <strong id="metric-auto-pnl">$0</strong></div>
   </div>
 
   <!-- Equity Chart -->
-  <div class="card" style="grid-column:span 2;">
+  <div class="card wide">
     <h2>📉 Equity (24h)</h2>
     <canvas id="equity-chart"></canvas>
   </div>
 
-  <!-- Позиции -->
+  <!-- ПОЗИЦИИ -->
   <div class="card">
-    <h2>📌 Позиции (<span id="pos-count">0</span>)</h2>
+    <h2>📌 Позиции (<span id="pos-count">0</span>) <span style="font-weight:normal;color:#8b949e;font-size:10px;">PnL: <span id="pos-total-pnl">—</span></span></h2>
     <div id="positions"></div>
   </div>
 
-  <!-- Алерты -->
+  <!-- ОРДЕРА -->
   <div class="card">
-    <h2>⚠️ Последние алерты</h2>
+    <h2>📋 Ордера (<span id="ord-count">0</span>)</h2>
+    <div class="tabs">
+      <span class="tab active" onclick="filterOrders('all')">Все</span>
+      <span class="tab" onclick="filterOrders('TP')">TP</span>
+      <span class="tab" onclick="filterOrders('SL')">SL</span>
+    </div>
+    <div id="orders"></div>
+  </div>
+
+  <!-- СИГНАЛЫ -->
+  <div class="card">
+    <h2>🔍 Сигналы (<span id="sig-count">0</span>)</h2>
+    <div id="signals"></div>
+  </div>
+
+  <!-- АЛЕРТЫ -->
+  <div class="card">
+    <h2>🚨 Алерты</h2>
     <div id="alerts">—</div>
   </div>
 </div>
 
 <script>
-const RPC = '';  // проксируется этим же сервером
+const RPC = '';
 let chart = null;
 let equityHistory = [];
+let allOrders = [];
 
-async function fetchJSON(url) {
-  try { const r = await fetch(url); return await r.json(); }
-  catch(e) { return null; }
-}
+function fmt(n, d) { return Number(n||0).toFixed(d||2); }
+function pnlClass(v) { return v >= 0 ? 'pos' : 'neg'; }
+function pnlSign(v) { return v >= 0 ? '+' : ''; }
 
 async function refresh() {
-  const [health, positions, metrics] = await Promise.all([
-    fetchJSON(`${RPC}/health`),
-    fetchJSON(`${RPC}/positions`),
-    fetchJSON(`${RPC}/metrics`)
-  ]);
+  try {
+    const r = await fetch(RPC + '/rpc/all');
+    const data = await r.json();
 
-  // Status
-  const dot = document.getElementById('status-dot');
-  if (health?.alive) { dot.className = 'status-dot alive'; }
-  else { dot.className = 'status-dot dead'; }
-  document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+    // ── Monitor / WS ──
+    const mon = data.monitor || {};
+    document.getElementById('status-dot').className = 'dot ' + (mon.alive ? 'alive' : 'dead');
+    document.getElementById('uptime').textContent = fmt(mon.uptime/60, 0) + 'м';
+    document.getElementById('ws-status').textContent = mon.alive ? '🟢' : '🔴';
+    document.getElementById('updated').textContent = new Date().toLocaleTimeString();
 
-  // Equity & PnL
-  let equity = 0, totalPnl = 0;
-  if (Array.isArray(positions)) {
+    // ── Positions ──
+    const positions = data.positions || [];
+    document.getElementById('pos-count').textContent = positions.length;
+
+    let equity = 0, totalPnl = 0;
+    let posHTML = '';
     for (const p of positions) {
-      totalPnl += parseFloat(p.upnl || 0);
-      equity += parseFloat(p.size || 0) * parseFloat(p.mark || 0) / parseFloat(p.leverage || 1);
-    }
-  }
-  
-  const eqEl = document.getElementById('kpi-equity');
-  eqEl.textContent = `$${equity.toFixed(0)}`;
-  eqEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
-  
-  const pnlEl = document.getElementById('kpi-pnl');
-  pnlEl.textContent = `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`;
-  pnlEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
+      const upnl = parseFloat(p.upnl || 0);
+      const mark = parseFloat(p.mark || 0);
+      const entry = parseFloat(p.entry || 0);
+      const margin = parseFloat(p.margin || p.positionIM || 0);
+      totalPnl += upnl;
+      equity += margin;
 
-  // Metrics
-  if (metrics) {
-    const today = Object.values(metrics)[0] || {};
+      const sl = p.stopLoss ? '$' + fmt(p.stopLoss, 4) : '—';
+      const side = p.side === 'Buy' ? '🟢' : '🔴';
+
+      posHTML += `<div class="row">
+        <span class="sym">${side} ${p.symbol}</span>
+        <span style="font-size:10px;color:#8b949e;">${p.leverage}x · вх $${fmt(entry,4)} · м $${fmt(mark,4)}</span>
+        <span class="pnl ${pnlClass(upnl)}">${pnlSign(upnl)}$${fmt(upnl,2)}</span>
+      </div>`;
+    }
+    document.getElementById('positions').innerHTML = posHTML || '<div class="metric">Нет позиций</div>';
+    document.getElementById('pos-total-pnl').textContent = pnlSign(totalPnl) + '$' + fmt(totalPnl, 2);
+
+    // ── Equity / PnL ──
+    const eqEl = document.getElementById('kpi-equity');
+    eqEl.textContent = '$' + fmt(equity, 0);
+    eqEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
+
+    const pnlEl = document.getElementById('kpi-pnl');
+    pnlEl.textContent = pnlSign(totalPnl) + '$' + fmt(totalPnl, 2);
+    pnlEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
+
+    // ── Metrics ──
+    const metrics = data.metrics || {};
+    const dates = Object.keys(metrics).sort().reverse();
+    const today = dates.length > 0 ? metrics[dates[0]] : {};
     document.getElementById('metric-tp').textContent = today.tp_real || 0;
     document.getElementById('metric-sl').textContent = today.sl_real || 0;
     document.getElementById('metric-entry').textContent = today.entry || 0;
     document.getElementById('metric-auto').textContent = today.auto_entry_placed || 0;
-  }
+    document.getElementById('metric-auto-pnl').textContent = '$' + fmt(today.auto_entry_pnl || 0, 2);
 
-  // Positions
-  document.getElementById('pos-count').textContent = Array.isArray(positions) ? positions.length : 0;
-  let posHTML = '';
-  if (Array.isArray(positions)) {
-    for (const p of positions) {
-      const pnl = parseFloat(p.upnl || 0);
-      const pnlCls = pnl >= 0 ? 'positive' : 'negative';
-      posHTML += `<div class="pos-row">
-        <span class="pos-sym">${p.symbol}</span>
-        <span class="pos-side ${p.side}">${p.side}</span>
-        <span>${p.leverage}x</span>
-        <span>$${parseFloat(p.mark||0).toFixed(4)}</span>
-        <span class="pos-pnl ${pnlCls}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>
-      </div>`;
-    }
-  }
-  document.getElementById('positions').innerHTML = posHTML || '<div class="metric">Нет позиций</div>';
+    // ── Risk (из /risk или рассчитываем) ──
+    try {
+      const rr = await fetch(RPC + '/risk');
+      const risk = await rr.json();
+      const dailyLoss = parseFloat(risk.daily_loss || 0);
+      const maxLoss = parseFloat(risk.max_daily_loss || 50);
+      const marginTotal = parseFloat(risk.total_margin || equity);
+      const maxMargin = parseFloat(risk.max_total_margin || 500);
+      const blocked = risk.blocked;
+      const posCount = risk.position_count || positions.length;
 
-  // Equity chart — добавляем точку
-  const now = new Date();
-  equityHistory.push({ x: now, y: equity });
-  if (equityHistory.length > 288) equityHistory = equityHistory.slice(-288); // 24ч по 5мин
+      document.getElementById('risk-pnl').textContent = (dailyLoss <= 0 ? '' : '+') + '$' + fmt(dailyLoss, 2);
+      document.getElementById('risk-limit').textContent = fmt(maxLoss, 0);
+      document.getElementById('risk-margin').textContent = '$' + fmt(marginTotal, 2);
+      document.getElementById('risk-max-margin').textContent = fmt(maxMargin, 0);
+      document.getElementById('risk-pos-count').textContent = posCount;
+      document.getElementById('risk-blocked').textContent = blocked ? '🔴 ЗАБЛОКИРОВАНЫ' : '🟢 Открыты';
 
-  if (!chart) {
-    const ctx = document.getElementById('equity-chart').getContext('2d');
-    chart = new Chart(ctx, {
-      type: 'line',
-      data: { datasets: [{ label:'Equity', data:equityHistory, borderColor:'#3fb950', borderWidth:1.5, pointRadius:0, tension:0.3, fill:false }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: {
-          x: { type:'time', time:{unit:'hour'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} },
-          y: { grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10},callback:v=>'$'+v} }
-        },
-        plugins: { legend:{display:false} }
+      // Progress bars
+      const pnlPct = Math.min(100, Math.abs(dailyLoss) / maxLoss * 100);
+      const marginPct = Math.min(100, marginTotal / maxMargin * 100);
+      const pnlBar = document.getElementById('risk-pnl-bar');
+      pnlBar.style.width = pnlPct + '%';
+      pnlBar.className = 'progress-fill ' + (pnlPct > 80 ? 'bad' : pnlPct > 50 ? 'warn' : 'ok');
+
+      const marginBar = document.getElementById('risk-margin-bar');
+      marginBar.style.width = marginPct + '%';
+      marginBar.className = 'progress-fill ' + (marginPct > 80 ? 'bad' : marginPct > 50 ? 'warn' : 'ok');
+
+      const badge = document.getElementById('risk-badge');
+      if (blocked) { badge.textContent = 'STOP'; badge.className = 'badge bad'; }
+      else if (pnlPct > 80 || marginPct > 80) { badge.textContent = 'WARN'; badge.className = 'badge warn'; }
+      else { badge.textContent = 'OK'; badge.className = 'badge ok'; }
+    } catch(e) {}
+
+    // ── Orders ──
+    const orders = data.orders || [];
+    allOrders = orders;
+    document.getElementById('ord-count').textContent = orders.length;
+    renderOrders(orders, 'all');
+
+    // ── Signals ──
+    try {
+      const sr = await fetch(RPC + '/signals');
+      const sig = await sr.json();
+      const longs = sig.long || [];
+      const shorts = sig.short || [];
+      document.getElementById('sig-count').textContent = longs.length + shorts.length;
+      let sigHTML = '';
+      if (longs.length > 0) {
+        sigHTML += '<div style="color:var(--green);margin-bottom:4px;">📈 LONG:</div>';
+        for (const s of longs.slice(0, 3)) {
+          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pos||'?'}% vol=$${fmt(s.turnover24h/1e6,0)}M</div>`;
+        }
       }
-    });
-  } else {
-    chart.data.datasets[0].data = equityHistory;
-    chart.update('none');
+      if (shorts.length > 0) {
+        sigHTML += '<div style="color:var(--red);margin-bottom:4px;margin-top:6px;">📉 SHORT:</div>';
+        for (const s of shorts.slice(0, 3)) {
+          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pos||'?'}%</div>`;
+        }
+      }
+      document.getElementById('signals').innerHTML = sigHTML || '<div class="metric">Нет сигналов</div>';
+    } catch(e) {}
+
+    // ── Alerts ──
+    const alerts = data.alerts || [];
+    document.getElementById('alerts').innerHTML = alerts.length > 0
+      ? alerts.slice(-5).reverse().map(a => `<div class="metric">${a}</div>`).join('')
+      : '<div class="metric">—</div>';
+
+    // ── Equity chart ──
+    const now = new Date();
+    equityHistory.push({ x: now, y: equity });
+    if (equityHistory.length > 288) equityHistory = equityHistory.slice(-288);
+
+    if (!chart) {
+      const ctx = document.getElementById('equity-chart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [{ label:'Equity', data:equityHistory, borderColor:'#3fb950', borderWidth:1.5, pointRadius:0, tension:0.3, fill:true, backgroundColor:'rgba(63,185,80,0.08)' }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            x: { type:'time', time:{unit:'hour'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} },
+            y: { grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10},callback:v=>'$'+v} }
+          },
+          plugins: { legend:{display:false} }
+        }
+      });
+    } else {
+      chart.data.datasets[0].data = equityHistory;
+      chart.update('none');
+    }
+
+  } catch(e) {
+    document.getElementById('status-dot').className = 'dot dead';
+    console.error('Dashboard error:', e);
   }
+}
+
+function filterOrders(kind) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  renderOrders(allOrders, kind);
+}
+
+function renderOrders(orders, kind) {
+  const filtered = kind === 'all' ? orders : orders.filter(o => o.kind === kind);
+  if (filtered.length === 0) {
+    document.getElementById('orders').innerHTML = '<div class="metric">Нет ордеров</div>';
+    return;
+  }
+  let html = '<div class="row" style="color:#8b949e;font-size:10px;"><span class="sym">Символ</span><span style="width:45px">Тип</span><span style="width:65px">Цена</span><span style="width:45px">Qty</span></div>';
+  for (const o of filtered.slice(0, 20)) {
+    const kindClr = o.kind === 'TP' ? 'var(--green)' : o.kind === 'SL' ? 'var(--red)' : 'var(--yellow)';
+    html += `<div class="row">
+      <span class="sym">${o.symbol}</span>
+      <span style="width:45px;color:${kindClr}">${o.kind}</span>
+      <span style="width:65px">$${fmt(o.price, 4)}</span>
+      <span style="width:45px">${fmt(o.qty, 0)}</span>
+    </div>`;
+  }
+  document.getElementById('orders').innerHTML = html;
 }
 
 refresh();
