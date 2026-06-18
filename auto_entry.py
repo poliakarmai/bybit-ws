@@ -17,6 +17,29 @@ AUTO_ENTRY_WATCH = [
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
 MIN_SCORE = 25  # порог для авто-входа (из 50)
 
+# ── Фаза 5.2: Per-symbol оптимальные параметры ──
+PER_SYMBOL_CONFIG = {}
+PER_SYMBOL_CONFIG_FILE = os.path.join(DATA_DIR, 'per_symbol_optimal.json')
+
+
+def _load_per_symbol_config():
+    global PER_SYMBOL_CONFIG
+    try:
+        if os.path.exists(PER_SYMBOL_CONFIG_FILE):
+            with open(PER_SYMBOL_CONFIG_FILE) as f:
+                PER_SYMBOL_CONFIG = json.load(f)
+    except Exception:
+        pass
+
+
+def _get_symbol_param(sym: str, key: str, default):
+    """Получить параметр для символа: per-symbol → global default."""
+    sym_config = PER_SYMBOL_CONFIG.get(sym, {})
+    return sym_config.get(key, default)
+
+
+_load_per_symbol_config()  # загружаем при импорте
+
 
 def _filter_by_mtf_confluence(scored: list, direction: str) -> list:
     """Фаза 4.3.1: фильтровать сигналы без D/W/M конфлюенса (≥2/3)."""
@@ -294,7 +317,9 @@ def auto_entry_scan(positions):
             bb2 = get_bb_data(sym, 'D')
             if not bb2:
                 continue
-            price = round(bb2['lower'], 4)
+            # Per-symbol оптимальный дисконт (Фаза 5.2)
+            entry_discount = _get_symbol_param(sym, 'entry_discount', 1.0)
+            price = round(bb2['lower'] * entry_discount, 4)
             qty = math.ceil(margin * 3 / price)
             if qty < 1:
                 continue
