@@ -83,7 +83,8 @@ bybit-ws/
 ├── junk_trail.py        ← Трейлинг-TP для JUNK-шортов
 │
 ├── gridsignal_scanner.py← Сканер сигналов Bollinger Grid
-├── gridsignal-bot.py    ← Исполнение сигналов (через RPC)
+├── gridsignal-bot.py    ← Исполнение сигналов сканера через RPC (/rpc/enter, /rpc/scan)
+│                           Запуск: python3 gridsignal-bot.py --mode long|short
 │
 │   # ── ML (Фаза 5) ──
 ├── ml_scorer.py         ← ML Gate: RandomForest F1=0.921
@@ -127,8 +128,8 @@ bybit-ws/
 ├── funding_rotation.py  ← Авто-фандинг-ротация
 ├── partial_tp.py        ← Частичный TP (динамический сплит)
 ├── manual_positions.py  ← Защита ручных позиций
-├── confluence_paper.py  ← Multi-timeframe конфлюенс
-├── mtf_confirmation.py  ← MTF-подтверждение сигналов
+├── confluence_paper.py  ← Paper-trading версия MTF-конфлюенса (бэктестинг)
+├── mtf_confirmation.py  ← MTF-подтверждение сигналов (live, D/W/M ≥2/3)
 ├── ws_client.py         ← WebSocket live-цены/BB
 │
 ├── web/
@@ -185,9 +186,13 @@ bybit-ws/
 ```
 
 ### 4.1 ML Gate (Random Forest)
-- **Модель:** RandomForestClassifier, F1=0.921
-- **Порог:** probability > 0.22
+- **Модель:** RandomForestClassifier
+- **In-sample F1:** 0.951 | **Walk-forward F1:** 0.368 ± 0.413 (🔴 сильный оверфитинг)
+- **Walk-forward Precision:** 0.50 ± 0.50 | **Recall:** 0.33 ± 0.41
+- **Датасет:** 270 сигналов, 30 TP (11.1% позитивный класс)
+- **Порог:** 0.22 (эвристический, не оптимизирован)
 - **При ошибке:** 0.5 (нейтрально, не пропускает слепо)
+- **Рекомендация:** переобучить на большем датасете, добавить stratified split, рассмотреть SMOTE
 
 ### 4.2 LSTM-режим
 - **Модель:** 2-layer LSTM (64→32), 30-дневные D-свечи BTC+ETH
@@ -244,7 +249,8 @@ bybit-ws/
 | Параметр | Значение |
 |----------|----------|
 | Макс. дневной убыток | $50 |
-| Макс. маржа | $500 |
+| Макс. маржа | **$300** (30% от ~$1000 депозита) |
+| Макс. в одну позицию | **$100** (10% депозита) |
 | Макс. позиций LONG | 12 |
 | Circuit breaker | daily_pnl < -$50 → блокировка входов |
 | Маржа > 80% | → алерт |
@@ -367,6 +373,10 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 - `bybit_ws_active_positions`
 - `bybit_ws_daily_pnl`
 - `bybit_ws_cycle_duration_seconds`
+- `bybit_ws_ml_gate_pass_rate` — % сигналов, прошедших ML Gate
+- `bybit_ws_api_error_rate` — % ошибок API
+- `bybit_ws_margin_usage_pct` — % использования маржи
+- `bybit_ws_cycle_duration_p95` — 95-й перцентиль цикла
 
 ---
 
@@ -418,6 +428,10 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | **EnvironmentFile** | `bybit-ws-async.service` | Ключи через `EnvironmentFile=~/.config/bybit-ws/env` (chmod 600) вместо голых `Environment=` |
 | **API credentials migration** | `api.py` | Приоритет: `os.environ` (systemd) → legacy `~/.config/bybit-cli/config` |
 | **main.py deprecated** | `main.py` | `sys.exit('Use main_async.py')` — мёртвый код удалён из активного использования |
+| **Canary-период деплоя** | `deploy.sh` | 10 мин мониторинг (20×30с): сервис жив + health.txt свежее 5 мин → rollback |
+| **Retention policy бэкапов** | `bybit-db-backup.py` | Хранение 7 дней, авто-удаление старых, алерт при < 1 GB |
+| **Walk-forward validation** | `walk_forward_validate.py` | Запущен: in-sample F1=0.951 → walk-forward F1=0.368 (оверфитинг) |
+| **Снижение маржи** | `config.py` | `max_total_margin` 500→300, добавлен `max_position_size: 100` |
 | Watchdog: зависание | `bybit-watchdog.sh` | Проверка возраста последней записи (>5 мин) |
 | Бэкап: конфиг + модели | `bybit-db-backup.py` | config.yaml, .joblib/.pt, trades.jsonl |
 
@@ -467,12 +481,12 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | Per-symbol RL агенты | 8-12ч | 🥈 |
 | ML data drift мониторинг (PSI/KS) | 2ч | 🥈 |
 | Расширить тесты ML (до 50+) | 8ч | 🥇 |
-| Переоценка порога ML Gate (0.22 → PR-кривая) | 2ч | 🥇 |
 | Ограничить RL Tier S/A монетами | 2ч | 🥈 |
 | LSTM горизонт 30→90 дней | 4ч | 🥈 |
 | Алерт при откате ML через RPC | 1ч | 🟢 |
 | Онлайн-мониторинг качества ML (precision_7d) | 2ч | 🟢 |
 | Watchdog интервал 30m → 5m | 0.5ч | 🟢 |
+| Переобучение RF (оверфитинг 0.583) | 4ч | 🥇 |
 
 ---
 
@@ -481,11 +495,11 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 ### Деплой
 
 ```bash
-# Атомарный деплой с бэкапом и rollback
+# Атомарный деплой с бэкапом, canary-периодом и rollback
 bash ~/bybit-ws/deploy.sh
 ```
 
-Скрипт делает: бэкап текущих файлов → атомарный swap → рестарт → smoke test → rollback при фейле.
+Скрипт делает: бэкап → атомарный swap → рестарт → **canary-мониторинг 10 мин** (20 проверок каждые 30с: сервис жив + health.txt свежее 5 мин) → rollback при фейле.
 
 ### Быстрый откат ML
 
@@ -506,8 +520,13 @@ curl http://127.0.0.1:8766/rpc/ml_toggle
 
 ```bash
 # Бэкап state.db (автоматически через cron daily 03:00)
-python3 ~/.hermes/scripts/bybit-db-backup.py
+python3 ~/hermes-infra/scripts/bybit-db-backup.py
 ```
+
+Бэкапы хранятся в `~/.local/share/bybit-ws/backups/`:
+- Формат: `backup_YYYYMMDD_HHMM.tar.gz`
+- Retention: 7 дней (старые удаляются автоматически)
+- Проверка свободного места: алерт если < 1 GB
 
 ### Тестирование
 

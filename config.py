@@ -134,7 +134,8 @@ _DEFAULT_WEBSOCKET = {
 
 _DEFAULT_RISK = {
     'max_drawdown_pct': 15,       # global stop: -15% of deposit → close all
-    'max_total_margin': 500,      # max $500 total in positions
+    'max_total_margin': 300,      # max $300 total in positions (30% of $1000 deposit)
+    'max_position_size': 100,     # max $100 in single position (10% of deposit)
     'max_daily_loss': 50,         # stop for the day at -$50
     'max_long_positions': 12,      # limit LONG entries
     'emergency_close_all': True,   # close all positions on max_drawdown
@@ -324,7 +325,8 @@ rpc:
 
 risk:
   max_drawdown_pct: {_DEFAULT_RISK['max_drawdown_pct']}       # -15% от пикового баланса → закрыть всё
-  max_total_margin: {_DEFAULT_RISK['max_total_margin']}        # не более $500 суммарно в позициях
+  max_total_margin: {_DEFAULT_RISK['max_total_margin']}        # не более $300 суммарно в позициях (30% депозита)
+  max_position_size: {_DEFAULT_RISK['max_position_size']}       # не более $100 в одну позицию (10% депозита)
   max_daily_loss: {_DEFAULT_RISK['max_daily_loss']}            # стоп на день при -$50
   max_long_positions: {_DEFAULT_RISK['max_long_positions']}     # лимит LONG
   emergency_close_all: {str(_DEFAULT_RISK['emergency_close_all']).lower()}

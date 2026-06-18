@@ -12,7 +12,7 @@ DATA_DIR=Path.home()/'.local'/'share'/'bybit-ws'
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:
-    from ml_scorer import _extract_features, MODEL_PATH
+    from ml_scorer import _extract_features, MODEL_PATH, _load_signals
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import TimeSeriesSplit
     from sklearn.metrics import f1_score, precision_score, recall_score
@@ -20,28 +20,13 @@ except ImportError as e:
     print(f'❌ Зависимости не установлены: {e}')
     sys.exit(1)
 
-# Загружаем сигналы из БД
-try:
-    import sqlite3
-    db = Path.home()/'.local'/'share'/'gridsignal-bot'/'users.db'
-    conn = sqlite3.connect(str(db))
-    rows = conn.execute('SELECT signal_data, outcome FROM trade_signals WHERE outcome IS NOT NULL ORDER BY created_at').fetchall()
-    conn.close()
-except Exception:
-    rows = []
+# Загружаем сигналы из БД (используем _load_signals из ml_scorer)
+signals_raw = _load_signals()
+signals = signals_raw  # _load_signals уже возвращает правильный формат
 
-if len(rows) < 20:
-    print(f'⚠️ Недостаточно данных: {len(rows)} сделок (нужно ≥20)')
+if len(signals) < 20:
+    print(f'⚠️ Недостаточно данных: {len(signals)} сделок (нужно ≥20)')
     sys.exit(0)
-
-signals = []
-for row in rows:
-    try:
-        sig = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-        sig['outcome'] = 1 if row[1] == 'TP' else 0
-        signals.append(sig)
-    except Exception:
-        pass
 
 X, y = _extract_features(signals)
 print(f'📊 Данные: {len(signals)} сделок, TP={sum(y)}/{len(y)} ({sum(y)/len(y)*100:.1f}%)')
