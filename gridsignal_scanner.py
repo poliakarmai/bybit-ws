@@ -5,7 +5,8 @@ v4.0: SHORT-режим, честный Multi-TF (D/5/3), RSI(14) метрика.
 Полный 9-метричный анализ топ-50 монет, возвращает топ-5 сигналов
 для стратегии Bollinger Grid (LONG + SHORT).
 
-Использует bybit CLI (ключи уже в ~/.config/bybit-cli/config).
+Использует bybit CLI (ключи из ~/.config/bybit-cli/config).
+Основной монитор (bybit-ws-async) использует api.py → env-ключи (EnvironmentFile).
 """
 
 import json
