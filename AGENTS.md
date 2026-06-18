@@ -220,7 +220,17 @@ SL и TP ставятся автоматически после исполнен
 ## Аудит 18.06.2026
 
 Полный аудит трёх эшелонов (Source-Driven + Security + Adversarial).
-Исправлено: 15 находок (7 CRITICAL + 8 HIGH/MEDIUM).
+Исправлено: 21 находка (7 CRITICAL + 12 HIGH + 4 MEDIUM).
+
+Дополнительные фиксы (поздний вечер):
+- HMAC-подпись моделей (защита от RCE)
+- Feature flag `BYBIT_ML_ENABLED=0`
+- Атомарный деплой-скрипт с rollback
+- RPC `/rpc/ml_toggle`
+- Watchdog: проверка зависания цикла
+- Бэкап расширен: конфиг + модели + trades
+- ML smoke-тесты (3 шт.)
+- Walk-forward validation скрипт
 
 ### Исправленные CRITICAL
 - **BE-SL:** `auto_sl.py` — прибыльные позиции получают SL на безубытке (вместо «пусть работает TP»)
