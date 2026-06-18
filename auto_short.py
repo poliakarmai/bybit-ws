@@ -136,6 +136,125 @@ def _check_short_mtf(sym: str):
         return None  # ошибка — не блокируем вход
     
     
+def _count_up_days(sym: str) -> int:
+    """Считает количество последовательных дней РОСТА (для SHORT-скоринга)."""
+    try:
+        from .api import bybit as _bybit
+        r = _bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=8')
+        if r and r.get('retCode') == 0:
+            candles = r['result'].get('list', [])
+            closes = [float(c[4]) for c in reversed(candles)]
+            up = 0
+            for i in range(len(closes) - 1, 0, -1):
+                if closes[i] > closes[i-1]:
+                    up += 1
+                else:
+                    break
+            return up
+    except Exception:
+        pass
+    return 0
+
+
+def short_score_coin(sym: str, bb_data: dict, ticker: dict, is_junk: bool) -> dict:
+    """9-метричный SHORT-скоринг (v1.0). Возвращает {score, breakdown, ...} или None.
+    
+    Метрики (0-50):
+    1. BB score (0-15): высокая позиция на BB = хорошо для SHORT
+    2. Volume score (0-10): оборот — ликвидность
+    3. Up days (0-10): последовательные дни роста = перегретость
+    4. Funding (0-5): нейтральный/отрицательный фандинг = хорошо для SHORT
+    5. BB Width (0-5): умеренная волатильность
+    6. Quality (0-5): позиция × ширина BB
+    """
+    if not bb_data:
+        return None
+
+    bb_pos = bb_data.get('bb_pos', 
+        (float(ticker.get('lastPrice', 0)) - float(bb_data.get('lower', 0))) / 
+        (float(bb_data.get('upper', 1)) - float(bb_data.get('lower', 0))) * 100 
+        if float(bb_data.get('upper', 1)) != float(bb_data.get('lower', 0)) else 50)
+    bb_width = bb_data.get('bb_width', 0)
+    cur = float(ticker.get('lastPrice', bb_data.get('current', 0)))
+
+    # 1. BB score (0-15) — зеркально LONG
+    if bb_pos >= 90:      bb_score = 15
+    elif bb_pos >= 75:    bb_score = 12
+    elif bb_pos >= 60:    bb_score = 8
+    elif bb_pos >= 40:    bb_score = 5
+    elif bb_pos >= 25:    bb_score = 3
+    else:                 bb_score = 1
+
+    # Auto-skip: BB < 20% — неинтересно для SHORT
+    if bb_pos < 20:
+        return None
+
+    # 2. Volume score (0-10) — как у LONG
+    turnover = float(ticker.get('turnover24h', 0) or 0)
+    if turnover < 1_000_000:
+        return None
+    if turnover > 500_000_000:     vol_score = 10
+    elif turnover > 100_000_000:   vol_score = 8
+    elif turnover > 50_000_000:    vol_score = 7
+    elif turnover > 20_000_000:    vol_score = 6
+    elif turnover > 10_000_000:    vol_score = 5
+    elif turnover > 5_000_000:     vol_score = 4
+    else:                          vol_score = 2
+
+    # 3. Up days (0-10) — зеркально down_days
+    up = _count_up_days(sym)
+    if up >= 5:      up_score = 10
+    elif up >= 3:    up_score = 8
+    elif up >= 2:    up_score = 5
+    elif up >= 1:    up_score = 3
+    else:            up_score = 1
+
+    # 4. Funding (0-5) — отрицательный фандинг = шортерам платят
+    funding = float(ticker.get('fundingRate', 0) or 0)
+    # Для SHORT: negative funding = отлично, neutral = хорошо, positive = penalty
+    if funding < -0.0002:      fund_score = 5   # шортерам платят
+    elif funding < -0.0001:    fund_score = 4
+    elif abs(funding) < 0.00005: fund_score = 3  # нейтрально
+    elif funding < 0.0001:     fund_score = 2
+    elif funding < 0.0002:     fund_score = 1
+    else:                      fund_score = 0   # дорогой фандинг для шорта
+
+    # 5. BB Width / Volatility (0-5)
+    if 3 <= bb_width <= 8:     vola_score = 5
+    elif 1 <= bb_width < 3:    vola_score = 3
+    elif 8 < bb_width <= 15:   vola_score = 3
+    else:                      vola_score = 1
+
+    # 6. Quality score (0-5) — позиция × ширина, инвертировано
+    quality = ((100 - bb_pos) / 100) * bb_width if bb_width > 0 else 3
+    if quality <= 0.5:        qscore = 5
+    elif quality <= 1.5:      qscore = 4
+    elif quality <= 3.0:      qscore = 3
+    elif quality <= 5.0:      qscore = 2
+    else:                     qscore = 1
+
+    # ── Бонус для JUNK: дневной памп добавляет очков ──
+    bonus = 0
+    bonus_label = ''
+    if is_junk:
+        chg_pct = float(ticker.get('price24hPcnt', 0) or 0)
+        if chg_pct >= 1.5:     bonus = 8; bonus_label = f' Pump+{int(chg_pct*100)}%'
+        elif chg_pct >= 1.0:   bonus = 5; bonus_label = f' Pump+{int(chg_pct*100)}%'
+        elif chg_pct >= 0.8:   bonus = 3; bonus_label = f' Pump+{int(chg_pct*100)}%'
+
+    total = bb_score + vol_score + up_score + fund_score + vola_score + qscore + bonus
+
+    return {
+        'symbol': sym,
+        'score': total,
+        'max_score': 58 if is_junk else 50,
+        'bb_pos': bb_pos,
+        'bb_width': bb_width,
+        'cur': cur,
+        'breakdown': f'BB={bb_score} Vol={vol_score} Up={up_score} Fund={fund_score} Vola={vola_score} Q={qscore}{bonus_label}',
+    }
+
+
 def check_auto_short(positions):
     """Сканировать перегретые монеты и ставить SHORT.
     Вызывается каждые 10 циклов (5 мин)."""
@@ -250,7 +369,11 @@ def check_auto_short(positions):
             break
 
         # Шорт! Рассчитываем параметры
-        short_margin = margin_for_strategy('short', score=7.0)
+        # ── Фаза 5.7: 9-метричный SHORT-скоринг ──
+        short_sc = short_score_coin(sym, bb, t, is_junk)
+        short_score = short_sc['score'] if short_sc else 35  # fallback: средний скор
+        normalized_short = min(10, max(5, short_score / 5))  # 25→5, 50→10
+        short_margin = margin_for_strategy('short', score=normalized_short)
         # ── Фаза 4.3.6: MTF-конфлюенс → бонус к позиции ──
         if isinstance(mtf_conf, dict):
             mtf_c = mtf_conf.get('confluence', 0)
@@ -371,7 +494,7 @@ def check_auto_short(positions):
 
                 dca_str = ', '.join(f'+{d["mult"]*100:.0f}% @ ${d["price"]:.4f}' for d in dca_placed)
                 msg = (f'🔴 SHORT JUNK {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
-                       f'памп +{chg_pct*100:.0f}% | TP ${tp_price:.6f} | DCA: {dca_str}{mtf_bonus}')
+                       f'score={short_score} памп +{chg_pct*100:.0f}% | TP ${tp_price:.6f} | DCA: {dca_str}{mtf_bonus}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
                 log_event(msg)
@@ -402,7 +525,7 @@ def check_auto_short(positions):
                 _save_state(state)
 
                 msg = (f'🔴 SHORT {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
-                       f'BB={bb_pct:.0f}% | SL ${sl_price:.4f} (+{sl_pct*100:.0f}%) | '
+                       f'score={short_score} BB={bb_pct:.0f}% | SL ${sl_price:.4f} (+{sl_pct*100:.0f}%) | '
                        f'TP ${tp_price:.4f}{mtf_bonus}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
