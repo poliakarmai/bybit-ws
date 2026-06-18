@@ -154,7 +154,7 @@ def test_dashboard_exists():
     if dash.exists():
         html = dash.read_text()
         check("Chart.js подключён", 'chart.js' in html.lower() or 'Chart' in html)
-        check("RPC эндпоинт есть", '8766' in html)
+        check("RPC прокси (const RPC)", 'const RPC' in html)
         check("Автообновление есть", 'setInterval' in html)
 
 # ──────────────────────────────────────────────
