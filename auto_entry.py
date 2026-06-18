@@ -3,7 +3,7 @@ import json, math, os, time
 from . import BYBIT_CLI, DATA_DIR, MAX_POSITION_VALUE
 from . import safe_run
 from .api import bybit, get_bb_data
-from .alerts import log_event
+from .alerts import log_event, add_alert
 from .config import Config
 from .position_sizing import margin_for_strategy
 
@@ -16,6 +16,47 @@ AUTO_ENTRY_WATCH = [
 
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
 MIN_SCORE = 25  # порог для авто-входа (из 50)
+
+
+def _filter_by_mtf_confluence(scored: list, direction: str) -> list:
+    """Фаза 4.3.1: фильтровать сигналы без D/W/M конфлюенса (≥2/3)."""
+    from .mtf_confirmation import check_confluence
+
+    filtered = []
+    for s in scored:
+        sym = s['symbol']
+        conf = check_confluence(sym, direction)
+        if conf is None:
+            filtered.append(s)
+            continue
+        if conf['approved']:
+            s['mtf'] = conf
+            filtered.append(s)
+
+            # ── Фаза 4.3.5: paper-трекинг конфлюенса ──
+            try:
+                from .confluence_paper import track_signal
+                cur = s.get('cur', 0)
+                track_signal(sym, direction, cur, cur,
+                           conf['confluence'], s.get('score'))
+            except Exception:
+                pass
+
+            # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа) ──
+            if conf['confluence'] == 3:
+                from .alerts import add_alert as _add_alert
+                _add_alert('ENTRY',
+                    f'🔥 STRONG CONFLUENCE: {sym} {direction} D+W+M | '
+                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% — '
+                    f'ручной вход или увеличенная позиция!'
+                )
+        else:
+            from .alerts import log_event
+            log_event(
+                f'🚫 MTF filter: {sym} {direction} score={s["score"]} '
+                f'confluence={conf["confluence"]}/3 ({conf["filter_reason"]})'
+            )
+    return filtered
 
 
 def _load_cooldown():
@@ -203,6 +244,9 @@ def auto_entry_scan(positions):
         if result and result['score'] >= MIN_SCORE:
             scored.append(result)
 
+    # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр ──
+    scored = _filter_by_mtf_confluence(scored, 'LONG')
+
     scored.sort(key=lambda x: x['score'], reverse=True)
 
     for s in scored:
@@ -249,9 +293,19 @@ def auto_entry_scan(positions):
                     'positionIdx': idx, 'timeInForce': 'GTC'}
             result = bybit('POST', '/v5/order/create', body)
             if result and result.get('retCode') == 0:
+                # ── Фаза 4.3.2: Telegram-алерт при входе ──
+                mtf_info = ''
+                if 'mtf' in s:
+                    mtf = s['mtf']
+                    mtf_info = f' | MTF:{mtf["confluence"]}/3({mtf["strength"]})'
+
                 entries.append(
                     f'🤖 Авто-вход {sym} @ ${price:.4f} x{qty} '
-                    f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]})'
+                    f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info})'
+                )
+                add_alert('ENTRY',
+                    f'🚀 LONG {sym}: вход ${price:.4f} ×{qty} ({3}x) | '
+                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
         except Exception as e:

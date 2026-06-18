@@ -265,6 +265,14 @@ def _run_heavy_cycle(cfg, new_positions, new_orders, cycle_count, now_ts):
             if sl_alerts:
                 save_json(CORR_DEDUP_FILE, corr_dedup)
 
+    # ── Фаза 4.3.5: обновление paper-трекинга конфлюенса ──
+    if new_positions:
+        try:
+            from .confluence_paper import check_outcomes
+            check_outcomes(new_positions)
+        except Exception:
+            pass
+
 
 def _run_x10_cycle(cfg, new_positions, cycle_count, correlation_stop):
     """X10 стратегии каждые HEAVY_CYCLE*2 циклов (10 мин)."""
@@ -594,6 +602,13 @@ def main_loop():
                         emoji = '🔴' if rpnl < 0 else '🛑'
                         add_alert('STOP', f'{emoji} {sym} SL: ${entry:.6f}→${exit_price:.6f} | {rpnl:+.1f}$ ({pnl_pct:+.1f}%) | {size:.0f}×{lev:.0f}x {side}')
                         record_alert('SL')
+                        # ── Фаза 4.3.5: запись закрытия в confluence paper ──
+                        try:
+                            from .confluence_paper import record_close
+                            direction = 'LONG' if side == 'Buy' else 'SHORT'
+                            record_close(sym, direction, exit_price, rpnl)
+                        except Exception:
+                            pass
                         # SL re-entry: запомнить для лесенки (только LONG)
                         if side == 'Buy':
                             sl_price = old_pos.get('mark', 0)
@@ -615,6 +630,13 @@ def main_loop():
                         pnl_pct = (rpnl / (size * entry)) * 100 if size and entry else 0
                         add_alert('TP', f'🎯 {sym} TP: ${entry:.6f}→${exit_price:.6f} | +{rpnl:.1f}$ (+{pnl_pct:.1f}%) | {size:.0f}×{lev:.0f}x {side}')
                         record_alert('TP')
+                        # ── Фаза 4.3.5: запись закрытия в confluence paper ──
+                        try:
+                            from .confluence_paper import record_close
+                            direction = 'LONG' if side == 'Buy' else 'SHORT'
+                            record_close(sym, direction, exit_price, rpnl)
+                        except Exception:
+                            pass
                         continue
                     if change_type == 'CLOSED':
                         old_pos = old_positions.get(sym, {})

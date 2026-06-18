@@ -96,6 +96,45 @@ def _round_to_tick(price, sym):
     return round(price / tick) * tick
 
 
+def _check_short_mtf(sym: str) -> bool:
+    """Фаза 4.3.1: проверить D/W/M конфлюенс для SHORT-сигнала.
+    
+    Возвращает True если конфлюенс ≥2/3 или нет данных (обратная совместимость).
+    """
+    from .mtf_confirmation import check_confluence
+    
+    try:
+        conf = check_confluence(sym, 'SHORT')
+        if conf is None:
+            return True  # нет данных — не фильтруем
+        if not conf['approved']:
+            log_event(
+                f'🚫 MTF filter SHORT: {sym} confluence={conf["confluence"]}/3 '
+                f'({conf["filter_reason"]})'
+            )
+            return False
+        
+        # ── Фаза 4.3.5: paper-трекинг конфлюенса ──
+        try:
+            from .confluence_paper import track_signal
+            track_signal(sym, 'SHORT', 0, 0, conf['confluence'])
+        except Exception:
+            pass
+
+        # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа) ──
+        if conf['confluence'] == 3:
+            from .alerts import add_alert as _add_alert
+            _add_alert('ENTRY',
+                f'🔥 STRONG CONFLUENCE: {sym} SHORT D+W+M — '
+                f'ручной вход или увеличенная позиция!'
+            )
+        
+        return True
+    except Exception as e:
+        log_event(f'⚠️ MTF filter SHORT {sym}: {e}')
+        return True  # ошибка — не блокируем вход
+    
+    
 def check_auto_short(positions):
     """Сканировать перегретые монеты и ставить SHORT.
     Вызывается каждые 10 циклов (5 мин)."""
@@ -198,6 +237,10 @@ def check_auto_short(positions):
             # Tier A/B — обычный фильтр BB
             if bb_pct < BB_SHORT_THRESHOLD:
                 continue
+
+        # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр для SHORT ──
+        if not _check_short_mtf(sym):
+            continue
 
         # Проверка time budget — останавливаемся если подходим к таймауту
         if time.time() > deadline:
