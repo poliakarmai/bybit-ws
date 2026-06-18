@@ -17,6 +17,58 @@ AUTO_ENTRY_WATCH = [
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
 MIN_SCORE = 25  # порог для авто-входа (из 50)
 
+# ── Фаза 5.4: LSTM-режим → адаптивные параметры ──
+REGIME_PARAMS = {
+    'TRENDING_UP':   {'min_score': 15, 'entry_discount': 0.97, 'sl_tightness': 0.91, 'aggression': 1.2},
+    'TRENDING_DOWN': {'min_score': 25, 'entry_discount': 0.93, 'sl_tightness': 0.95, 'aggression': 0.6},
+    'RANGING':       {'min_score': 20, 'entry_discount': 0.95, 'sl_tightness': 0.93, 'aggression': 1.0},
+    'HIGH_VOL':      {'min_score': 30, 'entry_discount': 0.90, 'sl_tightness': 0.96, 'aggression': 0.4},
+    'LOW_VOL':       {'min_score': 20, 'entry_discount': 0.96, 'sl_tightness': 0.92, 'aggression': 1.0},
+    'CHOPPY':        {'min_score': 30, 'entry_discount': 0.92, 'sl_tightness': 0.94, 'aggression': 0.5},
+    'NEUTRAL':       {'min_score': 20, 'entry_discount': 0.95, 'sl_tightness': 0.93, 'aggression': 1.0},
+}
+
+_regime_cache = {'params': REGIME_PARAMS['NEUTRAL'], 'regime': 'NEUTRAL', 'conf': 50, 'ts': 0}
+REGIME_CACHE_TTL = 3600  # 1 час
+
+
+def _get_regime_params():
+    """
+    Адаптивные параметры для текущего рыночного режима.
+    LSTM (5.4) → fallback regime.py.
+    """
+    global _regime_cache
+    now = time.time()
+    if now - _regime_cache['ts'] < REGIME_CACHE_TTL:
+        return _regime_cache['params'], _regime_cache['regime'], _regime_cache['conf']
+
+    regime = 'NEUTRAL'
+    confidence = 50
+
+    try:
+        from .lstm_regime import predict_regime, get_cached_prediction
+        data = predict_regime()
+        if not data:
+            data = get_cached_prediction()
+        if data:
+            regime = data.get('regime', 'NEUTRAL')
+            confidence = data.get('confidence', 50)
+    except Exception:
+        pass
+
+    if regime == 'NEUTRAL':
+        try:
+            from .regime import check_regime
+            data = check_regime()
+            regime = data.get('regime', 'NEUTRAL')
+            confidence = data.get('confidence', 50)
+        except Exception:
+            pass
+
+    params = REGIME_PARAMS.get(regime, REGIME_PARAMS['NEUTRAL'])
+    _regime_cache = {'params': params, 'regime': regime, 'conf': confidence, 'ts': now}
+    return params, regime, confidence
+
 # ── Фаза 5.2: Per-symbol оптимальные параметры ──
 PER_SYMBOL_CONFIG = {}
 PER_SYMBOL_CONFIG_FILE = os.path.join(DATA_DIR, 'per_symbol_optimal.json')
@@ -262,9 +314,15 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
 
 
 def auto_entry_scan(positions):
-    """Скрининг и авто-вход по 9-метричному скорингу (v4.0)."""
+    """Скрининг и авто-вход по 9-метричному скорингу (v4.0 + LSTM-режим 5.4)."""
     entries = []
     active = set(positions.keys())
+
+    # ── Фаза 5.4: адаптивные параметры от режима ──
+    regime_params, regime_name, regime_conf = _get_regime_params()
+    min_score = regime_params['min_score']
+    entry_discount_mult = regime_params['entry_discount']
+    aggression = regime_params['aggression']
     all_watch = list(AUTO_ENTRY_WATCH)
     wl_file = os.path.join(DATA_DIR, 'watchlist_custom.txt')
     if os.path.exists(wl_file):
@@ -302,7 +360,7 @@ def auto_entry_scan(positions):
         if not bb:
             continue
         result = full_score_coin(sym, bb, ticker_line)
-        if result and result['score'] >= MIN_SCORE:
+        if result and result['score'] >= min_score:
             scored.append(result)
 
     # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр ──
@@ -321,9 +379,9 @@ def auto_entry_scan(positions):
                 if elapsed < cooldown_sl:
                     continue
 
-            # Маржа от score (нормализовано к 7.0 для совместимости)
+            # Маржа от score с учётом агрессии режима (Фаза 5.4)
             normalized_score = min(10, s['score'] / 5)  # 25→5, 50→10
-            margin = margin_for_strategy('long', score=normalized_score)
+            margin = margin_for_strategy('long', score=normalized_score) * aggression
             if margin <= 0:
                 continue
 
@@ -331,9 +389,9 @@ def auto_entry_scan(positions):
             bb2 = get_bb_data(sym, 'D')
             if not bb2:
                 continue
-            # Per-symbol оптимальный дисконт (Фаза 5.2)
-            entry_discount = _get_symbol_param(sym, 'entry_discount', 1.0)
-            price = round(bb2['lower'] * entry_discount, 4)
+            # Per-symbol оптимальный дисконт × режимный множитель (Фаза 5.2 + 5.4)
+            sym_discount = _get_symbol_param(sym, 'entry_discount', 1.0)
+            price = round(bb2['lower'] * sym_discount * entry_discount_mult, 4)
             qty = math.ceil(margin * 3 / price)
             if qty < 1:
                 continue
@@ -361,14 +419,15 @@ def auto_entry_scan(positions):
                 if 'mtf' in s:
                     mtf = s['mtf']
                     mtf_info = f' | MTF:{mtf["confluence"]}/3({mtf["strength"]})'
+                regime_info = f' | 📊{regime_name}' if regime_name != 'NEUTRAL' else ''
 
                 entries.append(
                     f'🤖 Авто-вход {sym} @ ${price:.4f} x{qty} '
-                    f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info})'
+                    f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info}{regime_info})'
                 )
                 add_alert('ENTRY',
                     f'🚀 LONG {sym}: вход ${price:.4f} ×{qty} ({3}x) | '
-                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}'
+                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
                 # -- Фаза 5.3: запись в A/B тест --
