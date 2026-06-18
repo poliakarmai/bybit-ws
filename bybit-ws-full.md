@@ -344,7 +344,6 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | `get_metrics()` | Дневные метрики (TP/SL/входы) |
 | `get_risk_status()` | Лимиты риска |
 | `place_entry(symbol, side, qty, sl, tp)` | Вход в позицию |
-| `vpn_status()` | VPN-здоровье (WireGuard, трафик, клиенты) — критично: bybit-ws ходит через VPN |
 
 ---
 
