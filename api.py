@@ -1,7 +1,7 @@
-"""API-запросы к Bybit v3 — нативный requests + HMAC-SHA256.
+"""API-запросы к Bybit v5 — httpx + HMAC-SHA256.
 
-v3: замена subprocess(BYBIT_CLI) на requests (код-ревью 14.06.2026).
-Ускорение 10-50×, устранение command injection, переиспользование соединений.
+v5: замена subprocess(BYBIT_CLI) на httpx (код-ревью 14.06.2026).
+Ускорение 10-50x, устранение command injection, переиспользование соединений.
 """
 import hashlib, hmac, json, os, time
 import httpx

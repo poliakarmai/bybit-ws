@@ -896,23 +896,27 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         # ── Размещение SL ──
         if sl is not None and sl > 0:
-            sl_side = 'Sell' if side == 'Buy' else 'Buy'
-            # Use actual positionIdx (hedge-safe)
-            actual_idx = pos.get('positionIdx', 0) if pos else 0
-            sl_result = _api_call('POST', '/v5/position/trading-stop', {
-                'category': 'linear',
-                'symbol': symbol,
-                'positionIdx': actual_idx,
-                'stopLoss': str(_round_price(sl)),
-                'slTriggerBy': 'MarkPrice',
-            })
-            if sl_result.get('retCode') == 0:
-                result['sl'] = {'price': _round_price(sl), 'status': 'placed'}
+            if pos is None:
+                result['sl'] = {'price': _round_price(sl), 'status': 'failed',
+                                'detail': 'позиция не появилась за 3с — SL не поставлен'}
             else:
-                result['sl'] = {
-                    'price': _round_price(sl), 'status': 'failed',
-                    'detail': sl_result.get('retMsg', '?')
-                }
+                sl_side = 'Sell' if side == 'Buy' else 'Buy'
+                # Use actual positionIdx (hedge-safe)
+                actual_idx = pos.get('positionIdx', 0)
+                sl_result = _api_call('POST', '/v5/position/trading-stop', {
+                    'category': 'linear',
+                    'symbol': symbol,
+                    'positionIdx': actual_idx,
+                    'stopLoss': str(_round_price(sl)),
+                    'slTriggerBy': 'MarkPrice',
+                })
+                if sl_result.get('retCode') == 0:
+                    result['sl'] = {'price': _round_price(sl), 'status': 'placed'}
+                else:
+                    result['sl'] = {
+                        'price': _round_price(sl), 'status': 'failed',
+                        'detail': sl_result.get('retMsg', '?')
+                    }
 
         # ── Размещение TP ──
         if tp is not None and tp > 0:

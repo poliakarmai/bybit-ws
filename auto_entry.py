@@ -421,8 +421,10 @@ def auto_entry_scan(positions):
                 signal_data = {
                     'score': s.get('score', 25), 'bb_pos': s.get('bb_pos', 50),
                     'bb_width': s.get('bb_width', 10), 'price': s.get('cur', 0),
-                    'lower_bb': 0, 'upper_bb': 0, 'middle_bb': 0,
-                    'entry': 0, 'timeframe': 'D', 'mode': 'long', 'funding': 0.0,
+                    'lower_bb': bb2.get('lower', 0), 'upper_bb': bb2.get('upper', 0),
+                    'middle_bb': bb2.get('middle', 0),
+                    'entry': s.get('cur', 0), 'timeframe': 'D', 'mode': 'long',
+                    'funding': s.get('funding', 0.0),
                 }
                 ens_enter, ens_conf, ens_details = _ensemble_check(signal_data, market_state)
                 if not ens_enter:

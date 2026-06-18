@@ -185,7 +185,7 @@ def should_enter(state_dict: dict, direction: str = 'LONG') -> tuple[bool, str]:
     Возвращает (enter: bool, reason: str).
     """
     if not MODEL_PATH.exists():
-        return True, 'RL модель не обучена — полагаемся на эвристику'
+        return False, 'RL модель не обучена — пропускаем сигнал'
 
     try:
         feat = _dict_to_features(state_dict)
@@ -200,7 +200,7 @@ def should_enter(state_dict: dict, direction: str = 'LONG') -> tuple[bool, str]:
         else:  # SKIP или противоположное направление
             return False, f'RL: {name} (conf={conf:.2f}) — пропустить'
     except Exception as e:
-        return True, f'RL error: {e} — входим по эвристике'
+        return False, f'RL error: {e} — пропускаем сигнал'
 
 
 def _dict_to_features(d: dict) -> np.ndarray:

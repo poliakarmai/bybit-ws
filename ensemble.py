@@ -84,7 +84,7 @@ def _rf_score(signal_data: dict) -> tuple[float, str]:
         detail = f'RF: {"PASS" if passed else "FAIL"} (prob={ml_prob:.2f})' if ml_prob else 'RF: PASS (no model)'
         return score, detail
     except Exception as e:
-        return 1.0, f'RF: error ({e})'
+        return 0.5, f'RF: error ({e}) — нейтрально'
 
 
 def _lstm_score(market_state: dict) -> tuple[float, str]:
@@ -119,16 +119,15 @@ def _lstm_score(market_state: dict) -> tuple[float, str]:
 
 
 def _rl_score(state_dict: dict) -> tuple[float, str]:
-    """RL-агент: ENTER=1.0, WAIT=0.5, SKIP=0.0."""
+    """RL-агент: ENTER=1.0, WAIT=0.0, SKIP=0.0."""
     try:
         from .rl_agent import should_enter
         enter, reason = should_enter(state_dict, 'LONG')
 
         if 'ENTER_LONG' in reason:
             score = 1.0
-        elif 'WAIT' in reason:
-            score = 0.5
         else:
+            # WAIT и SKIP — не входить
             score = 0.0
 
         # Извлекаем confidence из reason
@@ -142,7 +141,7 @@ def _rl_score(state_dict: dict) -> tuple[float, str]:
         detail = f'RL: {reason}'
         return score, detail
     except Exception as e:
-        return 0.5, f'RL: error ({e})'
+        return 0.0, f'RL: error ({e})'
 
 
 def ensemble_should_enter(signal_data: dict, market_state: Optional[dict] = None) -> tuple[bool, float, dict]:

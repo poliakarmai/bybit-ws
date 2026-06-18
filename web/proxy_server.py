@@ -42,7 +42,7 @@ def _proxy_rpc(handler, path):
     data = r.read()
     handler.send_response(200)
     handler.send_header('Content-Type', 'application/json')
-    handler.send_header('Access-Control-Allow-Origin', '*')
+    handler.send_header('Access-Control-Allow-Origin', 'http://localhost:9999')
     handler.send_header('Cache-Control', 'no-cache')
     handler.end_headers()
     handler.wfile.write(data)
@@ -84,4 +84,4 @@ class P(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    HTTPServer(('0.0.0.0', 9999), P).serve_forever()
+    HTTPServer(('127.0.0.1', 9999), P).serve_forever()
