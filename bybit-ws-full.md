@@ -2,7 +2,7 @@
 tags: [bybit-ws, documentation, overview, trading, architecture]
 created: 2026-06-16
 updated: 2026-06-18
-version: "2.0"
+version: "2.1"
 ---
 
 # Bybit-ws — Полная документация
@@ -135,9 +135,13 @@ bybit-ws/
 │   ├── dashboard.html   ← Дашборд v5.0
 │   └── proxy_server.py  ← Прокси (127.0.0.1:9999)
 │
+├── deploy.sh            ← Атомарный деплой с rollback
+├── walk_forward_validate.py ← Walk-forward валидация ML
+│
 └── test_smoke.py        ← 16 интеграционных тестов
     test_modules.py      ← 5 модульных тестов
     test_scanner_smoke.py← Тесты сканера
+    test_ml_smoke.py     ← 3 ML smoke теста (HMAC, RF, LSTM)
 ```
 
 ---
@@ -203,6 +207,26 @@ bybit-ws/
 - **WAIT = SKIP** (не голосует «за вход»)
 - **При ошибке:** 0.0 (RL), 0.5 (RF), fallback (LSTM)
 - **Фича-флаг:** `BYBIT_ML_ENABLED=0` отключает весь ML-конвейер → возврат к Фазе 2
+
+### 4.6 Безопасность моделей (HMAC)
+
+**Все ML-модели подписываются HMAC-SHA256** при сохранении и проверяются при загрузке. Без подписи модель не загрузится — алерт и fallback.
+
+| Модуль | Модель | Формат | Подпись |
+|--------|--------|--------|---------|
+| `ml_scorer.py` | RandomForest | `rf_model.joblib` | `rf_model.joblib.hmac` |
+| `lstm_regime.py` | StandardScaler | `scaler.json` | `scaler.json.hmac` |
+| `rl_agent.py` | DQN (PyTorch) | `dqn_latest.zip` | `.pb` (встроенная в SB3) |
+
+**Механизм:**
+- `_hmac_sign(path)` — SHA256 файла → HMAC с секретом → `.hmac`-файл
+- `_hmac_verify(path)` — пересчитывает и сравнивает через `hmac.compare_digest()` (timing-safe)
+- Секрет: `BYBIT_HMAC_SECRET` (env) или fallback-константа
+- При расхождении: модель не загружается, алерт, fallback на эвристику
+
+**Почему не safetensors/ONNX:** sklearn RF не поддерживает safetensors. HMAC-SHA256 эквивалентен по security-свойствам: злоумышленник не может подделать подпись без знания ключа.
+
+> **Важно:** это закрывает RCE-вектор через подмену моделей. Даже при компрометации файловой системы (write-доступ к `~/.local/share/bybit-ws/`) злоумышленник не сможет загрузить malicious model без ключа.
 
 ### 4.5 A/B-тест
 - **Группа A:** ML Gate
@@ -349,7 +373,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 
 Полный аудит трёх эшелонов: Source-Driven + Security + Adversarial.
 Всего находок: 47 (7 CRITICAL, 12 HIGH, 15 MEDIUM, 13 LOW).
-Исправлено: 21 (7 CRITICAL + 12 HIGH + 4 MEDIUM).
+Исправлено: 23 (7 CRITICAL + 12 HIGH + 4 MEDIUM).
 
 ### Исправленные CRITICAL (7/7)
 
@@ -378,15 +402,19 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | H9 | API без settleCoin | `auto_entry.py` | `&settleCoin=USDT` |
 | H10 | Импорт regime маскирует ошибки | `ensemble.py` | Явный ImportError handler |
 
-### Дополнительные фиксы (18.06 поздний вечер)
+### Дополнительные фиксы (18.06 вечер, второе ревью)
 
 | Что | Где | Суть |
 |-----|-----|------|
-| Pickle → joblib | `ml_scorer.py` | `joblib.load()` вместо `pickle.load()` |
+| **HMAC-подпись моделей** | `ml_scorer.py`, `lstm_regime.py` | `_hmac_sign()` / `_hmac_verify()` с `hmac.compare_digest()` (timing-safe). Закрывает RCE через подмену моделей |
 | Scaler pickle → json | `lstm_regime.py` | StandardScaler через JSON (безопасно) |
-| Feature flag | `auto_entry.py` | `BYBIT_ML_ENABLED=0` — откат ML |
+| Feature flag | `auto_entry.py` | `BYBIT_ML_ENABLED=0` — откат ML одной командой |
+| Атомарный деплой | `deploy.sh` | Бэкап → swap → рестарт → smoke test → rollback при фейле |
+| RPC ML Toggle | `rpc.py` | `GET/POST /rpc/ml_toggle` — статус и переключение ML без рестарта конфига |
+| Walk-forward validation | `walk_forward_validate.py` | PR-кривая на out-of-sample данных для переоценки порога ML Gate |
+| ML smoke тесты | `test_ml_smoke.py` | 3 теста: RF load, HMAC sign/verify, LSTM fallback |
 | Watchdog: зависание | `bybit-watchdog.sh` | Проверка возраста последней записи (>5 мин) |
-| Бэкап: конфиг + модели | `bybit-db-backup.py` | config.yaml, .pkl/.pt, trades.jsonl |
+| Бэкап: конфиг + модели | `bybit-db-backup.py` | config.yaml, .joblib/.pt, trades.jsonl |
 
 ### Исправленные MEDIUM (4/15)
 
@@ -405,6 +433,8 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | `2844afe` | 8 HIGH/MEDIUM исправлено |
 | `2b3888f` | Мусорные файлы удалены |
 | `c11650d` | 4 MEDIUM + документация |
+| `a6f669e` | Первое ревью: HMAC, feature flag, watchdog, бэкап |
+| `65521d9` | Второе ревью: deploy.sh, walk-forward, ml_toggle RPC, ML-тесты |
 
 ---
 
@@ -417,7 +447,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 - ✅ **Фаза 3:** Умный трейдинг — ML-скоринг, Partial TP, Фандинг-ротация
 - ✅ **Фаза 4:** Масштабирование — ATR, MTF, WebSocket, httpx, дашборд
 - ✅ **Фаза 5:** ML — RandomForest, A/B-тест, LSTM, RL (DQN), Ансамбль
-- ✅ **Аудит:** 19 находок исправлено (18 июня)
+- ✅ **Аудит:** 23 находки исправлено (18 июня), 24 осталось (все MEDIUM/LOW)
 
 ### Бэклог
 
@@ -430,10 +460,15 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | `except Exception` → логи (219 мест) | 4ч | 🟢 |
 | ML retraining pipeline | 4ч | 🥇 |
 | Per-symbol RL агенты | 8-12ч | 🥈 |
-| ML data drift мониторинг | 2ч | 🥈 |
-| Атомарный деплой-скрипт | 2ч | 🥈 |
-| Расширить тесты ML (до 100+) | 8ч | 🥇 |
-| Walk-forward validation для RF | 2ч | 🥇 |
+| ML data drift мониторинг (PSI/KS) | 2ч | 🥈 |
+| Расширить тесты ML (до 50+) | 8ч | 🥇 |
+| Переоценка порога ML Gate (0.22 → PR-кривая) | 2ч | 🥇 |
+| Ограничить RL Tier S/A монетами | 2ч | 🥈 |
+| LSTM горизонт 30→90 дней | 4ч | 🥈 |
+| Алерт при откате ML через RPC | 1ч | 🟢 |
+| Онлайн-мониторинг качества ML (precision_7d) | 2ч | 🟢 |
+| Архивировать DESIGN-STRATEGIES.md | 0.5ч | 🟢 |
+| Watchdog интервал 30m → 5m | 0.5ч | 🟢 |
 
 ---
 
