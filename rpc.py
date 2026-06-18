@@ -300,6 +300,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_get_config()
         elif path == "/rpc/paths":
             self._handle_paths()
+        elif path == "/rpc/ab_test_report":
+            self._handle_ab_test_report()
         elif path == "/rpc" or path == "/":
             self._handle_index()
         else:
@@ -357,7 +359,7 @@ class RPCHandler(BaseHTTPRequestHandler):
             "endpoints": [
                 "/rpc/all", "/rpc/positions", "/rpc/orders",
                 "/rpc/health", "/rpc/trades", "/rpc/alerts", "/rpc/metrics", "/rpc/risk",
-                "/rpc/signals", "/rpc/config", "/rpc/paths",
+                "/rpc/signals", "/rpc/config", "/rpc/paths", "/rpc/ab_test_report",
                 "/health", "/positions", "/orders", "/metrics", "/risk", "/signals", "/config",
                 "POST /scan", "POST /enter", "POST /close", "POST /reset-token",
                 "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
@@ -385,6 +387,15 @@ class RPCHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
         self.wfile.write(json.dumps(paths, indent=2).encode())
+
+    def _handle_ab_test_report(self):
+        """GET /rpc/ab_test_report — отчёт A/B-тестирования ML Gate."""
+        try:
+            from .ab_test import get_report as _ab_report
+            report = _ab_report()
+            _json_response(self, report)
+        except Exception as e:
+            _error(self, 'AB test error', str(e), 500)
 
     def _handle_get_config(self):
         """GET /rpc/config — текущая конфигурация без секретов."""
@@ -973,6 +984,12 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         # ── Алерт о закрытии ──
         pnl = round((pos['mark'] - pos['entry']) * pos['size'] * (1 if pos['side'] == 'Buy' else -1), 2)
+        # -- Фаза 5.3: запись исхода в A/B тест --
+        try:
+            from .ab_test import record_outcome_for_symbol
+            record_outcome_for_symbol(symbol, 'MANUAL', pos['mark'], pnl)
+        except Exception:
+            pass
         direction = '📈 LONG' if pos['side'] == 'Buy' else '📉 SHORT'
         entry_str = str(pos['entry'])
         mark_str = str(pos['mark'])

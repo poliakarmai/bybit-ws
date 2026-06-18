@@ -213,21 +213,31 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     total = bb_score + vol_score + down_score + fund_score + vola_score + qscore
 
     # ── Фаза 5.1: ML Gate — фильтр вместо бленда ──
+    # ── Фаза 5.3: A/B-тестирование — группа B пропускает ML Gate ──
+    import time as _time
+    signal_id = f"{sym}:{int(_time.time())}:{total}"
     ml_passed = True
     ml_prob = None
+    ab_group = None
     try:
-        from .ml_scorer import ml_gate_pass
-        signal_data = {
-            'score': total / 5,              # нормализация: 0-50 → 0-10 (шкала GridSignal)
-            'price': cur,
-            'lower_bb': bb_data['lower'],
-            'upper_bb': bb_data['upper'],
-            'middle_bb': bb_data['middle'],
-            'entry': bb_data['lower'] * 0.98,  # 2% дисконт (как в GridSignal данных)
-            'timeframe': 'D',
-            'mode': 'long',
-        }
-        ml_passed, ml_prob = ml_gate_pass(signal_data)
+        from .ab_test import assign_group as _assign_group
+        ab_group = _assign_group(signal_id)
+
+        if ab_group == 'A':
+            # Группа A: ML Gate работает как обычно
+            from .ml_scorer import ml_gate_pass
+            signal_data = {
+                'score': total / 5,
+                'price': cur,
+                'lower_bb': bb_data['lower'],
+                'upper_bb': bb_data['upper'],
+                'middle_bb': bb_data['middle'],
+                'entry': bb_data['lower'] * 0.98,
+                'timeframe': 'D',
+                'mode': 'long',
+            }
+            ml_passed, ml_prob = ml_gate_pass(signal_data)
+        # else: группа B — пропускаем без ML Gate (ml_passed уже True)
     except Exception:
         pass  # модель недоступна → полагаемся на эвристику
 
@@ -235,6 +245,7 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
         return None  # ML gate: не входить
 
     ml_info = f' ML={ml_prob:.2f}' if ml_prob is not None else ''
+    ab_info = f' AB={ab_group}' if ab_group else ''
 
     return {
         'symbol': sym,
@@ -243,7 +254,10 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
         'bb_pos': bb_pos,
         'bb_width': bb_width,
         'cur': cur,
-        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore}{ml_info}',
+        'signal_id': signal_id,
+        'ab_group': ab_group,
+        'ml_prob': ml_prob,
+        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore}{ml_info}{ab_info}',
     }
 
 
@@ -357,6 +371,13 @@ def auto_entry_scan(positions):
                     f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
+                # -- Фаза 5.3: запись в A/B тест --
+                if s.get('signal_id'):
+                    try:
+                        from .ab_test import record_entry as _record_entry
+                        _record_entry(s['signal_id'], sym, 'Buy', qty, price, s['score'], s.get('ml_prob'))
+                    except Exception:
+                        pass
         except Exception as e:
             log_event(f'⚠️ auto_entry {sym}: {e}')
             continue

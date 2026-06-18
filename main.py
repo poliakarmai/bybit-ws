@@ -143,6 +143,17 @@ def _close_instant(symbol: str, position: dict) -> bool:
             log_event(f'🚨 CLOSE REJECTED {symbol}: {ret_msg}')
             return False
         log_event(f'✅ CLOSE OK {symbol}: {close_side} {qty} @ market')
+        # -- Фаза 5.3: запись исхода в A/B тест --
+        try:
+            from .ab_test import record_outcome_for_symbol
+            entry = float(position.get('entry', 0))
+            mark = float(position.get('mark', 0))
+            size = float(position.get('size', 0))
+            pos_pnl = (mark - entry) * size if side == 'Buy' else (entry - mark) * size
+            outcome = 'TP' if pos_pnl > 0 else 'SL'
+            record_outcome_for_symbol(symbol, outcome, mark, pos_pnl)
+        except Exception:
+            pass
         return True
     except Exception as e:
         import traceback
