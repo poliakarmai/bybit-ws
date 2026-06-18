@@ -60,6 +60,17 @@ def train(symbols=('BTCUSDT', 'ETHUSDT'), days=365, timesteps=100_000):
     summary = ', '.join(f'{d["symbol"]}: {len(d["closes"])}д' for d in all_data)
     print(f"   Загружено: {summary}")
 
+    # ── Adversarial augmentation ──
+    try:
+        from adversarial_env import augment_training_data
+        aug_data = augment_training_data(all_data)
+        print(f"   Adversarial: +{len(aug_data) - len(all_data)} синтетических сценариев")
+        all_data = aug_data
+    except ImportError:
+        print("   ⚠️ adversarial_env.py не найден — без аугментации")
+    except Exception as e:
+        print(f"   ⚠️ Аугментация пропущена: {e}")
+
     # Создаём среды
     def make_env(data, idx):
         def _init():
