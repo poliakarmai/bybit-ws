@@ -4,7 +4,7 @@ v3: замена subprocess(BYBIT_CLI) на requests (код-ревью 14.06.20
 Ускорение 10-50×, устранение command injection, переиспользование соединений.
 """
 import hashlib, hmac, json, os, time
-import requests
+import httpx
 from .alerts import log_event
 
 # === Credentials (читаются один раз при импорте) ===
@@ -37,7 +37,7 @@ _session = None
 def _get_session():
     global _session
     if _session is None:
-        _session = requests.Session()
+        _session = httpx.Client()
         _session.headers.update({
             'Content-Type': 'application/json',
             'User-Agent': 'bybit-ws/4.0',
@@ -130,14 +130,14 @@ def bybit(method, path, body=None, retries=None):
 
             return resp.json()
 
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             log_event(f'bybit timeout after {REQUEST_TIMEOUT}s: {method} {path[:60]}')
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
             return None
 
-        except requests.exceptions.ConnectionError as e:
+        except httpx.ConnectError as e:
             log_event(f'bybit connection error: {e}')
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])

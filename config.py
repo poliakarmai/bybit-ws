@@ -128,6 +128,10 @@ _DEFAULT_RPC = {
     'rate_limit_per_min': 60,  # max requests per minute per IP
 }
 
+_DEFAULT_WEBSOCKET = {
+    'enabled': True,            # WebSocket live prices/BB (Фаза 4)
+}
+
 _DEFAULT_RISK = {
     'max_drawdown_pct': 15,       # global stop: -15% of deposit → close all
     'max_total_margin': 500,      # max $500 total in positions
@@ -199,6 +203,7 @@ def _default_config() -> dict:
         'tiers': dict(_DEFAULT_TIERS),
         'monitor': dict(_DEFAULT_MONITOR),
         'rpc': dict(_DEFAULT_RPC),
+        'websocket': dict(_DEFAULT_WEBSOCKET),
         'risk': dict(_DEFAULT_RISK),
         'logging': dict(_DEFAULT_LOGGING),
         'alerts': dict(_DEFAULT_ALERTS),

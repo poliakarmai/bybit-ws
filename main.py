@@ -510,6 +510,16 @@ def main_loop():
     except Exception as e:
         log_event(f'⚠️ RPC-сервер не запустился: {e}')
 
+    # Запуск WebSocket-клиента (Фаза 4.1 — live цены/BB)
+    ws_enabled = cfg.websocket.get('enabled', True)
+    if ws_enabled:
+        try:
+            from .ws_client import start as ws_start
+            ws_start()
+            log_event('🔌 WebSocket-клиент запущен (live цены, BB)')
+        except Exception as e:
+            log_event(f'⚠️ WS-клиент не запустился: {e}')
+
     global WATCHDOG_LAST
     WATCHDOG_LAST = time.time()
     cycle_count = 0

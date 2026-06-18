@@ -175,9 +175,13 @@ curl http://127.0.0.1:8766/rpc/paths
 ## Что дальше (Фаза 4)
 
 - [x] ATR-based риск-сайзинг — `position_sizing.atr_margin()`, кеш 4ч
-- [ ] Multi-timeframe конфлюенс (D/W/M согласованность)
-- [ ] Алерты в Telegram при входе/выходе
-- [ ] Дашборд Grafana
+- [x] Multi-timeframe конфлюенс — `mtf_confirmation.py` + `confluence_paper.py` (D/W/M, ≥2/3)
+- [x] Алерты в Telegram при входе/выходе — `alerts.py` → `hermes send --to telegram:Poliakarm`
+- [x] WebSocket live-цены/BB — `ws_client.py` (50+ тикеров, kline-потоки)
+- [x] httpx вместо requests — `api.py` мигрирован (подготовка к asyncio)
+- [x] Дашборд — `web/dashboard.html` v4.0 + `proxy_server.py` (порт 9997)
+- [ ] asyncio — полная миграция main loop + RPC (40-60ч)
+- [ ] Binance/OKX поддержка (60-80ч)
 
 ## MCP-инструменты (как AI-агенты взаимодействуют с bybit-ws)
 

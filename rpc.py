@@ -40,6 +40,7 @@ from collections import defaultdict
 from .api import bybit as _bybit_api
 from .api import fetch_positions as _fetch_positions
 from .state_db import db as _db
+from .alerts import add_alert
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 HOME = Path.home()
@@ -930,6 +931,10 @@ class RPCHandler(BaseHTTPRequestHandler):
                     'detail': 'TP price is on wrong side of SL — would be redundant'
                 }
 
+        # ── Алерт о входе ──
+        direction = '📈 LONG' if side == 'Buy' else '📉 SHORT'
+        add_alert('ENTRY', f'{direction} {symbol}: вход {qty} шт. по рынку, SL={_round_price(sl) if sl else "нет"}, TP={_round_price(tp) if tp else "нет"}')
+
         return _json_response(self, result, 200)
 
     def _handle_close(self, body: dict):
@@ -965,6 +970,14 @@ class RPCHandler(BaseHTTPRequestHandler):
                           close_result.get('retMsg', 'Unknown error'), 400)
 
         order_id = close_result.get('result', {}).get('orderId', 'unknown')
+
+        # ── Алерт о закрытии ──
+        pnl = round((pos['mark'] - pos['entry']) * pos['size'] * (1 if pos['side'] == 'Buy' else -1), 2)
+        direction = '📈 LONG' if pos['side'] == 'Buy' else '📉 SHORT'
+        entry_str = str(pos['entry'])
+        mark_str = str(pos['mark'])
+        add_alert('TP', f'{direction} {symbol}: закрыт, PnL=${pnl}, вход={entry_str}, выход={mark_str}')
+
         return _json_response(self, {
             'status': 'ok',
             'symbol': symbol,
