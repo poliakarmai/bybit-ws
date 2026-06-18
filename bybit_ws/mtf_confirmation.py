@@ -13,12 +13,44 @@ Multi-Timeframe Confirmation (v1.0) — Фаза 4.3.1
 import math
 from typing import Optional, Dict, List, Tuple
 
-from .gridsignal_scanner import get_candles, calc_bb
+from .api import bybit
 
 # Конфигурация
 CONFLUENCE_MIN_TFS = 2       # минимум ТФ для одобрения (2/3)
 TF_LIST: Tuple[str, ...] = ('D', 'W', 'M')
 TF_LABELS = {'D': 'day', 'W': 'week', 'M': 'month'}
+
+
+def _fetch_candles(symbol: str, interval: str = 'D', limit: int = 30) -> Optional[list]:
+    """Получить свечи (от старых к новым) через REST API."""
+    r = bybit('GET', f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}')
+    if not r or r.get('retCode') != 0:
+        return None
+    try:
+        candles = r.get('result', {}).get('list', [])
+        if candles:
+            return list(reversed(candles))  # Bybit: новые→старые, нам надо старые→новые
+    except (KeyError, IndexError, TypeError):
+        pass
+    return None
+
+
+def _calc_bb(candles: list) -> Optional[dict]:
+    """Рассчитать Bollinger Bands (20, 2)."""
+    closes = [float(c[4]) for c in candles[-20:]]
+    if len(closes) < 20:
+        return None
+    sma = sum(closes) / 20
+    variance = sum((x - sma) ** 2 for x in closes) / 20
+    std = math.sqrt(variance)
+    return {
+        'upper': sma + 2 * std,
+        'middle': sma,
+        'lower': sma - 2 * std,
+        'current': closes[-1],
+        'pos': ((closes[-1] - (sma - 2 * std)) / (4 * std)) * 100 if std > 0 else 50,
+        'width': ((4 * std) / sma) * 100 if sma > 0 else 10,
+    }
 
 
 def _bb_signal(bb: Optional[dict], direction: str) -> Optional[dict]:
@@ -71,12 +103,12 @@ def check_confluence(symbol: str, direction: str = 'LONG') -> Optional[dict]:
     approved_tfs: List[str] = []
 
     for tf in TF_LIST:
-        candles = get_candles(symbol, tf, 30)
+        candles = _fetch_candles(symbol, tf, 30)
         if not candles or len(candles) < 20:
             tf_results[tf] = None
             continue
 
-        bb = calc_bb(candles)
+        bb = _calc_bb(candles)
         if not bb:
             tf_results[tf] = None
             continue
