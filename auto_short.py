@@ -211,6 +211,9 @@ def check_auto_short(positions):
         usdt_qty = short_margin * SHORT_LEVERAGE
         qty_step = _get_lot_step(sym)
         qty = math.ceil(usdt_qty / last_price / qty_step) * qty_step
+        # Round to qty_step decimals (fixes floating-point: 4.6000000000000005 → 4.6)
+        qty_decimals = len(str(qty_step).split('.')[1]) if '.' in str(qty_step) else 0
+        qty = round(qty, qty_decimals)
         if qty <= 0:
             continue
 
@@ -233,18 +236,22 @@ def check_auto_short(positions):
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
-            order = bybit('POST', '/v5/order/create', {
-                'category': 'linear',
-                'symbol': sym,
-                'side': 'Sell',
-                'orderType': 'Limit',
-                'qty': str(qty),
-                'price': str(limit_price),
-                'positionIdx': 0,  # SHORT (one-way mode)
-                'timeInForce': 'GTC',
-            })
-            if order.get('retCode') != 0:
-                log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?")}')
+            order = None
+            for pos_idx in (0, 1, 2):
+                order = bybit('POST', '/v5/order/create', {
+                    'category': 'linear',
+                    'symbol': sym,
+                    'side': 'Sell',
+                    'orderType': 'Limit',
+                    'qty': str(qty),
+                    'price': str(limit_price),
+                    'positionIdx': pos_idx,
+                    'timeInForce': 'GTC',
+                })
+                if order and order.get('retCode') == 0:
+                    break
+            if not order or order.get('retCode') != 0:
+                log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?") if order else "no response"}')
                 continue
 
             state_entry = {

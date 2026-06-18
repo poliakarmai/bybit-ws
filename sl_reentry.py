@@ -151,7 +151,7 @@ def check_sl_reentry(positions, correlation_stop=False):
                 usdt_qty = margin * rc['leverage']
                 qty = round(usdt_qty / price / qty_step) * qty_step
                 if qty > 0:
-                    for pos_idx in (0, 1):
+                    for pos_idx in (0, 1, 2):
                         order = bybit('POST', '/v5/order/create', {
                             'category': 'linear', 'symbol': sym, 'side': 'Buy',
                             'orderType': 'Limit', 'qty': str(qty),
@@ -179,10 +179,14 @@ def check_sl_reentry(positions, correlation_stop=False):
                 usdt_qty = margin * rc['leverage']
                 qty = round(usdt_qty / price / qty_step) * qty_step
                 qty = round(qty, _get_precision(qty_step))
-                if qty <= 0 or price >= current * 0.995:
+                if qty <= 0:
                     continue
+                # Лимитный BUY выше рынка исполнится мгновенно — ОК
+                # Но если сильно выше (>1%) — используем текущую чтобы избежать reject
+                if price > current * 1.01:
+                    price = _round_to_tick(current * 0.999, sym)
 
-                for pos_idx in (0, 1):
+                for pos_idx in (0, 1, 2):
                     order = bybit('POST', '/v5/order/create', {
                         'category': 'linear', 'symbol': sym, 'side': 'Buy',
                         'orderType': 'Limit', 'qty': str(qty),

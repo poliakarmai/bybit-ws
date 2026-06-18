@@ -110,7 +110,11 @@ def bybit(method, path, body=None, retries=None):
                 resp = session.post(url, json=body, headers=headers, timeout=REQUEST_TIMEOUT)
 
             if resp.status_code != 200:
-                err = f'HTTP {resp.status_code}: {resp.text[:100]}'
+                err = f'HTTP {resp.status_code} {method} {path}: {resp.text[:80]}'
+                # 404 = endpoint not found — immediate failure, no retry
+                if resp.status_code == 404:
+                    log_event(f'bybit 404 (endpoint not found, skipping): {err}')
+                    return None
                 if attempt < retries:
                     if resp.status_code == 429:
                         # Exponential backoff: 1s → 2s → 4s → 8s → 16s
@@ -375,8 +379,9 @@ def get_bb_data(symbol, interval='D'):
 def fetch_funding_total(symbol, since_ms):
     """Суммировать фандинг-выплаты по символу с openTime.
 
-    Endpoint: GET /v5/account/funding-history
-    Docs: https://bybit-exchange.github.io/docs/v5/account/funding-history
+    Endpoint: GET /v5/account/transaction-log?type=FUNDING (authenticated)
+    Note: /v5/account/funding-history removed in Bybit v5.
+    Fallback: returns 0 if endpoint unavailable (avoids retry flood).
 
     Args:
         symbol: e.g. DOTUSDT
@@ -389,13 +394,18 @@ def fetch_funding_total(symbol, since_ms):
     cursor = ''
     while True:
         path = (
-            f'/v5/account/funding-history?category=linear'
-            f'&symbol={symbol}&startTime={since_ms}&limit=50'
+            f'/v5/account/transaction-log?category=linear'
+            f'&symbol={symbol}&type=FUNDING&startTime={since_ms}&limit=50'
         )
         if cursor:
             path += f'&cursor={cursor}'
         data = bybit('GET', path)
         if not data or data.get('retCode') != 0:
+            # Endpoint removed in Bybit v5 — fallback to 0, don't retry
+            if data is None:
+                break
+            if data.get('retCode') == 10001:
+                break
             break
         items = data['result'].get('list', [])
         if not items:
