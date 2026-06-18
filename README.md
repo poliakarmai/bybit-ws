@@ -2,11 +2,11 @@
 
 **Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
-[![Version](https://img.shields.io/badge/version-4.1.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py)
+[![Version](https://img.shields.io/badge/version-4.4.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py) [![Phase 4](https://img.shields.io/badge/phase_4-6%2F8-orange)](./AGENTS.md)
 
 ---
 
-## Архитектура модулей (v3.12.0)
+## Архитектура модулей (v4.4.0)
 
 ```
 ┌─────────────────── MAIN LOOP (30s) ───────────────────┐
@@ -31,8 +31,15 @@
 │    • overbought.py      — детект перегрева             │
 │    • cost_tracker.py    — учёт комиссий                │
 │    • cleanup.py         — чистка просроченных ордеров  │
+│    • ws_client.py       — WebSocket live цены/BB       │
+│    • mtf_confirmation.py— D/W/M конфлюенс              │
 │                                                        │
 └────────────────────────────────────────────────────────┘
+         │
+         ▼ RPC (порт 8766) + Web (порт 9999)
+    • rpc.py              — JSON-RPC, /metrics Prometheus
+    • web/proxy_server.py — прокси дашборда
+    • web/dashboard.html  — дашборд v5.0 (риски, позиции, сигналы)
 ```
 
 ### Полный список файлов движка
