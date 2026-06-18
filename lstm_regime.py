@@ -22,6 +22,8 @@ lstm_regime.py — LSTM-классификатор рыночного режим
   python lstm_regime.py --predict # предсказать текущий режим
 """
 
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -48,6 +50,25 @@ MODEL_PATH = MODEL_DIR / 'lstm_regime.pt'
 SCALER_PATH = MODEL_DIR / 'lstm_regime_scaler.pkl'
 FEATURES_PATH = MODEL_DIR / 'lstm_regime_features.json'
 CACHE_PATH = DATA_DIR / 'lstm_regime_cache.json'
+HMAC_SECRET = os.getenv('BYBIT_HMAC_SECRET', 'bybit-ws-model-integrity').encode()
+
+
+def _sign_lstm_file(path: Path):
+    """Подписать файл HMAC-SHA256."""
+    sha = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    sig = hmac.new(HMAC_SECRET, sha.encode(), hashlib.sha256).hexdigest()
+    open(str(path) + '.hmac', 'w').write(sig)
+
+
+def _verify_lstm_file(path: Path) -> bool:
+    """Проверить HMAC-подпись файла."""
+    sig_path = str(path) + '.hmac'
+    if not os.path.exists(sig_path):
+        return False
+    sha = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    expected = hmac.new(HMAC_SECRET, sha.encode(), hashlib.sha256).hexdigest()
+    actual = open(sig_path).read().strip()
+    return hmac.compare_digest(expected, actual)
 
 SEQUENCE_LENGTH = 30
 LOOKAHEAD = 7
@@ -383,8 +404,10 @@ def train_model(force=False):
     # Сохранение
     os.makedirs(MODEL_DIR, exist_ok=True)
     torch.save(model.state_dict(), MODEL_PATH)
+    _sign_lstm_file(MODEL_PATH)
     with open(SCALER_PATH, 'wb') as f:
         pickle.dump(scaler, f)
+    _sign_lstm_file(SCALER_PATH)
     with open(FEATURES_PATH, 'w') as f:
         json.dump({
             'n_samples': len(X),
@@ -442,10 +465,16 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
     try:
         # Загрузка модели
         model = LSTMModel()
+        if not _verify_lstm_file(MODEL_PATH):
+            print(f'⚠️ HMAC mismatch for {MODEL_PATH} — skipping LSTM', flush=True)
+            return None
         model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu', weights_only=True))
         model.eval()
 
         if SCALER_PATH.suffix == '.json':
+            if not _verify_lstm_file(SCALER_PATH):
+                print(f'⚠️ HMAC mismatch for {SCALER_PATH} — skipping LSTM', flush=True)
+                return None
             import json
             with open(SCALER_PATH, 'r') as f:
                 scaler_data = json.load(f)

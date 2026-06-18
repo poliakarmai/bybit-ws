@@ -302,6 +302,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_paths()
         elif path == "/rpc/ab_test_report":
             self._handle_ab_test_report()
+        elif path == "/rpc/ml_toggle":
+            self._handle_ml_toggle()
         elif path == "/rpc" or path == "/":
             self._handle_index()
         else:
@@ -396,6 +398,32 @@ class RPCHandler(BaseHTTPRequestHandler):
             _json_response(self, report)
         except Exception as e:
             _error(self, 'AB test error', str(e), 500)
+
+    def _handle_ml_toggle(self):
+        """GET /rpc/ml_toggle — статус ML-конвейера (включён/выключен).
+        POST /rpc/ml_toggle?enable=0|1 — переключить (требует авторизации)."""
+        import os
+        if self.command == 'POST':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length > 0 else {}
+            enable = body.get('enable', None)
+            # Также поддержка query-параметров
+            if enable is None:
+                from urllib.parse import parse_qs, urlparse
+                qs = parse_qs(urlparse(self.path).query)
+                enable = qs.get('enable', [None])[0]
+            if enable is not None:
+                new_val = '1' if str(enable) in ('1', 'true', 'True') else '0'
+                os.environ['BYBIT_ML_ENABLED'] = new_val
+                _json_response(self, {
+                    'ml_enabled': new_val == '1',
+                    'note': 'Перезапустите bybit-ws-async для применения',
+                    'restart_cmd': 'systemctl --user restart bybit-ws-async'
+                })
+                return
+        # GET — показать текущий статус
+        from .auto_entry import ML_ENABLED as _ml
+        _json_response(self, {'ml_enabled': _ml, 'env_var': 'BYBIT_ML_ENABLED'})
 
     def _handle_get_config(self):
         """GET /rpc/config — текущая конфигурация без секретов."""

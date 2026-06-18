@@ -42,13 +42,14 @@ version: "2.0"
 | Модулей Python | 45+ |
 | Стратегий | 8 (Grid LONG/SHORT, Junk, DCA, SL Re-entry, x10 × 3) |
 | Память | ~35 MB |
-| Цикл | 30 секунд |
+| Цикл | 30 сек (async main loop) |
 | RPC порт | 8766 (localhost) |
 | Дашборд | 9999 (127.0.0.1) |
-| Тестов | 21 (smoke 16 + modules 5 + scanner) |
+| Тестов | 23 (smoke 16 + modules 5 + ML 3 + scanner) |
 | Позиций | 9 активных |
-| Дневной лимит убытка | $50 |
+| Дневной лимит убытка | $50 (~5% от депозита ~$1000) |
 | Макс. маржа | $500 |
+| ML фича-флаг | `BYBIT_ML_ENABLED=0` — быстрый откат |
 
 ### Пути
 
@@ -240,9 +241,11 @@ bybit-ws/
 
 | Сервис | Статус | PID | Порт |
 |--------|--------|-----|------|
-| `bybit-ws-async` | active | 387862 | — |
+| `bybit-ws-async` | active | 391888 | — |
 | Дашборд | proxy | — | 9999 |
 | RPC | встроен | — | 8766 |
+
+> **Async-статус:** продакшен работает на `main_async.py` (asyncio, цикл 30с). `main.py` — синхронная версия, оставлена для совместимости. `main_async.py` использует `asyncio.gather` для параллельных API-запросов, `run_in_executor` для CPU-bound.
 
 ### 6.2 Кроны (торговые)
 
@@ -295,6 +298,7 @@ bybit-ws/
 | `/rpc/metrics` | Дневные метрики |
 | `/rpc/risk` | Статус риска |
 | `/rpc/ab_test_report` | Отчёт A/B теста |
+| `/rpc/ml_toggle` | Статус/переключение ML (GET/POST) |
 | `/rpc/paths` | Пути к файлам |
 | `/rpc/scan` | Скан сигналов |
 | `/metrics` | Prometheus (bybit_ws_*) |
@@ -314,7 +318,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | `get_metrics()` | Дневные метрики (TP/SL/входы) |
 | `get_risk_status()` | Лимиты риска |
 | `place_entry(symbol, side, qty, sl, tp)` | Вход в позицию |
-| `vpn_status()` | VPN-здоровье |
+| `vpn_status()` | VPN-здоровье (WireGuard, трафик, клиенты) — критично: bybit-ws ходит через VPN |
 
 ---
 
@@ -345,7 +349,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 
 Полный аудит трёх эшелонов: Source-Driven + Security + Adversarial.
 Всего находок: 47 (7 CRITICAL, 12 HIGH, 15 MEDIUM, 13 LOW).
-Исправлено: 21 (7 CRITICAL + 10 HIGH + 4 MEDIUM).
+Исправлено: 21 (7 CRITICAL + 12 HIGH + 4 MEDIUM).
 
 ### Исправленные CRITICAL (7/7)
 
@@ -359,7 +363,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | C6 | JUNK без хард-SL | `auto_short.py` | SL +25% от входа |
 | C7 | fetch_funding_total параметры | `api.py` | `symbol→currency`, `FUNDING→SETTLEMENT` |
 
-### Исправленные HIGH (10/12)
+### Исправленные HIGH (12/12)
 
 | # | Баг | Файл | Фикс |
 |---|-----|------|------|
@@ -438,18 +442,25 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 ### Деплой
 
 ```bash
-# 1. Синхронизация кода
-cd ~/bybit-ws
-for f in auto_entry.py api.py rl_agent.py ensemble.py rpc.py; do
-    cp "$f" ~/.local/lib/bybit_ws/
-done
+# Атомарный деплой с бэкапом и rollback
+bash ~/bybit-ws/deploy.sh
+```
 
-# 2. Рестарт сервиса
+Скрипт делает: бэкап текущих файлов → атомарный swap → рестарт → smoke test → rollback при фейле.
+
+### Быстрый откат ML
+
+```bash
+# Отключить ML-конвейер
+curl -X POST http://127.0.0.1:8766/rpc/ml_toggle -d '{"enable":0}'
 systemctl --user restart bybit-ws-async
 
-# 3. Проверка
-systemctl --user status bybit-ws-async
-journalctl --user -u bybit-ws-async --since '1 min ago' | grep -i error
+# Включить обратно
+curl -X POST http://127.0.0.1:8766/rpc/ml_toggle -d '{"enable":1}'
+systemctl --user restart bybit-ws-async
+
+# Проверить статус
+curl http://127.0.0.1:8766/rpc/ml_toggle
 ```
 
 ### Бэкап

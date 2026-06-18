@@ -7,11 +7,13 @@ ML Scorer v1.0 — машинное обучение для предсказан
 Зависимости: scikit-learn, numpy (pip install scikit-learn numpy)
 """
 
+import hashlib
+import hmac
 import json
 import os
 import joblib
 import numpy as np
-import pickle
+import pickle  # только для train() — сохранение, загрузка через joblib+HMAC
 import re
 import sqlite3
 import sys
@@ -23,6 +25,25 @@ import numpy as np
 DB_PATH = Path.home() / ".local" / "share" / "gridsignal-bot" / "users.db"
 MODEL_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_scorer.pkl"
 FEATURES_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_features.json"
+HMAC_SECRET = os.getenv('BYBIT_HMAC_SECRET', 'bybit-ws-model-integrity').encode()
+
+
+def _sign_file(path: Path):
+    """Подписать файл HMAC-SHA256."""
+    sha = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    sig = hmac.new(HMAC_SECRET, sha.encode(), hashlib.sha256).hexdigest()
+    open(str(path) + '.hmac', 'w').write(sig)
+
+
+def _verify_file(path: Path) -> bool:
+    """Проверить HMAC-подпись файла."""
+    sig_path = str(path) + '.hmac'
+    if not os.path.exists(sig_path):
+        return False
+    sha = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    expected = hmac.new(HMAC_SECRET, sha.encode(), hashlib.sha256).hexdigest()
+    actual = open(sig_path).read().strip()
+    return hmac.compare_digest(expected, actual)
 
 
 def _extract_features(signals: list[dict]) -> tuple[np.ndarray, np.ndarray]:
@@ -160,10 +181,11 @@ def train():
     for name, imp in importances[:5]:
         print(f"  {name}: {imp:.3f}")
 
-    # Сохраняем
+    # Сохраняем + HMAC-подпись
     os.makedirs(MODEL_PATH.parent, exist_ok=True)
     with open(MODEL_PATH, "wb") as f:
         pickle.dump(model, f)
+    _sign_file(MODEL_PATH)
 
     with open(FEATURES_PATH, "w") as f:
         json.dump({
@@ -188,6 +210,9 @@ def predict(signal_data: dict) -> Optional[float]:
         return None
 
     try:
+        if not _verify_file(MODEL_PATH):
+            print(f'⚠️ HMAC mismatch for {MODEL_PATH} — model may be tampered', flush=True)
+            return None
         model = joblib.load(MODEL_PATH)
 
         X, _ = _extract_features([signal_data])
