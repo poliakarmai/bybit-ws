@@ -2,13 +2,13 @@
 rl_env.py — RL-среда для обучения агента выбора момента входа (Фаза 5.5).
 
 Gymnasium-совместимая среда на исторических kline-данных.
-Агент решает: ENTER_LONG, ENTER_SHORT, WAIT, или SKIP.
+Агент решает: ENTER_LONG, WAIT, или SKIP.
 
 State (13 признаков):
   BB%, BB_width, RSI, ATR%, Vol_ratio, Funding, MTF_confluence,
   Days_since_entry, Regime_1hot×5 (первые 3), Score_norm
 
-Actions: SKIP=0, ENTER_LONG=1, ENTER_SHORT=2, WAIT=3
+Actions: SKIP=0, ENTER_LONG=1, WAIT=2
 
 Reward: PnL сделки (TP+, SL−), 0 за SKIP, -0.01 за WAIT
 """

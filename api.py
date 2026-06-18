@@ -395,7 +395,7 @@ def fetch_funding_total(symbol, since_ms):
     while True:
         path = (
             f'/v5/account/transaction-log?category=linear'
-            f'&symbol={symbol}&type=FUNDING&startTime={since_ms}&limit=50'
+            f'&currency=USDT&type=SETTLEMENT&startTime={since_ms}&limit=50'
         )
         if cursor:
             path += f'&cursor={cursor}'

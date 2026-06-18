@@ -65,10 +65,30 @@ def check_and_fix_sl():
         size = p['size']
         entry = p['entry']
 
-        # 🔒 Не ставить SL на прибыльные позиции — пусть работает TP
+        # 🔒 Ставить SL даже на прибыльные. Если в плюсе — безубыток (entry)
         if side == 'Buy' and mark > entry:
+            sl_price = round(entry, 4)
+            if sl_price < mark:
+                body = {'category': 'linear', 'symbol': sym, 'positionIdx': idx,
+                        'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
+                data = bybit('POST', '/v5/position/trading-stop', body)
+                if data and data.get('retCode') == 0:
+                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, +{((mark-entry)/entry*100):.1f}%)')
+                else:
+                    err = data.get('retMsg', '?') if data else 'no response'
+                    alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
             continue
         if side == 'Sell' and mark < entry:
+            sl_price = round(entry, 4)
+            if sl_price > mark:
+                body = {'category': 'linear', 'symbol': sym, 'positionIdx': idx,
+                        'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
+                data = bybit('POST', '/v5/position/trading-stop', body)
+                if data and data.get('retCode') == 0:
+                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, +{((entry-mark)/entry*100):.1f}%)')
+                else:
+                    err = data.get('retMsg', '?') if data else 'no response'
+                    alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
             continue
 
         if side == 'Buy':

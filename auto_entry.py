@@ -434,6 +434,18 @@ def auto_entry_scan(positions):
             except Exception:
                 pass  # ансамбль недоступен → входим по эвристике
 
+            # ── Повторная проверка: позиция могла появиться между снапшотом и ордером ──
+            skip_symbol = False
+            recheck = bybit('GET', f'/v5/position/list?category=linear&settleCoin=USDT&symbol={sym}')
+            if recheck and recheck.get('retCode') == 0:
+                for rp in recheck['result'].get('list', []):
+                    if float(rp.get('size', 0)) > 0:
+                        log_event(f'⏭️ Дубль {sym}: позиция уже есть — пропускаем')
+                        skip_symbol = True
+                        break
+            if skip_symbol:
+                continue
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}
@@ -456,6 +468,16 @@ def auto_entry_scan(positions):
                     f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
+            elif result is None:
+                # API не ответил — проверяем, не ушёл ли ордер на биржу
+                orders_check = bybit('GET', f'/v5/order/realtime?category=linear&symbol={sym}&limit=1')
+                if orders_check and orders_check.get('retCode') == 0:
+                    open_orders = orders_check['result'].get('list', [])
+                    if open_orders:
+                        log_event(f'⚠️ Авто-вход {sym}: API таймаут но ордер создан — проверь вручную')
+                        add_alert('ENTRY',
+                            f'⚠️ LONG {sym}: ордер ушёл без подтверждения (таймаут API) — проверь!'
+                        )
                 # -- Фаза 5.3: запись в A/B тест --
                 if s.get('signal_id'):
                     try:

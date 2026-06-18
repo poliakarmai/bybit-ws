@@ -346,6 +346,8 @@ def check_auto_short(positions):
                 state_entry['dca_levels'] = JUNK_DCA_LEVELS
                 state_entry['dca_placed'] = dca_placed
                 state_entry['pump_pct'] = round(chg_pct * 100, 1)
+                # Хард-SL на +25% — защита если DCA не сработает
+                state_entry['hard_sl'] = round(price * 1.25, 6)
 
                 state[sym] = state_entry
                 _save_state(state)
@@ -440,6 +442,23 @@ def check_junk_dca(positions):
 
         mark_price = float(pos.get('mark', 0) or 0)
         if mark_price <= 0:
+            continue
+
+        # ── Hard SL check (абсолютный уровень, +25% от входа) ──
+        hard_sl = entry.get('hard_sl', 0)
+        if hard_sl > 0 and mark_price >= hard_sl:
+            try:
+                _close_junk_position(sym, pos)
+                pnl_pct = (mark_price - entry_price) / entry_price * 100
+                msg = (f'🛑 HARD-SL JUNK {sym}: +{pnl_pct:.1f}% > hard SL ${hard_sl:.6f} | '
+                       f'вход ${entry_price:.6f} → выход ${mark_price:.6f}')
+                add_alert('STOP', msg)
+                log_event(msg)
+                actions.append(sym)
+                del state[sym]
+                _save_state(state)
+            except Exception as e:
+                log_event(f'⚠️ Junk-HardSL {sym}: ошибка — {e}')
             continue
 
         # ── Max loss check (hard stop) ──

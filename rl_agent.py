@@ -195,7 +195,7 @@ def should_enter(state_dict: dict, direction: str = 'LONG') -> tuple[bool, str]:
 
         if action == target_action:
             return True, f'RL: {name} (conf={conf:.2f})'
-        elif action == 3:  # WAIT
+        elif action == 2:  # WAIT
             return False, f'RL: WAIT (conf={conf:.2f}) — подождать'
         else:  # SKIP или противоположное направление
             return False, f'RL: {name} (conf={conf:.2f}) — пропустить'
