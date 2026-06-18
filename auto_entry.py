@@ -409,6 +409,31 @@ def auto_entry_scan(positions):
                         idx = int(p.get('positionIdx', 0))
                         break
 
+            # ── Фаза 5.5: RL-агент — стоит ли входить? ──
+            rl_decision = None
+            try:
+                from .rl_agent import should_enter as _rl_should_enter
+                rl_state = {
+                    'bb_pct': s.get('bb_pos', 50),
+                    'bb_width': s.get('bb_width', 10),
+                    'rsi': 50,
+                    'atr_pct': 2.0,
+                    'vol_ratio': 1.0,
+                    'funding': 0.0,
+                    'mtf_confluence': s.get('mtf', {}).get('confluence', 2) if 'mtf' in s else 2,
+                    'days_since_entry': 0,
+                    'regime': regime_name,
+                    'score': s.get('score', 25),
+                    'daily_return': 0.0,
+                }
+                rl_enter, rl_reason = _rl_should_enter(rl_state, direction='LONG')
+                if not rl_enter:
+                    log_event(f'🤖 RL skip {sym}: {rl_reason}')
+                    continue
+                rl_decision = rl_reason
+            except Exception:
+                pass  # RL недоступен → входим по эвристике
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}
@@ -420,14 +445,15 @@ def auto_entry_scan(positions):
                     mtf = s['mtf']
                     mtf_info = f' | MTF:{mtf["confluence"]}/3({mtf["strength"]})'
                 regime_info = f' | 📊{regime_name}' if regime_name != 'NEUTRAL' else ''
+                rl_info = f' | 🧠RL' if rl_decision else ''
 
                 entries.append(
                     f'🤖 Авто-вход {sym} @ ${price:.4f} x{qty} '
-                    f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info}{regime_info})'
+                    f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info}{regime_info}{rl_info})'
                 )
                 add_alert('ENTRY',
                     f'🚀 LONG {sym}: вход ${price:.4f} ×{qty} ({3}x) | '
-                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}'
+                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
                 # -- Фаза 5.3: запись в A/B тест --
