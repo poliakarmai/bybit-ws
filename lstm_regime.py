@@ -463,12 +463,16 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
             volumes = data['volumes']
             n = len(closes)
 
+            zero_features = 0
             for j in range(n - SEQUENCE_LENGTH, n):
                 feat = _calc_features(closes[:j + 1], highs[:j + 1], lows[:j + 1], volumes[:j + 1])
                 if feat is None:
                     features.append([0] * 8)
+                    zero_features += 1
                 else:
                     features.append(feat)
+            if zero_features > SEQUENCE_LENGTH // 2:
+                print(f'⚠️ LSTM: {zero_features}/{SEQUENCE_LENGTH} нулевых признаков — прогноз ненадёжен')
 
             if len(features) != SEQUENCE_LENGTH:
                 continue

@@ -135,7 +135,12 @@ def train():
     print(f"📈 CV F1: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
 
     # Полное обучение
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    # Проверка минимального размера класса для stratify
+    min_class = min(np.bincount(y))
+    use_stratify = y if min_class >= 2 else None
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, stratify=use_stratify, random_state=42
+    )
     model.fit(X_train, y_train)
 
     # Важность признаков

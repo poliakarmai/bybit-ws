@@ -8,6 +8,7 @@ Backtest v2.0 — walk-forward бэктест Bollinger Grid на историч
 """
 
 import json
+import re
 import math
 import os
 import subprocess
@@ -22,6 +23,8 @@ BYBIT_CLI = os.path.expanduser("~/.local/bin/bybit")
 def fetch_klines(symbol: str, interval: str, limit: int = 200) -> list[dict]:
     """Загружает klines через bybit REST API. Возвращает старые→новые."""
     try:
+        if not re.fullmatch(r'^[A-Z0-9]+$', symbol):
+            raise ValueError(f'Invalid symbol: {symbol}')
         r = subprocess.run(
             [BYBIT_CLI, "raw", "GET",
              f"/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"],

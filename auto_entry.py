@@ -435,6 +435,7 @@ def auto_entry_scan(positions):
                 ensemble_decision = f'Ensemble({ens_conf:.0%})'
             except Exception:
                 pass  # ансамбль недоступен → входим по эвристике
+                log_event(f'⚠️ Ensemble error for {sym} — fallback to heuristic')
 
             # ── Повторная проверка: позиция могла появиться между снапшотом и ордером ──
             skip_symbol = False

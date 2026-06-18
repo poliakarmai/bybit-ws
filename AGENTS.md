@@ -216,3 +216,30 @@ SL и TP ставятся автоматически после исполнен
 2. `get_risk_status` → проверить лимиты
 3. `get_positions` → нет ли уже позиции по символу
 4. `place_entry` → войти (Market — сразу, Limit — на BB-полосе)
+
+## Аудит 18.06.2026
+
+Полный аудит трёх эшелонов (Source-Driven + Security + Adversarial).
+Исправлено: 15 находок (7 CRITICAL + 8 HIGH/MEDIUM).
+
+### Исправленные CRITICAL
+- **BE-SL:** `auto_sl.py` — прибыльные позиции получают SL на безубытке (вместо «пусть работает TP»)
+- **RL WAIT:** `rl_agent.py` — `action==3→2` (WAIT был мёртвой веткой)
+- **Двойной вход:** `auto_entry.py` — повторная проверка позиции через API перед ордером
+- **RL docstring:** `rl_env.py` — 4 действия→3
+- **Потерянный ордер:** `auto_entry.py` — проверка `/v5/order/realtime` при таймауте
+- **JUNK хард-SL:** `auto_short.py` — SL +25% для шлак-шортов
+- **fetch_funding_total:** `api.py` — `symbol→currency`, `FUNDING→SETTLEMENT`
+
+### Исправленные HIGH/MEDIUM
+- **Прокси:** `proxy_server.py` — bind `127.0.0.1`, CORS `localhost` (был `0.0.0.0` + `*`)
+- **Fail-closed:** RL и RF при ошибке не пропускают сигнал (был default-enter/PASS)
+- **BB-данные:** `auto_entry.py` — реальные значения для RL (вместо нулей)
+- **WAIT=SKIP:** `ensemble.py` — WAIT больше не голосует «за вход»
+- **RPC SL:** `rpc.py` — SL не шлётся если позиция не появилась
+- **Docstring:** `api.py` v3→v5
+- **Дубликаты:** удалены `bybit_ws/{ab_test,ensemble,lstm_regime,rl_agent,rl_env}.py`
+- **Stratify:** `ml_scorer.py` — проверка `min_class >= 2`
+- **Symbol валидация:** `backtest.py` — regex `^[A-Z0-9]+$`
+- **LSTM warning:** `lstm_regime.py` — алерт при >50% нулевых признаков
+- **Ensemble log:** `auto_entry.py` — логгирование fallback к эвристике
