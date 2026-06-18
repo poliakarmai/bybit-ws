@@ -96,17 +96,18 @@ def _round_to_tick(price, sym):
     return round(price / tick) * tick
 
 
-def _check_short_mtf(sym: str) -> bool:
+def _check_short_mtf(sym: str):
     """Фаза 4.3.1: проверить D/W/M конфлюенс для SHORT-сигнала.
     
-    Возвращает True если конфлюенс ≥2/3 или нет данных (обратная совместимость).
+    Возвращает dict с confluence info или None если нет данных (не фильтруем).
+    Возвращает False если конфлюенс < 2/3 (фильтруем).
     """
     from .mtf_confirmation import check_confluence
     
     try:
         conf = check_confluence(sym, 'SHORT')
         if conf is None:
-            return True  # нет данных — не фильтруем
+            return None  # нет данных — не фильтруем
         if not conf['approved']:
             log_event(
                 f'🚫 MTF filter SHORT: {sym} confluence={conf["confluence"]}/3 '
@@ -129,10 +130,10 @@ def _check_short_mtf(sym: str) -> bool:
                 f'ручной вход или увеличенная позиция!'
             )
         
-        return True
+        return conf  # возвращаем полный dict для sizing
     except Exception as e:
         log_event(f'⚠️ MTF filter SHORT {sym}: {e}')
-        return True  # ошибка — не блокируем вход
+        return None  # ошибка — не блокируем вход
     
     
 def check_auto_short(positions):
@@ -239,7 +240,8 @@ def check_auto_short(positions):
                 continue
 
         # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр для SHORT ──
-        if not _check_short_mtf(sym):
+        mtf_conf = _check_short_mtf(sym)
+        if mtf_conf is False:
             continue
 
         # Проверка time budget — останавливаемся если подходим к таймауту
@@ -249,6 +251,13 @@ def check_auto_short(positions):
 
         # Шорт! Рассчитываем параметры
         short_margin = margin_for_strategy('short', score=7.0)
+        # ── Фаза 4.3.6: MTF-конфлюенс → бонус к позиции ──
+        if isinstance(mtf_conf, dict):
+            mtf_c = mtf_conf.get('confluence', 0)
+            if mtf_c == 3:
+                short_margin *= 1.5   # +50% при 3/3
+            elif mtf_c == 2:
+                short_margin *= 1.15  # +15% при 2/3
         if short_margin <= 0:
             continue
         usdt_qty = short_margin * SHORT_LEVERAGE
@@ -305,6 +314,14 @@ def check_auto_short(positions):
                 'is_junk': is_junk,
             }
 
+            # ── MTF-бонус (один раз, для обеих веток) ──
+            mtf_bonus = ''
+            if isinstance(mtf_conf, dict):
+                c = mtf_conf.get('confluence', 0)
+                mtf_bonus = f' | MTF:{c}/3'
+                if c == 3: mtf_bonus += ' +50%'
+                elif c == 2: mtf_bonus += ' +15%'
+
             if is_junk:
                 # ── Шлак: без SL, с DCA-лесенкой ──
                 chg_pct = float(t.get('price24hPcnt', 0) or 0)
@@ -354,7 +371,7 @@ def check_auto_short(positions):
 
                 dca_str = ', '.join(f'+{d["mult"]*100:.0f}% @ ${d["price"]:.4f}' for d in dca_placed)
                 msg = (f'🔴 SHORT JUNK {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
-                       f'памп +{chg_pct*100:.0f}% | TP ${tp_price:.6f} | DCA: {dca_str}')
+                       f'памп +{chg_pct*100:.0f}% | TP ${tp_price:.6f} | DCA: {dca_str}{mtf_bonus}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
                 log_event(msg)
@@ -386,7 +403,7 @@ def check_auto_short(positions):
 
                 msg = (f'🔴 SHORT {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
                        f'BB={bb_pct:.0f}% | SL ${sl_price:.4f} (+{sl_pct*100:.0f}%) | '
-                       f'TP ${tp_price:.4f}')
+                       f'TP ${tp_price:.4f}{mtf_bonus}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
                 log_event(msg)

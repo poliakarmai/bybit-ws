@@ -16,7 +16,20 @@ for f in "${FILES[@]}"; do
     [ -f "$TARGET/$f" ] && cp "$TARGET/$f" "$BACKUP_DIR/" || true
 done
 
-# ── 2. Атомарный swap ──
+# ── 2. VirusTotal scan ──
+VT_SCANNER=~/.hermes/scripts/vt-scan.py
+if [ -f "$VT_SCANNER" ] && [ -n "${VT_API_KEY:-}" ]; then
+    echo "🛡️ VirusTotal scan..."
+    python3 "$VT_SCANNER" "$REPO" || {
+        echo "⚠️  VirusTotal found suspicious files — review before deploying"
+        echo "   To skip: set SKIP_VT_SCAN=1 or fix flagged files"
+        [ "${SKIP_VT_SCAN:-0}" = "1" ] || exit 1
+    }
+else
+    echo "⚠️  VT_API_KEY not set — skipping VirusTotal scan"
+fi
+
+# ── 3. Атомарный swap ──
 echo "🔄 Атомарный деплой..."
 FAILED=()
 for f in "${FILES[@]}"; do

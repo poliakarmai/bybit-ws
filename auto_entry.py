@@ -386,6 +386,16 @@ def auto_entry_scan(positions):
             if margin <= 0:
                 continue
 
+            # ── Фаза 4.3.6: MTF-конфлюенс → бонус к позиции ──
+            confluence_mult = 1.0
+            if 'mtf' in s:
+                mtf_conf = s['mtf'].get('confluence', 0)
+                if mtf_conf == 3:
+                    confluence_mult = 1.5   # +50% при 3/3
+                elif mtf_conf == 2:
+                    confluence_mult = 1.15  # +15% при 2/3
+            margin *= confluence_mult
+
             # Получаем BB для уровней входа
             bb2 = get_bb_data(sym, 'D')
             if not bb2:
@@ -460,7 +470,12 @@ def auto_entry_scan(positions):
                 mtf_info = ''
                 if 'mtf' in s:
                     mtf = s['mtf']
-                    mtf_info = f' | MTF:{mtf["confluence"]}/3({mtf["strength"]})'
+                    bonus = ''
+                    if mtf['confluence'] == 3:
+                        bonus = ' +50%'
+                    elif mtf['confluence'] == 2:
+                        bonus = ' +15%'
+                    mtf_info = f' | MTF:{mtf["confluence"]}/3({mtf["strength"]}{bonus})'
                 regime_info = f' | 📊{regime_name}' if regime_name != 'NEUTRAL' else ''
                 rl_info = f' | 🧠{ensemble_decision}' if ensemble_decision else ''
 
