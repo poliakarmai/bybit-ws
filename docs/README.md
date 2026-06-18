@@ -3,6 +3,24 @@
 Трейдинг-монитор для Bybit фьючерсов. Стратегия: **Bollinger Grid** (LONG/SHORT по BB-полосам).  
 Работает как systemd-сервис, ~25 MB RAM, SQLite — единственный источник истины (SSOT).
 
+## 📚 Полный комплект документации
+
+| Документ | Описание |
+|----------|----------|
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Архитектура: компоненты, потоки данных, модель данных, сетевая схема, Mermaid-диаграммы |
+| **[API.md](API.md)** | API Reference: 12 GET + 8 POST RPC-эндпоинтов, 6 MCP-инструментов, аутентификация, примеры |
+| **[SECURITY.md](SECURITY.md)** | Безопасность: секреты, модель угроз, best practices, инциденты, аудит, network security |
+| **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | Решение проблем: 13 категорий, 60+ причин, команды диагностики |
+| **[ROADMAP.md](ROADMAP.md)** | План развития: Фазы 4.3/5/6, приоритеты, сроки |
+| **[../CHANGELOG.md](../CHANGELOG.md)** | История версий: v1.0 → v4.1, Keep a Changelog |
+| **[../config.example.yaml](../config.example.yaml)** | Полный конфиг с комментариями (734 строки, все параметры) |
+| **[../AGENTS.md](../AGENTS.md)** | Навигация для AI-агентов: структура, RPC, авто-обнаружение путей |
+| **[../DESIGN-STRATEGIES.md](../DESIGN-STRATEGIES.md)** | Дизайн стратегий: Bollinger Grid, scoring, риск-менеджмент |
+
+---
+
+## Быстрый старт
+
 ---
 
 ## 1. Установка
