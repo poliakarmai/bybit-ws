@@ -221,8 +221,10 @@ bybit-ws/
 **Механизм:**
 - `_hmac_sign(path)` — SHA256 файла → HMAC с секретом → `.hmac`-файл
 - `_hmac_verify(path)` — пересчитывает и сравнивает через `hmac.compare_digest()` (timing-safe)
-- Секрет: `BYBIT_HMAC_SECRET` (env) или fallback-константа
-- При расхождении: модель не загружается, алерт, fallback на эвристику
+- Секрет: `BYBIT_HMAC_SECRET` (обязателен в production, `BYBIT_WS_PRODUCTION=1`)
+- В dev-режиме (без `BYBIT_WS_PRODUCTION`) — warning + fallback-ключ
+- В production без ключа — `sys.exit()` (отказ старта)
+- При расхождении подписи: модель не загружается, алерт, fallback на эвристику
 
 **Почему не safetensors/ONNX:** sklearn RF не поддерживает safetensors. HMAC-SHA256 эквивалентен по security-свойствам: злоумышленник не может подделать подпись без знания ключа.
 
@@ -413,6 +415,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | RPC ML Toggle | `rpc.py` | `GET/POST /rpc/ml_toggle` — статус и переключение ML без рестарта конфига |
 | Walk-forward validation | `walk_forward_validate.py` | PR-кривая на out-of-sample данных для переоценки порога ML Gate |
 | ML smoke тесты | `test_ml_smoke.py` | 3 теста: RF load, HMAC sign/verify, LSTM fallback |
+| **HMAC production guard** | `ml_scorer.py`, `lstm_regime.py` | Убран fallback-ключ в production: `BYBIT_WS_PRODUCTION=1` → `sys.exit()` без ключа |
 | Watchdog: зависание | `bybit-watchdog.sh` | Проверка возраста последней записи (>5 мин) |
 | Бэкап: конфиг + модели | `bybit-db-backup.py` | config.yaml, .joblib/.pt, trades.jsonl |
 

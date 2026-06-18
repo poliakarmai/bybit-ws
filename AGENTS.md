@@ -9,8 +9,9 @@
 
 **ML-статус:** Фаза 5 завершена. Ансамбль RF+LSTM+RL. Feature flag `BYBIT_ML_ENABLED=0` → быстрый откат.
 **Безопасность:** Все ML-модели подписываются HMAC-SHA256. RCE через подмену моделей закрыт.
-**Аудит:** 23/47 находок исправлено (7C + 12H + 4M). 24 MEDIUM/LOW осталось.
-**Документация:** `bybit-ws-full.md` — единый источник истины. `DESIGN-STRATEGIES.md` архивирован → `docs/archive/`.
+23/47 находок исправлено (7C + 12H + 4M). 24 MEDIUM/LOW осталось.
+**Документация:** `bybit-ws-full.md` v2.1 — единый источник истины. `DESIGN-STRATEGIES.md` архивирован → `docs/archive/`.
+**HMAC production guard:** `BYBIT_WS_PRODUCTION=1` + `BYBIT_HMAC_SECRET` обязателен. Без ключа — отказ старта.
 
 ## Структура (ключевые файлы)
 
@@ -269,5 +270,6 @@ SL и TP ставятся автоматически после исполнен
 Полный аудит трёх эшелонов (Source-Driven + Security + Adversarial).
 Исправлено: 23 находки (7 CRITICAL + 12 HIGH + 4 MEDIUM). 24 MEDIUM/LOW осталось.
 HMAC-подпись моделей закрывает RCE-вектор.
-
-**Документация:** `bybit-ws-full.md` v2.1 — единый источник истины. `DESIGN-STRATEGIES.md` архивирован.
+23/47 находок исправлено (7C + 12H + 4M). 24 MEDIUM/LOW осталось.
+**Документация:** `bybit-ws-full.md` v2.1 — единый источник истины. `DESIGN-STRATEGIES.md` архивирован → `docs/archive/`.
+**HMAC production guard:** `BYBIT_WS_PRODUCTION=1` + `BYBIT_HMAC_SECRET` обязателен. Без ключа — отказ старта.

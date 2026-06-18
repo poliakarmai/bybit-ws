@@ -25,7 +25,15 @@ import numpy as np
 DB_PATH = Path.home() / ".local" / "share" / "gridsignal-bot" / "users.db"
 MODEL_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_scorer.pkl"
 FEATURES_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_features.json"
-HMAC_SECRET = os.getenv('BYBIT_HMAC_SECRET', 'bybit-ws-model-integrity').encode()
+_FALLBACK_KEY = 'bybit-ws-model-integrity-dev'
+_HMAC_RAW = os.getenv('BYBIT_HMAC_SECRET')
+if not _HMAC_RAW:
+    if os.getenv('BYBIT_WS_PRODUCTION') == '1':
+        sys.exit('FATAL: BYBIT_HMAC_SECRET not set in production')
+    else:
+        print('WARNING: using fallback HMAC key (dev mode). Set BYBIT_HMAC_SECRET for production.', flush=True)
+        _HMAC_RAW = _FALLBACK_KEY
+HMAC_SECRET: bytes = _HMAC_RAW.encode()  # type: ignore[assignment]
 
 
 def _sign_file(path: Path):
