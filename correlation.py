@@ -8,6 +8,7 @@ concentration risk.
 import json
 import math
 import os
+import re
 import time
 from datetime import datetime
 
@@ -168,6 +169,45 @@ def check_correlation(positions):
                     f'   {risk_msg}\n'
                     f'   → {action}'
                 )
+
+    # ── Batching: группировка по общему символу ──
+    # Если один символ коррелирует с 3+ другими → один алерт вместо N
+    if len(messages) >= 3:
+        from collections import defaultdict
+        sym_pairs = defaultdict(list)
+        for msg in messages:
+            m = re.search(r'(\w+USDT)↔(\w+USDT)', msg)
+            if m:
+                sym_pairs[m.group(1)].append((m.group(2), msg))
+                sym_pairs[m.group(2)].append((m.group(1), msg))
+
+        batched = {}
+        for sym, pairs_list in sym_pairs.items():
+            if len(pairs_list) >= 3:
+                # Собираем все корреляции с этим символом
+                others = [p[0] for p in pairs_list]
+                # Берём позицию общего символа
+                pos = positions.get(sym, {})
+                side = '🔴 SHORT' if pos.get('side') == 'Sell' else '🟢 LONG'
+                size = pos.get('size', '?')
+                # Диапазон r
+                r_vals = [float(re.search(r'r=([+\-]\d+\.\d+)', p[1]).group(1)) for p in pairs_list]
+                r_min, r_max = min(r_vals), max(r_vals)
+                r_range = f'{r_min:+.2f}..{r_max:+.2f}' if r_min != r_max else f'{r_min:+.2f}'
+                batched[sym] = (
+                    f'⚠️ Корреляция 📈📈 {sym} ↔ {", ".join(others)}: r={r_range}\n'
+                    f'   {sym} {side} ×{size} | {len(others)} коррелирующих позиций\n'
+                    f'   Двигаются синхронно — при развороте многократный убыток\n'
+                    f'   → Закрой лишние или ужесточи SL на всех'
+                )
+                # Удаляем индивидуальные сообщения для этих пар
+                for _, orig_msg in pairs_list:
+                    if orig_msg in messages:
+                        messages.remove(orig_msg)
+
+        # Добавляем батчированные сообщения
+        for batch_msg in batched.values():
+            messages.append(batch_msg)
 
     # Save snapshot for dashboard
     result = {
