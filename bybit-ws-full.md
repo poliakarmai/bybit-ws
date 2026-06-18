@@ -201,6 +201,7 @@ bybit-ws/
 - **Порог:** 0.45
 - **WAIT = SKIP** (не голосует «за вход»)
 - **При ошибке:** 0.0 (RL), 0.5 (RF), fallback (LSTM)
+- **Фича-флаг:** `BYBIT_ML_ENABLED=0` отключает весь ML-конвейер → возврат к Фазе 2
 
 ### 4.5 A/B-тест
 - **Группа A:** ML Gate
@@ -344,7 +345,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 
 Полный аудит трёх эшелонов: Source-Driven + Security + Adversarial.
 Всего находок: 47 (7 CRITICAL, 12 HIGH, 15 MEDIUM, 13 LOW).
-Исправлено: 19 (7 CRITICAL + 8 HIGH + 4 MEDIUM).
+Исправлено: 21 (7 CRITICAL + 10 HIGH + 4 MEDIUM).
 
 ### Исправленные CRITICAL (7/7)
 
@@ -358,7 +359,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | C6 | JUNK без хард-SL | `auto_short.py` | SL +25% от входа |
 | C7 | fetch_funding_total параметры | `api.py` | `symbol→currency`, `FUNDING→SETTLEMENT` |
 
-### Исправленные HIGH (8/12)
+### Исправленные HIGH (10/12)
 
 | # | Баг | Файл | Фикс |
 |---|-----|------|------|
@@ -370,6 +371,18 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 | H6 | RPC SL при отсутствующей позиции | `rpc.py` | Не слать SL если `pos is None` |
 | H7 | Docstring v3 → v5 | `api.py` | Исправлен |
 | H8 | Дубликаты в `bybit_ws/` | — | Удалены 5 файлов |
+| H9 | API без settleCoin | `auto_entry.py` | `&settleCoin=USDT` |
+| H10 | Импорт regime маскирует ошибки | `ensemble.py` | Явный ImportError handler |
+
+### Дополнительные фиксы (18.06 поздний вечер)
+
+| Что | Где | Суть |
+|-----|-----|------|
+| Pickle → joblib | `ml_scorer.py` | `joblib.load()` вместо `pickle.load()` |
+| Scaler pickle → json | `lstm_regime.py` | StandardScaler через JSON (безопасно) |
+| Feature flag | `auto_entry.py` | `BYBIT_ML_ENABLED=0` — откат ML |
+| Watchdog: зависание | `bybit-watchdog.sh` | Проверка возраста последней записи (>5 мин) |
+| Бэкап: конфиг + модели | `bybit-db-backup.py` | config.yaml, .pkl/.pt, trades.jsonl |
 
 ### Исправленные MEDIUM (4/15)
 
@@ -408,12 +421,15 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 |--------|--------|-----------|
 | Asyncio полная миграция | 40-60ч | 🥈 |
 | Binance/OKX поддержка | 60-80ч | 🥉 |
-| Трейлинг-SL для SHORT | 2-3ч | 🥇 |
-| auto_tp для SHORT | 1-2ч | 🥇 |
 | Логирование с ротацией | 2ч | 🥈 |
 | `pip-audit` / CVE мониторинг | 1ч | 🟢 |
-| `safetensors` вместо `pickle` | 1ч | 🟢 |
 | `except Exception` → логи (219 мест) | 4ч | 🟢 |
+| ML retraining pipeline | 4ч | 🥇 |
+| Per-symbol RL агенты | 8-12ч | 🥈 |
+| ML data drift мониторинг | 2ч | 🥈 |
+| Атомарный деплой-скрипт | 2ч | 🥈 |
+| Расширить тесты ML (до 100+) | 8ч | 🥇 |
+| Walk-forward validation для RF | 2ч | 🥇 |
 
 ---
 

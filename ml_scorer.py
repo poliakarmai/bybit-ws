@@ -9,6 +9,8 @@ ML Scorer v1.0 — машинное обучение для предсказан
 
 import json
 import os
+import joblib
+import numpy as np
 import pickle
 import re
 import sqlite3
@@ -186,8 +188,7 @@ def predict(signal_data: dict) -> Optional[float]:
         return None
 
     try:
-        with open(MODEL_PATH, "rb") as f:
-            model = pickle.load(f)
+        model = joblib.load(MODEL_PATH)
 
         X, _ = _extract_features([signal_data])
         if len(X) == 0:

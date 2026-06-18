@@ -16,6 +16,7 @@ AUTO_ENTRY_WATCH = [
 
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
 MIN_SCORE = 25  # порог для авто-входа (из 50)
+ML_ENABLED = os.getenv('BYBIT_ML_ENABLED', '1') == '1'  # фича-флаг: отключить весь ML
 
 # ── Фаза 5.4: LSTM-режим → адаптивные параметры ──
 REGIME_PARAMS = {
@@ -401,7 +402,7 @@ def auto_entry_scan(positions):
                 if existing_val + price * qty > MAX_POSITION_VALUE:
                     continue
 
-            pos_data = bybit('GET', f'/v5/position/list?category=linear&symbol={sym}')
+            pos_data = bybit('GET', f'/v5/position/list?category=linear&settleCoin=USDT&symbol={sym}')
             idx = 0
             if pos_data and pos_data.get('retCode') == 0:
                 for p in pos_data['result'].get('list', []):
@@ -411,31 +412,32 @@ def auto_entry_scan(positions):
 
             # ── Фаза 5.6: Ансамбль RF+LSTM+RL — стоит ли входить? ──
             ensemble_decision = None
-            try:
-                from .ensemble import ensemble_should_enter as _ensemble_check
-                market_state = {
-                    'regime': regime_name, 'regime_conf': regime_conf,
-                    'mtf_confluence': s.get('mtf', {}).get('confluence', 2) if 'mtf' in s else 2,
-                    'days_since_entry': 0, 'daily_return': 0.0,
-                }
-                signal_data = {
-                    'score': s.get('score', 25), 'bb_pos': s.get('bb_pos', 50),
-                    'bb_width': s.get('bb_width', 10), 'price': s.get('cur', 0),
-                    'lower_bb': bb2.get('lower', 0), 'upper_bb': bb2.get('upper', 0),
-                    'middle_bb': bb2.get('middle', 0),
-                    'entry': s.get('cur', 0), 'timeframe': 'D', 'mode': 'long',
-                    'funding': s.get('funding', 0.0),
-                }
-                ens_enter, ens_conf, ens_details = _ensemble_check(signal_data, market_state)
-                if not ens_enter:
-                    ws = ens_details['weighted_score']
-                    th = ens_details['threshold']
-                    log_event(f'🤖 Ensemble skip {sym}: score={ws:.2f}<{th}')
-                    continue
-                ensemble_decision = f'Ensemble({ens_conf:.0%})'
-            except Exception:
-                pass  # ансамбль недоступен → входим по эвристике
-                log_event(f'⚠️ Ensemble error for {sym} — fallback to heuristic')
+            if ML_ENABLED:
+                try:
+                    from .ensemble import ensemble_should_enter as _ensemble_check
+                    market_state = {
+                        'regime': regime_name, 'regime_conf': regime_conf,
+                        'mtf_confluence': s.get('mtf', {}).get('confluence', 2) if 'mtf' in s else 2,
+                        'days_since_entry': 0, 'daily_return': 0.0,
+                    }
+                    signal_data = {
+                        'score': s.get('score', 25), 'bb_pos': s.get('bb_pos', 50),
+                        'bb_width': s.get('bb_width', 10), 'price': s.get('cur', 0),
+                        'lower_bb': bb2.get('lower', 0), 'upper_bb': bb2.get('upper', 0),
+                        'middle_bb': bb2.get('middle', 0),
+                        'entry': s.get('cur', 0), 'timeframe': 'D', 'mode': 'long',
+                        'funding': s.get('funding', 0.0),
+                    }
+                    ens_enter, ens_conf, ens_details = _ensemble_check(signal_data, market_state)
+                    if not ens_enter:
+                        ws = ens_details['weighted_score']
+                        th = ens_details['threshold']
+                        log_event(f'🤖 Ensemble skip {sym}: score={ws:.2f}<{th}')
+                        continue
+                    ensemble_decision = f'Ensemble({ens_conf:.0%})'
+                except Exception:
+                    pass  # ансамбль недоступен → входим по эвристике
+                    log_event(f'⚠️ Ensemble error for {sym} — fallback to heuristic')
 
             # ── Повторная проверка: позиция могла появиться между снапшотом и ордером ──
             skip_symbol = False

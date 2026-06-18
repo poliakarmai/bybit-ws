@@ -93,9 +93,12 @@ def _lstm_score(market_state: dict) -> tuple[float, str]:
         from .lstm_regime import get_cached_prediction
         data = get_cached_prediction()
         if not data:
-            # Fallback to heuristic
-            from .regime import get_cached_regime
-            data = get_cached_regime()
+            # Fallback to heuristic — импорт на уровне модуля
+            try:
+                from .regime import get_cached_regime
+                data = get_cached_regime()
+            except ImportError:
+                return 0.5, 'LSTM: no data, regime unavailable'
 
         regime = data.get('regime', 'NEUTRAL')
         confidence = data.get('confidence', 50) / 100

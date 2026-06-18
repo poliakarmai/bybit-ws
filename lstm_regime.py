@@ -25,7 +25,7 @@ lstm_regime.py — LSTM-классификатор рыночного режим
 import json
 import math
 import os
-import pickle
+import pickle  # только для обратной совместимости, новые модели через json
 import sys
 import time
 from datetime import datetime, timedelta
@@ -445,8 +445,19 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
         model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu', weights_only=True))
         model.eval()
 
-        with open(SCALER_PATH, 'rb') as f:
-            scaler = pickle.load(f)
+        if SCALER_PATH.suffix == '.json':
+            import json
+            with open(SCALER_PATH, 'r') as f:
+                scaler_data = json.load(f)
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            scaler.mean_ = np.array(scaler_data['mean_'])
+            scaler.scale_ = np.array(scaler_data['scale_'])
+            scaler.var_ = np.array(scaler_data['var_'])
+            scaler.n_features_in_ = scaler_data['n_features_in_']
+        else:
+            with open(SCALER_PATH, 'rb') as f:
+                scaler = pickle.load(f)
 
         # Данные по каждому символу
         all_probs = []
