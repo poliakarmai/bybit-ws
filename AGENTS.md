@@ -111,12 +111,37 @@ curl http://localhost:8380/metrics
 
 | Данные | Место |
 |--------|-------|
-| Позиции (SSOT) | `data/state.db` (SQLite, WAL) |
-| Резервные снепшоты | `data/positions_snapshot.json` (раз в час) |
-| Метрики | `data/metrics.json` |
-| Пампы | `data/pumps.json` |
-| Бумажные позиции | `data/paper_state.db` |
+| Позиции (SSOT) | `~/.local/share/bybit-ws/state.db` (SQLite, WAL) |
+| Резервные снепшоты | `~/.local/share/bybit-ws/positions_snapshot.json` (раз в час) |
+| Метрики | `~/.local/share/bybit-ws/metrics.json` |
+| Пампы | `~/.local/share/bybit-ws/pumps.json` |
+| Бумажные позиции | `~/.local/share/bybit-ws/paper_state.db` |
 | Логи сервиса | `journalctl -u bybit-ws` |
+
+## Для AI-агентов: авто-обнаружение путей
+
+**Способ 1 — RPC (рекомендуемый):**
+```bash
+curl http://127.0.0.1:8766/rpc/paths
+```
+Возвращает JSON со всеми путями: `state_db`, `events_log`, `config_file`, `repo`, `install_dir`, команды синхронизации и рестарта. Не требует авторизации.
+
+**Способ 2 — AGENTS.md (этот файл):**
+Все пути захардкожены в таблице выше. Если RPC недоступен — использовать их.
+
+**Способ 3 — переменные окружения:**
+Монитор читает `BYBIT_WS_DATA_DIR`, `BYBIT_WS_CONFIG`. При кастомной установке — задать их.
+
+**Стандартные пути установки:**
+| Ресурс | Путь |
+|--------|------|
+| Репозиторий | `~/bybit-ws/` |
+| Рабочая копия | `~/.local/lib/bybit_ws/` |
+| Данные (SSOT) | `~/.local/share/bybit-ws/` |
+| Конфиг | `~/.config/bybit-ws/config.yaml` |
+| RPC | `http://127.0.0.1:8766` |
+| Сервис | `systemctl --user bybit-ws` |
+| Синхронизация | `cp ~/bybit-ws/{file}.py ~/.local/lib/bybit_ws/` |
 
 ## Конвенции
 

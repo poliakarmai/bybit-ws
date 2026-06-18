@@ -244,10 +244,18 @@ class RPCHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._check_ip_rate():
             return _error(self, 'Rate limit exceeded', 'Too many requests', 429)
-        if not self._check_auth():
-            return _error(self, 'Unauthorized', 'Invalid or missing Bearer token', 401)
 
         path = self.path.rstrip("/") or "/"
+
+        # Публичные эндпоинты — без авторизации
+        if path in ("/health", "/rpc/paths"):
+            if path == "/health":
+                return self._handle_health()
+            if path == "/rpc/paths":
+                return self._handle_paths()
+
+        if not self._check_auth():
+            return _error(self, 'Unauthorized', 'Invalid or missing Bearer token', 401)
 
         # Алиасы (короткие пути)
         if path == "/health":
@@ -289,6 +297,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_signals()
         elif path == "/rpc/config":
             self._handle_get_config()
+        elif path == "/rpc/paths":
+            self._handle_paths()
         elif path == "/rpc" or path == "/":
             self._handle_index()
         else:
@@ -346,12 +356,34 @@ class RPCHandler(BaseHTTPRequestHandler):
             "endpoints": [
                 "/rpc/all", "/rpc/positions", "/rpc/orders",
                 "/rpc/health", "/rpc/trades", "/rpc/alerts", "/rpc/metrics", "/rpc/risk",
-                "/rpc/signals", "/rpc/config",
+                "/rpc/signals", "/rpc/config", "/rpc/paths",
                 "/health", "/positions", "/orders", "/metrics", "/risk", "/signals", "/config",
                 "POST /scan", "POST /enter", "POST /close", "POST /reset-token",
                 "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
             ]
         })
+
+    def _handle_paths(self):
+        """GET /rpc/paths — все пути установки bybit-ws для внешних агентов."""
+        import os
+        paths = {
+            "state_db": os.path.expanduser("~/.local/share/bybit-ws/state.db"),
+            "events_log": os.path.expanduser("~/.local/share/bybit-ws/events.log"),
+            "alerts_log": os.path.expanduser("~/.local/share/bybit-ws/alerts.log"),
+            "rpc_port": 8766,
+            "rpc_host": "127.0.0.1",
+            "repo": os.path.expanduser("~/bybit-ws"),
+            "install_dir": os.path.expanduser("~/.local/lib/bybit_ws"),
+            "config_file": os.path.expanduser("~/.config/bybit-ws/config.yaml"),
+            "service": "bybit-ws",
+            "sync_command": "cp ~/bybit-ws/{file}.py ~/.local/lib/bybit_ws/",
+            "restart_command": "systemctl --user restart bybit-ws",
+            "venv": os.path.expanduser("~/bybit-ws/.venv"),
+        }
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(paths, indent=2).encode())
 
     def _handle_get_config(self):
         """GET /rpc/config — текущая конфигурация без секретов."""
