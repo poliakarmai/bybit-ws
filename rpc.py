@@ -59,6 +59,7 @@ rpc_state = {
 
 # BB-кеш: {symbol: {data, ts}}. Дневные свечи — валидны 24ч.
 _BB_CACHE = {}
+_BB_CACHE_LOCK = threading.Lock()
 _BB_CACHE_FILE = DATA_DIR / "bb_cache.json"
 
 
@@ -69,6 +70,7 @@ def _load_bb_cache():
             _BB_CACHE = json.loads(_BB_CACHE_FILE.read_text())
     except Exception:
         _BB_CACHE = {}
+_BB_CACHE_LOCK = threading.Lock()
 
 
 def _save_bb_cache():
@@ -78,17 +80,18 @@ def _save_bb_cache():
         pass
 
 
-def _get_bb_for_symbol(symbol: str) -> dict | None:
-    """Вычисляет BB(20,2) и RSI(14) для символа с дневных свечей Bybit. Кеш 24ч."""
+def _get_bb_for_symbol(symbol: str, interval: str = 'D') -> dict | None:
+    """Вычисляет BB(20,2) и RSI(14) для символа. Кеш 24ч, keyed по interval."""
     now = time.time()
-    cached = _BB_CACHE.get(symbol)
+    cache_key = f"{symbol}|{interval}"
+    cached = _BB_CACHE.get(cache_key)
     if cached and (now - cached.get("ts", 0)) < 86400:  # 24h
         return cached["data"]
 
     try:
         url = (
             f"https://api.bybit.com/v5/market/kline?"
-            f"category=linear&symbol={symbol}&interval=D&limit=30"
+            f"category=linear&symbol={symbol}&interval={interval}&limit=50"
         )
         req = urllib.request.Request(url, headers={"User-Agent": "bybit-ws-rpc/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -114,14 +117,24 @@ def _get_bb_for_symbol(symbol: str) -> dict | None:
         losses = sum(max(rsi_w[j-1] - rsi_w[j], 0) for j in range(1, len(rsi_w)))
         rsi = 100 - (100 / (1 + gains / max(losses, 0.0001)))
 
+        # down_days: количество дней снижения подряд
+        down_days = 0
+        for j in range(len(closes)-1, 0, -1):
+            if closes[j] < closes[j-1]:
+                down_days += 1
+            else:
+                break
+
         data = {
             "bb_sma": round(sma_20, 8),
             "bb_upper": round(upper, 8),
             "bb_lower": round(lower, 8),
             "bb_pct": round(bb_pct, 1),
             "bb_rsi": round(rsi, 0),
+            "bb_down_days": down_days,
         }
-        _BB_CACHE[symbol] = {"data": data, "ts": now}
+        with _BB_CACHE_LOCK:
+            _BB_CACHE[cache_key] = {"data": data, "ts": now}
         return data
     except Exception:
         return None
@@ -339,6 +352,7 @@ class RPCHandler(BaseHTTPRequestHandler):
             return _error(self, 'Rate limit exceeded', 'Too many requests', 429)
 
         path = self.path.rstrip("/") or "/"
+        path = path.split("?")[0]  # strip query string
 
         # Публичные эндпоинты — без авторизации
         if path in ("/health", "/rpc/paths"):
@@ -854,41 +868,124 @@ class RPCHandler(BaseHTTPRequestHandler):
     # ═══════════════════════════════════════════════════════════════
 
     def _handle_scan(self, body: dict):
-        """POST /scan — запустить GridSignal-сканер.
+        """POST /scan — Bollinger Grid скан (WS-кеш + параллельный REST).
 
-        Принимает: {"mode": "long|short", "limit": 5}
-        Возвращает: список сигналов с метриками.
+        Принимает: {"mode": "long|short", "limit": 5, "interval": "D"}
+        Возвращает: топ-N сигналов за ~5-10 секунд (даже при холодном кеше).
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+
         mode = body.get('mode', 'long')
         if mode not in ('long', 'short'):
-            return _error(self, 'Invalid mode', "mode must be 'long' or 'short'", 400)
+            return _error(self, 'Invalid mode', f'mode must be long/short, got {mode}', 400)
+
+        interval = body.get('interval', 'D')
+        if interval not in ('D', 'W', '4h', '1h', '15m', '5m'):
+            return _error(self, 'Invalid interval', f'interval={interval}', 400)
 
         try:
             limit = int(body.get('limit', 5))
         except (ValueError, TypeError):
             return _error(self, 'Invalid limit', 'limit must be an integer', 400)
-
         if limit < 1 or limit > 20:
-            return _error(self, 'Invalid limit', 'limit must be between 1 and 20', 400)
+            return _error(self, 'Invalid limit', 'limit must be 1-20', 400)
 
         try:
-            from .gridsignal_scanner import scan
-            signals = scan(limit=limit, mode=mode)
-            if not isinstance(signals, list):
-                return _error(self, 'Scanner returned unexpected format',
-                              str(signals)[:200], 500)
+            from . import api
+            from .ws_client import get_bb
 
-            return _json_response(self, {
-                'mode': mode,
-                'count': len(signals),
-                'signals': signals,
-            })
+            # Топ-50 тикеров по обороту (один REST-запрос)
+            ticker_resp = api.bybit('GET', '/v5/market/tickers?category=linear')
+            if ticker_resp.get('retCode') != 0:
+                return _error(self, 'API error', ticker_resp.get('retMsg', '?'), 500)
 
-        except ImportError:
-            return _error(self, 'Scanner module not found',
-                          'gridsignal_scanner not importable', 500)
+            tickers = ticker_resp.get('result', {}).get('list', [])
+            tickers.sort(key=lambda t: float(t.get('turnover24h', 0)), reverse=True)
+
+            BLACKLIST = {'TRUMPUSDT', 'MELANIAUSDT', 'BONKUSDT', 'FLOKIUSDT', 'WIFUSDT'}
+
+            # Фаза 1: WS-кеш (мгновенно)
+            ws_hits = []
+            rest_needed = []
+            for t in tickers:
+                sym = t['symbol']
+                if not sym.endswith('USDT') or sym in BLACKLIST:
+                    continue
+                bb = get_bb(sym, interval)
+                if bb is not None:
+                    ws_hits.append((sym, bb, float(t.get('lastPrice', 0)), float(t.get('turnover24h', 0))))
+                else:
+                    rest_needed.append(sym)
+                if len(ws_hits) + len(rest_needed) >= 50:
+                    break
+
+            # Фаза 2: параллельный REST для промахов (10 потоков)
+            rest_results = {}
+            if rest_needed:
+                _load_bb_cache()
+                lock = threading.Lock()
+                def _fetch_one(sym):
+                    bb = _get_bb_for_symbol(sym, interval)
+                    with lock:
+                        rest_results[sym] = bb
+                    return sym
+
+                with ThreadPoolExecutor(max_workers=10) as pool:
+                    futures = {pool.submit(_fetch_one, s): s for s in rest_needed}
+                    for _ in as_completed(futures, timeout=30):
+                        pass  # результаты в rest_results
+
+                _save_bb_cache()
+
+            # Фаза 3: сборка
+            candidates = []
+            for sym, bb, mark, turnover in ws_hits:
+                self._score_candidate(candidates, sym, bb, mark, mode, interval, turnover=turnover)
+            ticker_map = {t["symbol"]: float(t.get("turnover24h", 0)) for t in tickers}
+            for sym, bb in rest_results.items():
+                if bb:
+                    # Найти mark из tickers
+                    mark = 0.0
+                    for t in tickers:
+                        if t['symbol'] == sym:
+                            mark = float(t.get('lastPrice', 0))
+                            break
+                    self._score_candidate(candidates, sym, bb, mark, mode, interval, turnover=ticker_map.get(sym, 0))
+
+            candidates.sort(key=lambda s: s['score'], reverse=True)
+            _json_response(self, candidates[:limit])
+
         except Exception as e:
-            return _error(self, 'Internal scanner error', str(e)[:500], 500)
+            import logging
+            logging.getLogger('bybit.rpc').error(f'Scan error: {e}')
+            return _error(self, 'Internal scan error', str(e)[:500], 500)
+
+    def _score_candidate(self, candidates, sym, bb, mark, mode, interval, turnover=0.0):
+        """Добавить кандидата в список если проходит фильтр BB%."""
+        bb_pct = bb.get('bb_pct', 50)
+        if mode == 'long' and bb_pct > 35:
+            return
+        if mode == 'short' and bb_pct < 65:
+            return
+        score = round(min(10.0, max(0, (35 - bb_pct) * 0.4) if mode == 'long'
+                      else max(0, (bb_pct - 65) * 0.4)), 1)
+        candidates.append({
+            'symbol': sym,
+            'side': 'Buy' if mode == 'long' else 'Sell',
+            'score': score,
+            'price': mark,
+            'bb_pct': round(bb_pct, 1),
+            'bb_pos': round(bb_pct, 1),
+            'lower_bb': bb.get('bb_lower'),
+            'upper_bb': bb.get('bb_upper'),
+            'middle_bb': bb.get('bb_sma'),
+            'down_days': bb.get('bb_down_days', 0),
+            'turnover': turnover,
+            'rsi': bb.get('bb_rsi'),
+            'mode': mode.upper(),
+            'interval': interval,
+        })
 
     def _handle_enter(self, body: dict):
         """POST /enter — ручной вход в позицию.

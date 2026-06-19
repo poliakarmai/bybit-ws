@@ -7,7 +7,7 @@ REPO=~/bybit-ws
 TARGET=~/.local/lib/bybit_ws
 VERSION=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR=$TARGET.bak_$VERSION
-FILES=(auto_entry.py api.py rl_agent.py ensemble.py rpc.py lstm_regime.py ml_scorer.py auto_sl.py auto_short.py)
+FILES=(auto_entry.py api.py rl_agent.py ensemble.py rpc.py lstm_regime.py ml_scorer.py auto_sl.py auto_short.py ws_client.py)
 
 # ── 1. Бэкап ──
 echo "📦 Бэкап в $BACKUP_DIR"
