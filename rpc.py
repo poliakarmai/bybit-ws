@@ -782,42 +782,70 @@ class RPCHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_signals(self):
-        """GET /rpc/signals — LONG и SHORT сигналы."""
+        """GET /rpc/signals — сигналы из BB% позиций (мгновенно, без API)."""
         result = {"long": [], "short": []}
 
-        # SHORT сигналы через gridsignal_scanner (прямой вызов вместо subprocess)
         try:
-            from .gridsignal_scanner import scan
-            short_candidates = scan(limit=10, mode='short')
-            result["short"] = short_candidates
-        except Exception as e:
-            import logging
-            logging.getLogger('bybit.rpc').warning(f'Short scanner failed: {e}')
-
-        # LONG сигналы через auto_entry_scan (уже был прямой вызов)
-        try:
-            from .auto_entry import auto_entry_scan
-            positions = _load_json(DATA_DIR / "positions.json")
+            positions_db = _db.get_positions()
+            positions = positions_db if positions_db else _load_json(DATA_DIR / "positions.json")
             if not isinstance(positions, dict):
                 positions = {}
-            long_entries = auto_entry_scan(positions)
-            for msg in long_entries:
+
+            enriched = []
+            for sym, p in positions.items():
+                if not isinstance(p, dict):
+                    continue
+                p = dict(p)
+                p["symbol"] = sym
+                enriched.append(p)
+
+            enriched = _enrich_positions_with_bb(enriched)
+
+            for p in enriched:
+                sym = p.get("symbol", "")
+                side = p.get("side", "")
+                bb_pct = p.get("bb_pct")
+                rsi = p.get("bb_rsi")
+                mark = p.get("mark")
+                entry = p.get("entry")
+
+                if bb_pct is None:
+                    continue
+
                 try:
-                    parts = msg.split()
-                    if len(parts) >= 3 and parts[0] == "📌":
-                        sym = parts[1]
-                        signal = {"symbol": sym, "raw": msg}
-                        for p in parts[2:]:
-                            if "=" in p:
-                                k, v = p.split("=", 1)
-                                signal[k] = v
-                        result["long"].append(signal)
-                except Exception as e:
-                    import logging
-                    logging.getLogger('bybit.rpc').warning(f'Signal parse error: {e}')
+                    bb_pct = float(bb_pct)
+                    rsi = float(rsi) if rsi else None
+                    mark = float(mark) if mark else 0
+                    entry = float(entry) if entry else 0
+                except (ValueError, TypeError):
+                    continue
+
+                signal = {
+                    "symbol": sym,
+                    "side": side,
+                    "bb_pct": round(bb_pct, 1),
+                    "rsi": round(rsi, 0) if rsi else None,
+                    "mark": mark,
+                    "entry": entry,
+                }
+
+                if side == "Buy" and bb_pct < 35:
+                    score = round(max(0, (35 - bb_pct) * 0.3 + max(0, 40 - (rsi or 50)) * 0.1, 1))
+                    signal["score"] = score
+                    signal["signal"] = "LONG"
+                    result["long"].append(signal)
+                elif side == "Sell" and bb_pct > 65:
+                    score = round(max(0, (bb_pct - 65) * 0.3 + max(0, (rsi or 50) - 60) * 0.1, 1))
+                    signal["score"] = score
+                    signal["signal"] = "SHORT"
+                    result["short"].append(signal)
+
+            result["long"].sort(key=lambda s: s["score"], reverse=True)
+            result["short"].sort(key=lambda s: s["score"], reverse=True)
+
         except Exception as e:
             import logging
-            logging.getLogger('bybit.rpc').warning(f'Long scanner failed: {e}')
+            logging.getLogger('bybit.rpc').warning(f'Signals error: {e}')
 
         _json_response(self, result)
 
