@@ -225,7 +225,9 @@ def _on_open(ws):
 
     # Подписаться на тикеры всех отслеживаемых символов
     symbols = list(WATCH_SYMBOLS)
-    batch_size = 5  # Bybit v5 WS limit: max 10 args per subscribe (5 tickers + 5 kline = 10)
+    # Подписка: batch_size=5 → 5 tickers + 5 kline.D = 10 args (лимит Bybit v5: макс 10 args на subscribe)
+    # Разбито на 2 сообщения для kline.W (трейлинг-SL использует Weekly BB)
+    batch_size = 5
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i:i + batch_size]
         # Batch 1: tickers + kline.D

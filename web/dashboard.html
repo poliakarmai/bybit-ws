@@ -238,13 +238,13 @@ async function refresh() {
       if (longs.length > 0) {
         sigHTML += '<div style="color:var(--green);margin-bottom:4px;">📈 LONG:</div>';
         for (const s of longs.slice(0, 3)) {
-          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pos||'?'}% vol=$${fmt(s.turnover24h/1e6,0)}M</div>`;
+          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pct||'?'}%</div>`;
         }
       }
       if (shorts.length > 0) {
         sigHTML += '<div style="color:var(--red);margin-bottom:4px;margin-top:6px;">📉 SHORT:</div>';
         for (const s of shorts.slice(0, 3)) {
-          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pos||'?'}%</div>`;
+          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pct||'?'}%</div>`;
         }
       }
       document.getElementById('signals').innerHTML = sigHTML || '<div class="metric">Нет сигналов</div>';
