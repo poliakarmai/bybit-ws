@@ -223,11 +223,18 @@ def check_partial_tp() -> list[str]:
         else:
             progress_str = f"отошла на {abs(pct):.0f}% от цели"
 
+        # Понятный PnL
+        total_pnl = cum_rpnl
+        if abs(funding_total) > 0.01:
+            pnl_str = f"${total_pnl:+.2f} (вкл. фандинг ${funding_total:+.2f})"
+        else:
+            pnl_str = f"${total_pnl:+.2f}"
+
         alerts.append(
             f"🔄 {sym} — перераспределение TP\n"
             f"Было: Middle {prev_mid*100:.0f}% / Upper {100-prev_mid*100:.0f}%\n"
             f"Стало: Middle {new_mid*100:.0f}% / Upper {new_up*100:.0f}%\n"
-            f"PnL: ${tp_only+funding_total:+.2f} (TP ${tp_only:+.2f} + фандинг ${funding_total:+.2f})\n"
+            f"Реализовано: {pnl_str}\n"
             f"В позиции: {hours_open:.0f}ч · {progress_str}"
         )
 
