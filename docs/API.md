@@ -166,10 +166,10 @@ curl http://127.0.0.1:8766/rpc/paths
 
 ### `GET /rpc/positions` — Защищённый
 
-Текущие открытые позиции из SQLite SSOT.
+Текущие открытые позиции из SQLite SSOT. С версии 2026-06-19 обогащаются данными Bollinger Bands (20,2) и RSI(14) с дневных свечей Bybit (кеш 24ч).
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/rpc/positions
+curl -H "Authorization: Bearer *** http://127.0.0.1:8766/rpc/positions
 ```
 
 **Ответ:**
@@ -189,7 +189,12 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/rpc/positions
     "positionIM": 11.61,
     "cumRealisedPnl": 0.0,
     "openTime": 1781711576,
-    "margin": 11.61
+    "margin": 11.61,
+    "bb_pct": 40.2,
+    "bb_rsi": 62.0,
+    "bb_sma": 7.432,
+    "bb_upper": 9.145,
+    "bb_lower": 5.719
   }
 ]
 ```
@@ -202,8 +207,13 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/rpc/positions
 | `mark` | float | Текущая маркировочная цена |
 | `upnl` | float | Нереализованный PnL в USDT |
 | `size` | float | Размер позиции в базовых единицах |
-| `stopLoss` | float\|null | Цена стоп-лосса (null — не установлен) |
+| `stopLoss` | float\\|null | Цена стоп-лосса (null — не установлен) |
 | `positionIdx` | int | Индекс позиции (0 — one-way, 1/2 — hedge) |
+| `bb_pct` | float | Положение цены в % между нижней и верхней полосой BB (0%=нижняя, 100%=верхняя) |
+| `bb_rsi` | float | RSI(14) на дневном таймфрейме |
+| `bb_sma` | float | Средняя BB(20) |
+| `bb_upper` | float | Верхняя полоса BB (+2σ) |
+| `bb_lower` | float | Нижняя полоса BB (−2σ) |
 | `liqPrice` | float\|null | Цена ликвидации |
 | `leverage` | float | Плечо |
 | `positionIM` | float | Initial Margin (изолированная маржа) |
