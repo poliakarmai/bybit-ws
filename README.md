@@ -2,11 +2,11 @@
 
 **Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
-[![Version](https://img.shields.io/badge/version-4.4.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py) [![Phase 4](https://img.shields.io/badge/phase_4-6%2F8-orange)](./AGENTS.md)
+[![Version](https://img.shields.io/badge/version-6.0.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-54%2F54-brightgreen)](./test_smoke.py) [![Phase 6](https://img.shields.io/badge/phase_6-✓-green)](./AGENTS.md)
 
 ---
 
-## Архитектура модулей (v4.4.0)
+## Архитектура модулей (v6.0.0)
 
 ```
 ┌─────────────────── MAIN LOOP (30s) ───────────────────┐
@@ -336,6 +336,31 @@ rpc:
 ## Статистика
 
 Реальные цифры зависят от рыночных условий. Прошлые результаты не гарантируют будущих.
+
+---
+
+## 🤖 GridSignal Bot (@Gridbolbot)
+
+Telegram-бот сигналов Bollinger Grid.
+
+```
+Команды:
+  /scan              Топ-5 LONG-сигналов
+  /scan short        Топ-5 SHORT
+  /scan scalp        BB Scalping x10
+  /scan mean         Mean Reversion x10
+  /pro               GridSignal Pro (безлимит)
+```
+
+**Подписка:**
+| Тариф | Сканы | Цена |
+|-------|-------|------|
+| 🆓 Бесплатно | 3 /scan в день | 0₽ |
+| ⭐ Pro | Безлимит + алерты | 300 Stars (~400₽) или ~2 TON |
+
+**Оплата:** Telegram Stars + TON (CryptoBot).  
+Бот: [@Gridbolbot](https://t.me/Gridbolbot)  
+Код: `~/.local/bin/gridsignal-bot.py`
 
 ---
 
