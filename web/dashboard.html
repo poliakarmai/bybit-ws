@@ -265,7 +265,7 @@ async function refresh() {
       const ctx = document.getElementById('equity-chart').getContext('2d');
       chart = new Chart(ctx, {
         type: 'line',
-        data: { datasets: [{ label:'Equity', data:equityHistory, borderColor:'#3fb950', borderWidth:1.5, pointRadius:0, tension:0.3, fill:true, backgroundColor:'rgba(63,185,80,0.08)' }] },
+        data: { datasets: [{ label:'Equity', data:equityHistory, borderColor:'#3fb950', borderWidth:1.5, pointRadius:2, pointHoverRadius:4, tension:0.3, fill:true, backgroundColor:'rgba(63,185,80,0.08)' }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           scales: {
