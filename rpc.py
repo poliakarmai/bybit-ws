@@ -36,6 +36,8 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from collections import defaultdict
+from statistics import mean, stdev
+import urllib.request
 
 from .api import bybit as _bybit_api
 from .api import fetch_positions as _fetch_positions
@@ -54,6 +56,96 @@ rpc_state = {
     "cycle_duration": 0.0,
     "paused": False,
 }
+
+# BB-кеш: {symbol: {data, ts}}. Дневные свечи — валидны 24ч.
+_BB_CACHE = {}
+_BB_CACHE_FILE = DATA_DIR / "bb_cache.json"
+
+
+def _load_bb_cache():
+    global _BB_CACHE
+    try:
+        if _BB_CACHE_FILE.exists():
+            _BB_CACHE = json.loads(_BB_CACHE_FILE.read_text())
+    except Exception:
+        _BB_CACHE = {}
+
+
+def _save_bb_cache():
+    try:
+        _BB_CACHE_FILE.write_text(json.dumps(_BB_CACHE))
+    except Exception:
+        pass
+
+
+def _get_bb_for_symbol(symbol: str) -> dict | None:
+    """Вычисляет BB(20,2) и RSI(14) для символа с дневных свечей Bybit. Кеш 24ч."""
+    now = time.time()
+    cached = _BB_CACHE.get(symbol)
+    if cached and (now - cached.get("ts", 0)) < 86400:  # 24h
+        return cached["data"]
+
+    try:
+        url = (
+            f"https://api.bybit.com/v5/market/kline?"
+            f"category=linear&symbol={symbol}&interval=D&limit=30"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "bybit-ws-rpc/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = json.loads(resp.read())
+        if raw.get("retCode") != 0:
+            return None
+
+        klines = raw["result"]["list"]
+        klines.reverse()  # старые → новые
+        closes = [float(k[4]) for k in klines]
+        if len(closes) < 20:
+            return None
+
+        sma_20 = mean(closes[-20:])
+        std_20 = stdev(closes[-20:]) if len(closes[-20:]) > 1 else 0.0
+        upper = sma_20 + 2 * std_20
+        lower = sma_20 - 2 * std_20
+        bb_pct = (closes[-1] - lower) / (upper - lower) * 100 if upper != lower else 50.0
+
+        # RSI(14)
+        rsi_w = closes[-15:]
+        gains = sum(max(rsi_w[j] - rsi_w[j-1], 0) for j in range(1, len(rsi_w)))
+        losses = sum(max(rsi_w[j-1] - rsi_w[j], 0) for j in range(1, len(rsi_w)))
+        rsi = 100 - (100 / (1 + gains / max(losses, 0.0001)))
+
+        data = {
+            "bb_sma": round(sma_20, 8),
+            "bb_upper": round(upper, 8),
+            "bb_lower": round(lower, 8),
+            "bb_pct": round(bb_pct, 1),
+            "bb_rsi": round(rsi, 0),
+        }
+        _BB_CACHE[symbol] = {"data": data, "ts": now}
+        return data
+    except Exception:
+        return None
+
+
+def _enrich_positions_with_bb(positions: list[dict]) -> list[dict]:
+    """Добавляет BB% и RSI к каждой позиции."""
+    _load_bb_cache()
+    modified = False
+    for p in positions:
+        sym = p.get("symbol", "")
+        if not sym:
+            continue
+        bb = _get_bb_for_symbol(sym)
+        if bb:
+            p["bb_pct"] = bb["bb_pct"]
+            p["bb_rsi"] = bb["bb_rsi"]
+            p["bb_sma"] = bb["bb_sma"]
+            p["bb_upper"] = bb["bb_upper"]
+            p["bb_lower"] = bb["bb_lower"]
+            modified = True
+    if modified:
+        _save_bb_cache()
+    return positions
 
 # Rate limiting: per-IP token bucket
 _rate_limit_store = defaultdict(lambda: {"tokens": 60, "last": time.time()})
@@ -520,6 +612,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                     p = dict(p)
                     p["symbol"] = sym
                 result.append(p)
+        result = _enrich_positions_with_bb(result)
         _json_response(self, result)
 
     def _handle_orders(self):
