@@ -216,11 +216,19 @@ def check_partial_tp() -> list[str]:
             "progress": round((mark - entry) / (bb["sma"] - entry) * 100, 1) if bb["sma"] > entry else 0,
         }
 
+        # Человеко-читаемый прогресс
+        pct = state[sym]['progress']
+        if pct >= 0:
+            progress_str = f"до TP1: {pct:.0f}%"
+        else:
+            progress_str = f"отошла на {abs(pct):.0f}% от цели"
+
         alerts.append(
-            f"🎯 Partial TP {sym}: {prev_mid*100:.0f}/{100-prev_mid*100:.0f} → "
-            f"{new_mid*100:.0f}/{new_up*100:.0f} "
-            f"(прогресс {state[sym]['progress']:.0f}%, {hours_open:.0f}ч, "
-            f"TP: ${tp_only:+.2f}, фандинг: ${funding_total:+.2f})"
+            f"🔄 {sym} — перераспределение TP\n"
+            f"Было: Middle {prev_mid*100:.0f}% / Upper {100-prev_mid*100:.0f}%\n"
+            f"Стало: Middle {new_mid*100:.0f}% / Upper {new_up*100:.0f}%\n"
+            f"PnL: ${tp_only+funding_total:+.2f} (TP ${tp_only:+.2f} + фандинг ${funding_total:+.2f})\n"
+            f"В позиции: {hours_open:.0f}ч · {progress_str}"
         )
 
     _save_state(state)
