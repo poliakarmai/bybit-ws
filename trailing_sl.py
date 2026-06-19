@@ -1,9 +1,26 @@
 """Trailing SL для разогнанных позиций."""
-import math
+import math, os
 from . import TRAIL_SL_PERCENT
 from .api import bybit, get_bb_data, place_stop_loss
 from .alerts import log_event
 from .manual_positions import is_manual_position
+
+# WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
+_WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
+
+def _get_bb_ws(symbol, interval='W'):
+    """Получить BB: сначала WS-кеш, fallback на REST."""
+    if _WS_BB_ENABLED:
+        try:
+            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            if ws_alive() and not ws_stale(300):
+                bb = ws_get_bb(symbol, interval)
+                if bb and bb.get('lower', 0) > 0:
+                    return bb
+        except Exception:
+            pass
+    # Fallback: REST
+    return get_bb_data(symbol, interval)
 
 def trailing_sl(positions):
     """Подтянуть SL:
@@ -26,7 +43,7 @@ def trailing_sl(positions):
         if side == 'Buy':
             # LONG: цена у верхней полосы, профит >15%
             pnl_pct = (mark - entry) / entry * 100
-            bb = get_bb_data(sym, 'W')
+            bb = _get_bb_ws(sym, 'W')
             if not bb or bb['bb_pos'] is None:
                 continue
             bb_pos = bb['bb_pos']
@@ -43,7 +60,7 @@ def trailing_sl(positions):
         elif side == 'Sell':
             # SHORT: цена у нижней полосы, профит >15%
             pnl_pct = (entry - mark) / entry * 100
-            bb = get_bb_data(sym, 'W')
+            bb = _get_bb_ws(sym, 'W')
             if not bb or bb['bb_pos'] is None:
                 continue
             bb_pos = bb['bb_pos']

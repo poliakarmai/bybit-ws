@@ -9,9 +9,25 @@ DESIGN.md §Стратегия:
 
 import os, json
 from .api import bybit, fetch_positions, get_bb_data
-from .config import get_config
+from .config import Config
 from .alerts import log_event
 from .manual_positions import is_manual_position
+
+# WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
+_WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
+
+def _get_bb_ws(symbol, interval='D'):
+    """Получить BB: сначала WS-кеш, fallback на REST."""
+    if _WS_BB_ENABLED:
+        try:
+            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            if ws_alive() and not ws_stale(300):
+                bb = ws_get_bb(symbol, interval)
+                if bb and bb.get('lower', 0) > 0:
+                    return bb
+        except Exception:
+            pass
+    return get_bb_data(symbol, interval)
 
 
 def _get_tiers(cfg):
@@ -38,7 +54,7 @@ def check_and_fix_sl():
     if not positions:
         return alerts
 
-    cfg = get_config()
+    cfg = Config()
     tier_ab, one_way = _get_tiers(cfg)
 
     for sym, p in positions.items():
@@ -95,7 +111,7 @@ def check_and_fix_sl():
 
         if side == 'Buy':
             # LONG: SL = -7% от Lower BB Daily
-            bb = get_bb_data(sym, 'D')
+            bb = _get_bb_ws(sym, 'D')
             if bb and bb['lower'] > 0:
                 sl_price = bb['lower'] * 0.93
                 sl_desc = f'-7% от Lower BB (${bb["lower"]:.4f})'

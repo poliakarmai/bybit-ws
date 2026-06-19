@@ -7,6 +7,22 @@ from .alerts import log_event, add_alert
 from .config import Config
 from .position_sizing import margin_for_strategy
 
+# WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
+_WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
+
+def _get_bb_ws(symbol, interval='D'):
+    """Получить BB: сначала WS-кеш, fallback на REST."""
+    if _WS_BB_ENABLED:
+        try:
+            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            if ws_alive() and not ws_stale(300):
+                bb = ws_get_bb(symbol, interval)
+                if bb and bb.get('lower', 0) > 0:
+                    return bb
+        except Exception:
+            pass
+    return get_bb_data(symbol, interval)
+
 AUTO_ENTRY_WATCH = [
     'BTCUSDT','ETHUSDT','SOLUSDT','LTCUSDT','XRPUSDT','ADAUSDT','DOGEUSDT',
     'HYPEUSDT','NEARUSDT','SUIUSDT','TONUSDT','WLDUSDT','LINKUSDT',
@@ -359,7 +375,7 @@ def auto_entry_scan(positions):
 
     scored = []
     for sym, ticker_line in candidates:
-        bb = get_bb_data(sym, 'D')
+        bb = _get_bb_ws(sym, 'D')
         if not bb:
             continue
         result = full_score_coin(sym, bb, ticker_line)
