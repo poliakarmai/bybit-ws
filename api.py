@@ -114,7 +114,14 @@ def bybit(method, path, body=None, retries=None):
             if method == 'GET':
                 resp = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
             else:
-                resp = session.post(url, json=body, headers=headers, timeout=REQUEST_TIMEOUT)
+                # Сериализуем с пробелами — как в _sign_request, чтобы HMAC совпадал
+                if isinstance(body, dict):
+                    body_bytes = json.dumps(body, separators=(', ', ': ')).encode()
+                elif isinstance(body, str):
+                    body_bytes = body.encode()
+                else:
+                    body_bytes = b''
+                resp = session.post(url, content=body_bytes, headers=headers, timeout=REQUEST_TIMEOUT)
 
             if resp.status_code != 200:
                 err = f'HTTP {resp.status_code} {method} {path}: {resp.text[:80]}'
