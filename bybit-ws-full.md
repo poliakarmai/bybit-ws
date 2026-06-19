@@ -593,3 +593,62 @@ curl http://127.0.0.1:8766/rpc/positions
 # Проверить риск
 curl http://127.0.0.1:8766/rpc/risk
 ```
+
+## 11. Продуктизация (MVP-скоуп)
+
+### 11.1 Что в MVP
+
+| Фича | Must have | Nice to have |
+|------|-----------|-------------|
+| Web UI | Дашборд, настройки бота, история сделок | Equity-графики |
+| Auth | Email + password + 2FA | OAuth (Google) |
+| Multi-tenant | Per-user SQLite / schema isolation | — |
+| Billing | Stripe subscription | Promo codes |
+| API keys | Encrypted at rest (AES-256) | KMS integration |
+| Onboarding | Wizard + 5-min video | Live chat |
+
+### 11.2 Tech stack
+
+| Слой | Технология |
+|------|-----------|
+| Frontend | Next.js 14 + Tailwind + shadcn/ui |
+| Backend | FastAPI (основа в rpc.py) |
+| Auth | Clerk или Lucia |
+| DB | PostgreSQL (multi-tenant) + Redis (sessions) |
+| Deploy | Railway / Fly.io |
+
+### 11.3 Юридический минимум (→ Фаза 7)
+
+- [ ] Регистрация Estonian OÜ (~€200, 1 неделя)
+- [ ] Terms of Service (шаблон Termly)
+- [ ] Risk Disclosure (обязательно для крипто!)
+- [ ] Privacy Policy (GDPR)
+- [ ] Stripe account
+
+### 11.4 Метрики успеха MVP
+
+- 10 платящих пользователей за 30 дней
+- Churn < 10%/мес
+- NPS > 30
+- Support tickets < 5/день на 100 пользователей
+
+### 11.5 WebSocket BB-кеш (Фаза 6.3)
+
+WS-кеш — primary source для BB данных. REST — fallback при:
+- `is_stale(300)` → True (кеш старше 300 сек)
+- `is_connected()` → False (нет WebSocket)
+- `BYBIT_WS_BB_ENABLED=0` (feature flag)
+
+**Пороги stale по ТФ:**
+| ТФ | stale (сек) | Обоснование |
+|----|------------|-------------|
+| D (дневки) | 300 | Свеча фиксируется раз в сутки, но цена/BB меняются каждый тик |
+| W (недельки) | 300 | Аналогично — BB пересчитывается с каждым kline-обновлением |
+| Tickers | 10 | Цена обновляется постоянно |
+
+**При рассинхроне WS↔REST:** если разница BB% >5% между WS и REST — алерт и переключение на REST до следующего WS-обновления.
+
+### 11.6 Анализ coupling (19.06.2026)
+
+53 Python-модуля. Относительные импорты (`.from X`), чистый пакет.
+Fan-in/out в норме — нет единой точки отказа. Максимум 4 импортёра на модуль.
