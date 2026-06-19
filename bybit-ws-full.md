@@ -130,7 +130,11 @@ bybit-ws/
 ├── manual_positions.py  ← Защита ручных позиций
 ├── confluence_paper.py  ← Paper-trading версия MTF-конфлюенса (бэктестинг)
 ├── mtf_confirmation.py  ← MTF-подтверждение сигналов (live, D/W/M ≥2/3)
-├── ws_client.py         ← WebSocket live-цены/BB
+├── ws_client.py         ← WebSocket клиент (Фаза 6.3)
+│                          └─ kline.D+kline.W, tickers
+│                          └─ BB-кеш с REST-алиасами
+│                          └─ is_stale() возраст кеша
+│                          └─ BYBIT_WS_BB_ENABLED feature flag
 │
 ├── web/
 │   ├── dashboard.html   ← Дашборд v5.0
@@ -472,6 +476,7 @@ AI-агенты взаимодействуют с bybit-ws через MCP-сер
 - ✅ **Фаза 4:** Масштабирование — ATR, MTF, WebSocket, httpx, дашборд
 - ✅ **Фаза 5:** ML — RandomForest, A/B-тест, LSTM, RL (DQN), Ансамбль
 - ✅ **Аудит:** 23 находки исправлено (18 июня), 24 осталось (все MEDIUM/LOW)
+- 🔄 **Фаза 6.3:** WebSocket BB-кеш — WS→REST fallback, age-check, batch_size=5 (19 июня)
 
 ### Бэклог
 
