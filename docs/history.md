@@ -45,5 +45,18 @@
 HMAC-подпись моделей закрывает RCE-вектор.  
 Атомарный деплой с rollback.  
 RPC `/rpc/ml_toggle` — быстрый откат ML.  
-Watchdog с проверкой зависания цикла.  
+Watchdog с проверкой зависания цикла.
 Walk-forward валидация ML.
+
+## Фаза 6 (WebSocket-интеграция) 🔄
+
+**19.06.2026** — WebSocket BB-кеш для всех стратегий:
+
+- `ws_client.py`: добавлена подписка `kline.W` (недельные свечи для trailing_sl)
+- `ws_client.py`: алиасы ключей `bb_pos`/`cur`/`bb_width` для REST-совместимости
+- `ws_client.py`: `is_stale(max_age_sec)` — защита от устаревшего кеша (>300с → REST fallback)
+- `ws_client.py`: `batch_size` 10→5, подписки разбиты на tickers+kline.D и kline.W (лимит 10 args Bybit v5)
+- `trailing_sl.py`, `auto_sl.py`, `auto_entry.py`, `auto_short.py`: `_get_bb_ws()` — сначала WS-кеш, fallback на REST
+- Feature flag: `BYBIT_WS_BB_ENABLED` (env, default 1)
+- Аудит 3 эшелона: source-driven (3C→fixed), security (PASS), adversarial (2C→fixed)
+- Коммиты: `8acad92`, `f98b55e`
