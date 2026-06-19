@@ -420,7 +420,7 @@ def fetch_funding_total(symbol, since_ms):
         if not items:
             break
         for item in items:
-            total += float(item.get('fundingFee', 0))
+            total += float(item.get('funding', 0))
         cursor = data['result'].get('nextPageCursor', '')
         if not cursor:
             break

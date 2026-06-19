@@ -213,7 +213,7 @@ def check_partial_tp() -> list[str]:
             "upper_frac": new_up,
             "updated_at": int(time.time()),
             "bb_pct": bb["bb_pct"],
-            "progress": round((mark - entry) / (bb["sma"] - entry) * 100, 1) if bb["sma"] != entry else 0,
+            "progress": round((mark - entry) / (bb["sma"] - entry) * 100, 1) if bb["sma"] > entry else 0,
         }
 
         alerts.append(
