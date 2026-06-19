@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>bybit-ws Dashboard v5.0</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
 :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --green:#3fb950; --red:#f85149; --yellow:#d2991d; --blue:#58a6ff; }
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -85,7 +86,7 @@ body { background:var(--bg); color:var(--text); font:13px/1.5 'SF Mono',monospac
 
   <!-- Equity Chart -->
   <div class="card wide">
-    <h2>📉 Equity (24h)</h2>
+    <h2>📉 Equity (1h)</h2>
     <canvas id="equity-chart"></canvas>
   </div>
 
@@ -259,7 +260,7 @@ async function refresh() {
     // ── Equity chart ──
     const now = new Date();
     equityHistory.push({ x: now, y: equity });
-    if (equityHistory.length > 288) equityHistory = equityHistory.slice(-288);
+    if (equityHistory.length > 12) equityHistory = equityHistory.slice(-12);
 
     if (!chart) {
       const ctx = document.getElementById('equity-chart').getContext('2d');
@@ -269,7 +270,7 @@ async function refresh() {
         options: {
           responsive: true, maintainAspectRatio: false,
           scales: {
-            x: { type:'time', time:{unit:'hour'}, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} },
+            x: { type:'time', time:{unit:'minute', displayFormats:{minute:'HH:mm'}}, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} },
             y: { grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10},callback:v=>'$'+v} }
           },
           plugins: { legend:{display:false} }
