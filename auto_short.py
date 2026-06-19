@@ -34,6 +34,22 @@ import time
 from .api import bybit, get_bb_data, fetch_orders
 from .alerts import log_event, add_alert
 from .config import Config
+
+# WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
+_WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
+
+def _get_bb_ws(symbol, interval='D'):
+    """Получить BB: сначала WS-кеш, fallback на REST."""
+    if _WS_BB_ENABLED:
+        try:
+            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            if ws_alive() and not ws_stale(300):
+                bb = ws_get_bb(symbol, interval)
+                if bb and bb.get('upper', 0) > 0:
+                    return bb
+        except Exception:
+            pass
+    return get_bb_data(symbol, interval)
 from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
 from .state_db import db  # SQLite dual-write
@@ -329,7 +345,7 @@ def check_auto_short(positions):
 
         # Проверка BB
         try:
-            bb = get_bb_data(sym, 'D')
+            bb = _get_bb_ws(sym, 'D')
             if not bb:
                 continue
             upper = float(bb.get('upper', 0))

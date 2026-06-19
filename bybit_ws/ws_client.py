@@ -65,7 +65,7 @@ BB_STD = 2.0
 KLINE_LIMIT = 100  # сколько свечей держать в кеше на ТФ
 
 # Таймфреймы для kline-подписки
-KLINES_TO_WATCH = ['D']  # Основной: дневные. По необходимости: W, M, 4h, 1h
+KLINES_TO_WATCH = ['D', 'W']  # D=дневные, W=недельные (для trailing_sl)
 
 
 def _calc_sma(values: List[float], period: int) -> List[float]:
@@ -107,6 +107,10 @@ def _calc_bb(closes: List[float]) -> Optional[dict]:
         'pos': round(pos, 1),
         'width': round(bb_range / middle * 100, 2) if middle > 0 else 0,
         'current': round(current, 8),
+        # Aliases for REST compatibility (bb_pos, cur, bb_width)
+        'bb_pos': round(pos, 1),
+        'cur': round(current, 8),
+        'bb_width': round(bb_range / middle * 100, 2) if middle > 0 else 0,
     }
 
 
@@ -221,12 +225,17 @@ def _on_open(ws):
 
     # Подписаться на тикеры всех отслеживаемых символов
     symbols = list(WATCH_SYMBOLS)
-    batch_size = 10
+    batch_size = 5  # Bybit v5 WS limit: max 10 args per subscribe (5 tickers + 5 kline = 10)
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i:i + batch_size]
+        # Batch 1: tickers + kline.D
         args = [f'tickers.{s}' for s in batch] + [f'kline.D.{s}' for s in batch]
         ws.send(json.dumps({'op': 'subscribe', 'args': args}))
-        time.sleep(0.1)  # rate limit
+        time.sleep(0.15)  # rate limit: max 10 msgs/sec
+        # Batch 2: kline.W (weekly for trailing_sl)
+        args_w = [f'kline.W.{s}' for s in batch]
+        ws.send(json.dumps({'op': 'subscribe', 'args': args_w}))
+        time.sleep(0.15)
 
     with _cache_lock:
         _connected = True
@@ -277,6 +286,15 @@ def start():
 def is_connected() -> bool:
     with _cache_lock:
         return _connected
+
+def is_stale(max_age_sec: float = 300) -> bool:
+    """True если кеш старше max_age_sec (WS отвалился, данные устарели)."""
+    with _cache_lock:
+        if not _connected:
+            return True
+        if _last_update == 0:
+            return True
+        return (time.time() - _last_update) > max_age_sec
 
 
 def get_price(symbol: str) -> Optional[float]:
