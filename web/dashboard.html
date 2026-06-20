@@ -161,7 +161,11 @@ function applyPositions(data) {
   const mon = data.monitor || {};
   document.getElementById('status-dot').className = 'dot ' + (mon.alive ? 'alive' : 'dead');
   if (mon.alive) {
-    document.getElementById('uptime').textContent = fmt((Date.now()/1000 - (mon.ts || 0) + 60)/60, 0) + 'м';
+    if (mon.uptime !== undefined) {
+      document.getElementById('uptime').textContent = fmt(mon.uptime / 60, 0) + 'м';
+    } else {
+      document.getElementById('uptime').textContent = fmt((Date.now()/1000 - (mon.ts || 0) + 60)/60, 0) + 'м';
+    }
   }
   document.getElementById('updated').textContent = new Date().toLocaleTimeString();
 
@@ -233,6 +237,9 @@ async function refreshFull() {
   try {
     const r = await fetch(RPC + '/rpc/all');
     const data = await r.json();
+
+    // ── Positions & Monitor (fallback for mobile/no-WebSocket) ──
+    applyPositions(data);
 
     // Metrics
     const metrics = data.metrics || {};
