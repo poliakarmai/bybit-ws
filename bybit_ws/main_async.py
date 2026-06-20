@@ -395,8 +395,8 @@ async def async_main_loop():
                 _rpc_state['cycle_count'] = cycle
                 _rpc_state['last_cycle'] = time.time()
                 _rpc_health(alive=True)
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ RPC state update error: {e}')
 
             # ── Health-файл ──
             await run_in_thread(

@@ -42,13 +42,21 @@ def _proxy_rpc(handler, path):
     data = r.read()
     handler.send_response(200)
     handler.send_header('Content-Type', 'application/json')
-    handler.send_header('Access-Control-Allow-Origin', 'http://localhost:9999')
+    handler.send_header('Access-Control-Allow-Origin', '*')
     handler.send_header('Cache-Control', 'no-cache')
     handler.end_headers()
     handler.wfile.write(data)
 
 
 class P(BaseHTTPRequestHandler):
+
+    def do_OPTIONS(self):
+        """Preflight CORS."""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
 
     def do_GET(self):
         path = self.path.rstrip('/') or '/'
@@ -60,6 +68,7 @@ class P(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(data)
             return
@@ -70,7 +79,7 @@ class P(BaseHTTPRequestHandler):
                 _proxy_rpc(self, path)
             except Exception as e:
                 self.send_response(502)
-                self.send_header('Access-Control-Allow-Origin', 'http://localhost:9999')
+                self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
             return
