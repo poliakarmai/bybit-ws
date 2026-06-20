@@ -343,6 +343,14 @@ async def async_main_loop():
     except Exception as e:
         log_event(f'⚠️ RPC start error: {e}')
 
+    # WebSocket push-сервер для real-time дашборда (:8767)
+    try:
+        from .rpc import start_ws_server
+        ws_push_thread = start_ws_server(port=8767, bind='127.0.0.1')
+        log_event('📡 WebSocket push server on 127.0.0.1:8767 (real-time dashboard)')
+    except Exception as e:
+        log_event(f'⚠️ WS push server start error: {e}')
+
     # WebSocket — в потоке (публичный + приватный при BYBIT_WS_FULL_ENABLED=1)
     try:
         from .ws_client import start as ws_start, is_full_enabled as ws_full
@@ -464,6 +472,26 @@ async def async_main_loop():
 
             # Кешируем для следующего цикла
             old_positions = new_positions
+
+            # ── WebSocket push для real-time дашборда ──
+            try:
+                from .rpc import ws_broadcast
+                pos_list = []
+                if new_positions:
+                    for sym, p in new_positions.items():
+                        p = dict(p)
+                        p['symbol'] = sym
+                        pos_list.append(p)
+                ws_broadcast({
+                    'positions': pos_list,
+                    'monitor': {
+                        'alive': True,
+                        'cycle_count': cycle,
+                        'ts': time.time(),
+                    },
+                })
+            except Exception:
+                pass
 
             # Ждём до следующего цикла
             cycle_sec = float(cfg.monitor.cycle_seconds)

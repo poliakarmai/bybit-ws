@@ -32,6 +32,7 @@ Endpoints:
 import json
 import os
 import time
+import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -43,6 +44,74 @@ from .api import bybit as _bybit_api
 from .api import fetch_positions as _fetch_positions
 from .state_db import db as _db
 from .alerts import add_alert
+
+# ══════════════════════════════════════════════════
+# WebSocket-сервер (aiohttp) для real-time дашборда
+# ══════════════════════════════════════════════════
+_ws_clients = set()
+_ws_loop = None
+_ws_data = None  # последний снепшот для новых клиентов
+
+async def _ws_handler(request):
+    """Обработчик WebSocket-подключений."""
+    from aiohttp import web
+    ws = web.WebSocketResponse(
+        headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET',
+        }
+    )
+    await ws.prepare(request)
+    _ws_clients.add(ws)
+    try:
+        if _ws_data:
+            await ws.send_json(_ws_data)
+        async for _ in ws:
+            pass
+    finally:
+        _ws_clients.discard(ws)
+    return ws
+
+async def _ws_broadcast_async(data):
+    """Рассылка JSON-данных всем подключённым клиентам."""
+    global _ws_data
+    _ws_data = data
+    dead = set()
+    for ws in list(_ws_clients):
+        try:
+            await ws.send_json(data)
+        except Exception:
+            dead.add(ws)
+    _ws_clients -= dead
+
+def ws_broadcast(data):
+    """Потокобезопасный вызов broadcast из синхронного кода."""
+    if _ws_loop is None:
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_ws_broadcast_async(data), _ws_loop)
+    except Exception:
+        pass
+
+def start_ws_server(port=8767, bind='127.0.0.1'):
+    """Запустить WebSocket-сервер в фоновом потоке. Возвращает поток."""
+    global _ws_loop
+    _ws_loop = asyncio.new_event_loop()
+
+    def _run():
+        from aiohttp import web
+        asyncio.set_event_loop(_ws_loop)
+        app = web.Application()
+        app.router.add_get('/ws', _ws_handler)
+        runner = web.AppRunner(app)
+        _ws_loop.run_until_complete(runner.setup())
+        site = web.TCPSite(runner, host=bind, port=port)
+        _ws_loop.run_until_complete(site.start())
+        _ws_loop.run_forever()
+
+    t = threading.Thread(target=_run, daemon=True, name='bybit-ws-server')
+    t.start()
+    return t
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 HOME = Path.home()

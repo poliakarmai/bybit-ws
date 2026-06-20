@@ -122,62 +122,119 @@ body { background:var(--bg); color:var(--text); font:13px/1.5 'SF Mono',monospac
 
 <script>
 const RPC = '';
+const WS_URL = 'ws://127.0.0.1:8767/ws';
 let chart = null;
 let equityHistory = [];
 let allOrders = [];
+let ws = null;
+let wsReconnectTimer = null;
 
 function fmt(n, d) { return Number(n||0).toFixed(d||2); }
 function pnlClass(v) { return v >= 0 ? 'pos' : 'neg'; }
 function pnlSign(v) { return v >= 0 ? '+' : ''; }
 
-async function refresh() {
+// ── WebSocket: real-time позиции + монитор ──
+function connectWS() {
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+  try {
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => {
+      document.getElementById('ws-status').textContent = '🟢';
+      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    };
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        applyPositions(data);
+      } catch(err) { console.error('WS parse:', err); }
+    };
+    ws.onclose = () => {
+      document.getElementById('ws-status').textContent = '🔴';
+      wsReconnectTimer = setTimeout(connectWS, 2000);
+    };
+    ws.onerror = () => ws.close();
+  } catch(e) { wsReconnectTimer = setTimeout(connectWS, 3000); }
+}
+
+function applyPositions(data) {
+  // ── Monitor ──
+  const mon = data.monitor || {};
+  document.getElementById('status-dot').className = 'dot ' + (mon.alive ? 'alive' : 'dead');
+  if (mon.alive) {
+    document.getElementById('uptime').textContent = fmt((Date.now()/1000 - (mon.ts || 0) + 60)/60, 0) + 'м';
+  }
+  document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+
+  // ── Positions ──
+  const positions = data.positions || [];
+  document.getElementById('pos-count').textContent = positions.length;
+
+  let equity = 0, totalPnl = 0;
+  let posHTML = '';
+  for (const p of positions) {
+    const upnl = parseFloat(p.upnl || 0);
+    const mark = parseFloat(p.mark || 0);
+    const entry = parseFloat(p.entry || 0);
+    const margin = parseFloat(p.margin || p.positionIM || 0);
+    totalPnl += upnl;
+    equity += margin;
+
+    const side = p.side === 'Buy' ? '🟢' : '🔴';
+    posHTML += `<div class="row">
+      <span class="sym">${side} ${p.symbol}</span>
+      <span style="font-size:10px;color:#8b949e;">${p.leverage}x · вх $${fmt(entry,4)} · м $${fmt(mark,4)}</span>
+      <span class="pnl ${pnlClass(upnl)}">${pnlSign(upnl)}$${fmt(upnl,2)}</span>
+    </div>`;
+  }
+  document.getElementById('positions').innerHTML = posHTML || '<div class="metric">Нет позиций</div>';
+  document.getElementById('pos-total-pnl').textContent = pnlSign(totalPnl) + '$' + fmt(totalPnl, 2);
+
+  // ── Equity / PnL KPI ──
+  document.getElementById('kpi-equity').textContent = '$' + fmt(equity, 0);
+  document.getElementById('kpi-equity').className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
+  document.getElementById('kpi-pnl').textContent = pnlSign(totalPnl) + '$' + fmt(totalPnl, 2);
+  document.getElementById('kpi-pnl').className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
+
+  // ── Equity chart ──
+  const now = new Date();
+  equityHistory.push({ x: now, y: equity });
+  if (equityHistory.length > 12) equityHistory = equityHistory.slice(-12);
+  if (!chart) {
+    const ctx = document.getElementById('equity-chart').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: [{ label:'Equity', data:equityHistory, borderColor:'#3fb950', borderWidth:1.5, pointRadius:2, pointHoverRadius:4, tension:0.3, fill:true, backgroundColor:'rgba(63,185,80,0.08)' }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { type:'time', time:{unit:'minute', displayFormats:{minute:'HH:mm'}}, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} },
+          y: { grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10},callback:v=>'$'+v} }
+        },
+        plugins: { legend:{display:false} }
+      }
+    });
+  } else {
+    chart.data.datasets[0].data = equityHistory;
+    chart.update('none');
+  }
+
+  // ── Risk-расчёт на основе позиций ──
+  const marginTotal = equity;
+  const maxMargin = 500;
+  const marginPct = Math.min(100, marginTotal / maxMargin * 100);
+  document.getElementById('risk-margin').textContent = '$' + fmt(marginTotal, 2);
+  document.getElementById('risk-margin-bar').style.width = marginPct + '%';
+  document.getElementById('risk-margin-bar').className = 'progress-fill ' + (marginPct > 80 ? 'bad' : marginPct > 50 ? 'warn' : 'ok');
+  document.getElementById('risk-pos-count').textContent = positions.length;
+}
+
+// ── Полный поллинг (метрики, ордера, сигналы, алерты, риск) — раз в 60с ──
+async function refreshFull() {
   try {
     const r = await fetch(RPC + '/rpc/all');
     const data = await r.json();
 
-    // ── Monitor / WS ──
-    const mon = data.monitor || {};
-    document.getElementById('status-dot').className = 'dot ' + (mon.alive ? 'alive' : 'dead');
-    document.getElementById('uptime').textContent = fmt(mon.uptime/60, 0) + 'м';
-    document.getElementById('ws-status').textContent = mon.alive ? '🟢' : '🔴';
-    document.getElementById('updated').textContent = new Date().toLocaleTimeString();
-
-    // ── Positions ──
-    const positions = data.positions || [];
-    document.getElementById('pos-count').textContent = positions.length;
-
-    let equity = 0, totalPnl = 0;
-    let posHTML = '';
-    for (const p of positions) {
-      const upnl = parseFloat(p.upnl || 0);
-      const mark = parseFloat(p.mark || 0);
-      const entry = parseFloat(p.entry || 0);
-      const margin = parseFloat(p.margin || p.positionIM || 0);
-      totalPnl += upnl;
-      equity += margin;
-
-      const sl = p.stopLoss ? '$' + fmt(p.stopLoss, 4) : '—';
-      const side = p.side === 'Buy' ? '🟢' : '🔴';
-
-      posHTML += `<div class="row">
-        <span class="sym">${side} ${p.symbol}</span>
-        <span style="font-size:10px;color:#8b949e;">${p.leverage}x · вх $${fmt(entry,4)} · м $${fmt(mark,4)}</span>
-        <span class="pnl ${pnlClass(upnl)}">${pnlSign(upnl)}$${fmt(upnl,2)}</span>
-      </div>`;
-    }
-    document.getElementById('positions').innerHTML = posHTML || '<div class="metric">Нет позиций</div>';
-    document.getElementById('pos-total-pnl').textContent = pnlSign(totalPnl) + '$' + fmt(totalPnl, 2);
-
-    // ── Equity / PnL ──
-    const eqEl = document.getElementById('kpi-equity');
-    eqEl.textContent = '$' + fmt(equity, 0);
-    eqEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
-
-    const pnlEl = document.getElementById('kpi-pnl');
-    pnlEl.textContent = pnlSign(totalPnl) + '$' + fmt(totalPnl, 2);
-    pnlEl.className = 'kpi ' + (totalPnl >= 0 ? 'green' : 'red');
-
-    // ── Metrics ──
+    // Metrics
     const metrics = data.metrics || {};
     const dates = Object.keys(metrics).sort().reverse();
     const today = dates.length > 0 ? metrics[dates[0]] : {};
@@ -187,48 +244,39 @@ async function refresh() {
     document.getElementById('metric-auto').textContent = today.auto_entry_placed || 0;
     document.getElementById('metric-auto-pnl').textContent = '$' + fmt(today.auto_entry_pnl || 0, 2);
 
-    // ── Risk (из /risk или рассчитываем) ──
-    try {
-      const rr = await fetch(RPC + '/risk');
-      const risk = await rr.json();
-      const dailyLoss = parseFloat(risk.daily_loss || 0);
-      const maxLoss = parseFloat(risk.max_daily_loss || 50);
-      const marginTotal = parseFloat(risk.total_margin || equity);
-      const maxMargin = parseFloat(risk.max_total_margin || 500);
-      const blocked = risk.blocked;
-      const posCount = risk.position_count || positions.length;
-
-      document.getElementById('risk-pnl').textContent = (dailyLoss <= 0 ? '' : '+') + '$' + fmt(dailyLoss, 2);
-      document.getElementById('risk-limit').textContent = fmt(maxLoss, 0);
-      document.getElementById('risk-margin').textContent = '$' + fmt(marginTotal, 2);
-      document.getElementById('risk-max-margin').textContent = fmt(maxMargin, 0);
-      document.getElementById('risk-pos-count').textContent = posCount;
-      document.getElementById('risk-blocked').textContent = blocked ? '🔴 ЗАБЛОКИРОВАНЫ' : '🟢 Открыты';
-
-      // Progress bars
-      const pnlPct = Math.min(100, Math.abs(dailyLoss) / maxLoss * 100);
-      const marginPct = Math.min(100, marginTotal / maxMargin * 100);
-      const pnlBar = document.getElementById('risk-pnl-bar');
-      pnlBar.style.width = pnlPct + '%';
-      pnlBar.className = 'progress-fill ' + (pnlPct > 80 ? 'bad' : pnlPct > 50 ? 'warn' : 'ok');
-
-      const marginBar = document.getElementById('risk-margin-bar');
-      marginBar.style.width = marginPct + '%';
-      marginBar.className = 'progress-fill ' + (marginPct > 80 ? 'bad' : marginPct > 50 ? 'warn' : 'ok');
-
-      const badge = document.getElementById('risk-badge');
-      if (blocked) { badge.textContent = 'STOP'; badge.className = 'badge bad'; }
-      else if (pnlPct > 80 || marginPct > 80) { badge.textContent = 'WARN'; badge.className = 'badge warn'; }
-      else { badge.textContent = 'OK'; badge.className = 'badge ok'; }
-    } catch(e) {}
-
-    // ── Orders ──
+    // Orders
     const orders = data.orders || [];
     allOrders = orders;
     document.getElementById('ord-count').textContent = orders.length;
     renderOrders(orders, 'all');
 
-    // ── Signals ──
+    // Alerts
+    const alerts = data.alerts || [];
+    document.getElementById('alerts').innerHTML = alerts.length > 0
+      ? alerts.slice(-5).reverse().map(a => `<div class="metric">${typeof a==='string'?a:(a.msg||'')}</div>`).join('')
+      : '<div class="metric">—</div>';
+
+    // Risk (daily PnL)
+    try {
+      const rr = await fetch(RPC + '/risk');
+      const risk = await rr.json();
+      const dailyLoss = parseFloat(risk.daily_loss || 0);
+      const maxLoss = parseFloat(risk.max_daily_loss || 50);
+      document.getElementById('risk-pnl').textContent = (dailyLoss <= 0 ? '' : '+') + '$' + fmt(dailyLoss, 2);
+      document.getElementById('risk-limit').textContent = fmt(maxLoss, 0);
+      document.getElementById('risk-blocked').textContent = risk.blocked ? '🔴 ЗАБЛОКИРОВАНЫ' : '🟢 Открыты';
+
+      const pnlPct = Math.min(100, Math.abs(dailyLoss) / maxLoss * 100);
+      document.getElementById('risk-pnl-bar').style.width = pnlPct + '%';
+      document.getElementById('risk-pnl-bar').className = 'progress-fill ' + (pnlPct > 80 ? 'bad' : pnlPct > 50 ? 'warn' : 'ok');
+
+      const badge = document.getElementById('risk-badge');
+      if (risk.blocked) { badge.textContent = 'STOP'; badge.className = 'badge bad'; }
+      else if (pnlPct > 80) { badge.textContent = 'WARN'; badge.className = 'badge warn'; }
+      else { badge.textContent = 'OK'; badge.className = 'badge ok'; }
+    } catch(e) {}
+
+    // Signals
     try {
       const sr = await fetch(RPC + '/signals');
       const sig = await sr.json();
@@ -251,39 +299,8 @@ async function refresh() {
       document.getElementById('signals').innerHTML = sigHTML || '<div class="metric">Нет сигналов</div>';
     } catch(e) {}
 
-    // ── Alerts ──
-    const alerts = data.alerts || [];
-    document.getElementById('alerts').innerHTML = alerts.length > 0
-      ? alerts.slice(-5).reverse().map(a => `<div class="metric">${a}</div>`).join('')
-      : '<div class="metric">—</div>';
-
-    // ── Equity chart ──
-    const now = new Date();
-    equityHistory.push({ x: now, y: equity });
-    if (equityHistory.length > 12) equityHistory = equityHistory.slice(-12);
-
-    if (!chart) {
-      const ctx = document.getElementById('equity-chart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: { datasets: [{ label:'Equity', data:equityHistory, borderColor:'#3fb950', borderWidth:1.5, pointRadius:2, pointHoverRadius:4, tension:0.3, fill:true, backgroundColor:'rgba(63,185,80,0.08)' }] },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          scales: {
-            x: { type:'time', time:{unit:'minute', displayFormats:{minute:'HH:mm'}}, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} },
-            y: { grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10},callback:v=>'$'+v} }
-          },
-          plugins: { legend:{display:false} }
-        }
-      });
-    } else {
-      chart.data.datasets[0].data = equityHistory;
-      chart.update('none');
-    }
-
   } catch(e) {
-    document.getElementById('status-dot').className = 'dot dead';
-    console.error('Dashboard error:', e);
+    console.error('Full refresh error:', e);
   }
 }
 
@@ -312,8 +329,10 @@ function renderOrders(orders, kind) {
   document.getElementById('orders').innerHTML = html;
 }
 
-refresh();
-setInterval(refresh, 30000);
+// ── Старт ──
+connectWS();
+refreshFull();
+setInterval(refreshFull, 60000);
 </script>
 </body>
 </html>

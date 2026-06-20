@@ -343,6 +343,14 @@ async def async_main_loop():
     except Exception as e:
         log_event(f'⚠️ RPC start error: {e}')
 
+    # WebSocket push-сервер для real-time дашборда (:8767)
+    try:
+        from .rpc import start_ws_server
+        ws_push_thread = start_ws_server(port=8767, bind='127.0.0.1')
+        log_event('📡 WebSocket push server on 127.0.0.1:8767 (real-time dashboard)')
+    except Exception as e:
+        log_event(f'⚠️ WS push server start error: {e}')
+
     # WebSocket — в потоке (публичный + приватный при BYBIT_WS_FULL_ENABLED=1)
     try:
         from .ws_client import start as ws_start, is_full_enabled as ws_full
@@ -362,11 +370,23 @@ async def async_main_loop():
             cycle += 1
             t0 = time.monotonic()
 
+            if cycle <= 2 or cycle % 10 == 0:
+                log_event(f'🔄 cycle #{cycle}: starting...')
+
             # ── Параллельная загрузка позиций + ордеров ──
             # Фаза 6.3: при BYBIT_WS_FULL_ENABLED=1 — WS-push с REST-сверкой
-            new_positions, new_orders, _last_rest_sync = await async_positions_snapshot_ws(
-                _last_rest_sync, _REST_SYNC_INTERVAL
-            )
+            # Жёсткий таймаут 20с: httpx keep-alive может виснуть на Bybit
+            try:
+                new_positions, new_orders, _last_rest_sync = await asyncio.wait_for(
+                    async_positions_snapshot_ws(_last_rest_sync, _REST_SYNC_INTERVAL),
+                    timeout=20.0
+                )
+            except asyncio.TimeoutError:
+                log_event(f'⚠️ positions snapshot TIMEOUT (20s), using empty')
+                new_positions, new_orders = {}, {}
+            except Exception as e:
+                log_event(f'⚠️ positions snapshot error: {e}')
+                new_positions, new_orders = {}, {}
 
             # ── Обновляем RPC-состояние ──
             try:
@@ -465,9 +485,30 @@ async def async_main_loop():
             # Кешируем для следующего цикла
             old_positions = new_positions
 
+            # ── WebSocket push для real-time дашборда ──
+            try:
+                from .rpc import ws_broadcast
+                pos_list = []
+                if new_positions:
+                    for sym, p in new_positions.items():
+                        p = dict(p)
+                        p['symbol'] = sym
+                        pos_list.append(p)
+                ws_broadcast({
+                    'positions': pos_list,
+                    'monitor': {
+                        'alive': True,
+                        'cycle_count': cycle,
+                        'ts': time.time(),
+                    },
+                })
+            except Exception:
+                pass
+
             # Ждём до следующего цикла
             cycle_sec = float(cfg.monitor.cycle_seconds)
             sleep_time = max(0.1, cycle_sec - elapsed)
+
             await asyncio.sleep(sleep_time)
 
         except asyncio.CancelledError:
