@@ -107,6 +107,10 @@ TP_MAX_FAILS = len(TP_FAIL_DELAYS)
 ALERT_DEDUP_FILE = os.path.join(DATA_DIR, 'last_alerts.json')
 ALERT_DEDUP_TTL = 300  # 5 минут
 
+# Фаза 5.4: Режимные флаги LONG/SHORT (устанавливаются из main_async.py)
+REGIME_LONG_ENABLED = True
+REGIME_SHORT_ENABLED = True
+
 # Watchdog
 WATCHDOG_LAST = 0.0
 

@@ -69,6 +69,16 @@ _DEFAULT_STRATEGY_SHORT = {
     'junk_dca_levels': [1.0, 1.2],       # DCA-лесенка: +100% и +120% от входа
 }
 
+_DEFAULT_STRATEGY_ML = {
+    'rf_enabled': True,
+    'rf_threshold': 0.22,        # ML Gate порог (F1=0.921)
+    'rf_weight': 0.5,            # вес RF в комбинированном скоре
+    'dspy_enabled': False,       # DSPy-оптимизация (Фаза 5.1)
+    'dspy_weight': 0.5,          # вес DSPy в комбинированном скоре
+    'dspy_threshold': 50.0,      # порог DSPy-гейта (score ≥ 50 → ENTER)
+    'dspy_model': 'openai/gpt-4o-mini',  # LLM для DSPy
+}
+
 _DEFAULT_STRATEGY_DCA = {
     'enabled': True,
     'levels': [0.95, 0.90, 0.85],
@@ -134,7 +144,8 @@ _DEFAULT_WEBSOCKET = {
 
 _DEFAULT_RISK = {
     'max_drawdown_pct': 15,       # global stop: -15% of deposit → close all
-    'max_total_margin': 300,      # max $300 total in positions (30% of $1000 deposit)
+    'max_total_margin': 300,      # max $300 total in positions (fallback, если dynamic_margin_pct=0)
+    'dynamic_margin_pct': 30,     # % от available balance для авто-расчёта max_total_margin (0=выкл)
     'max_position_size': 100,     # max $100 in single position (10% of deposit)
     'max_daily_loss': 50,         # stop for the day at -$50
     'max_long_positions': 12,      # limit LONG entries
@@ -164,6 +175,13 @@ _DEFAULT_ALERTS = {
     'correlation_threshold': 0.80,
     'sl_alert': True,
     'tp_alert': True,
+    'push': {
+        'enabled': True,               # PUSH_ENABLED env или этот флаг
+        'ntfy_server': 'https://ntfy.sh',  # NTFY_SERVER env
+        'ntfy_topic': '',              # NTFY_TOPIC env — обязательно для ntfy
+        'telegram_fallback': True,     # слать в Telegram если ntfy недоступен
+        'dedup_ttl': 300,              # 5 мин — не слать одинаковый алерт чаще
+    },
 }
 
 _DEFAULT_POSITION_SIZING = {
@@ -199,6 +217,7 @@ def _default_config() -> dict:
             'dca': dict(_DEFAULT_STRATEGY_DCA),
             'x10': dict(_DEFAULT_STRATEGY_X10),
             'junk': dict(_DEFAULT_STRATEGY_JUNK),
+            'ml': dict(_DEFAULT_STRATEGY_ML),
         },
         'watchlist': dict(_DEFAULT_WATCHLIST),
         'tiers': dict(_DEFAULT_TIERS),
@@ -347,6 +366,12 @@ alerts:
   correlation_threshold: {_DEFAULT_ALERTS['correlation_threshold']}
   sl_alert: {str(_DEFAULT_ALERTS['sl_alert']).lower()}
   tp_alert: {str(_DEFAULT_ALERTS['tp_alert']).lower()}
+  push:
+    enabled: true                  # ntfy push-уведомления (Фаза 6.4)
+    ntfy_server: "https://ntfy.sh" # или self-hosted
+    ntfy_topic: ""                 # имя топика (задать или ${NTFY_TOPIC})
+    telegram_fallback: true        # слать в Telegram если ntfy недоступен
+    dedup_ttl: 300                 # 5 мин — не слать одинаковый алерт чаще
 """
 
 

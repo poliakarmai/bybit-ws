@@ -93,12 +93,39 @@ PER_SYMBOL_CONFIG_FILE = os.path.join(DATA_DIR, 'per_symbol_optimal.json')
 
 def _load_per_symbol_config():
     global PER_SYMBOL_CONFIG
+    # 1. Загружаем per_symbol_optimal.json (от optimize_params.py)
     try:
         if os.path.exists(PER_SYMBOL_CONFIG_FILE):
             with open(PER_SYMBOL_CONFIG_FILE) as f:
                 PER_SYMBOL_CONFIG = json.load(f)
     except Exception as e:
         log_event(f'⚠️ per-symbol config load: {e}')
+
+    # 2. Загружаем Optuna-параметры (Фаза 5.2 — optuna_tuner.py)
+    _load_optuna_config()
+
+
+def _load_optuna_config():
+    """Загрузить Optuna-параметры и смержить в PER_SYMBOL_CONFIG."""
+    try:
+        from .optuna_tuner import is_optuna_enabled, load_optuna_params
+        if is_optuna_enabled():
+            optuna_params = load_optuna_params()
+            if optuna_params:
+                for sym, params in optuna_params.items():
+                    if sym not in PER_SYMBOL_CONFIG:
+                        PER_SYMBOL_CONFIG[sym] = {}
+                    # Optuna-параметры переопределяют существующие
+                    PER_SYMBOL_CONFIG[sym].update({
+                        'optuna_bb_period': params.get('bb_period'),
+                        'optuna_bb_std_mult': params.get('bb_std_mult'),
+                        'optuna_sl_pct': params.get('sl_pct'),
+                        'optuna_tp_pct': params.get('tp_pct'),
+                        'optuna_min_score': params.get('min_score'),
+                    })
+                log_event(f'📊 Optuna: загружено {len(optuna_params)} символов из optuna_params.json')
+    except Exception as e:
+        log_event(f'⚠️ Optuna config load: {e}')
 
 
 def _get_symbol_param(sym: str, key: str, default):
@@ -134,13 +161,11 @@ def _filter_by_mtf_confluence(scored: list, direction: str) -> list:
             except Exception as e:
                 log_event(f'⚠️ confluence_paper {sym} {direction}: {e}')
 
-            # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа) ──
+            # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа, с дедупликацией 30 мин) ──
             if conf['confluence'] == 3:
                 from .alerts import add_alert as _add_alert
-                _add_alert('ENTRY',
-                    f'🔥 STRONG CONFLUENCE: {sym} {direction} D+W+M | '
-                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% — '
-                    f'ручной вход или увеличенная позиция!'
+                _add_alert('CONFLUENCE',
+                    f'🔥 STRONG CONFLUENCE: {sym} {direction} D+W+M (score={s["score"]}/{s["max_score"]})'
                 )
         else:
             from .alerts import log_event
@@ -288,14 +313,15 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     signal_id = f"{sym}:{int(_time.time())}:{total}"
     ml_passed = True
     ml_prob = None
+    ml_info_extra = ''
     ab_group = None
     try:
         from .ab_test import assign_group as _assign_group
         ab_group = _assign_group(signal_id)
 
         if ab_group == 'A':
-            # Группа A: ML Gate работает как обычно
-            from .ml_scorer import ml_gate_pass
+            # Группа A: ML Gate работает как обычно (RF + опционально DSPy)
+            from .ml_scorer import ml_gate_pass, combined_gate, DSPY_ENABLED as _dspy_en
             signal_data = {
                 'score': total / 5,
                 'price': cur,
@@ -305,8 +331,26 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
                 'entry': bb_data['lower'] * 0.98,
                 'timeframe': 'D',
                 'mode': 'long',
+                # DSPy-признаки (из сигнала)
+                'pnl_pct': 0.0,  # неизвестно до закрытия
+                'price_change_pct': 0.0,
+                'is_long': 1,
+                'side_num': 1,
+                'strategy_type': 3,  # long
+                'abs_pnl': 0.0,
+                'size': 1.0,
             }
-            ml_passed, ml_prob = ml_gate_pass(signal_data)
+            if _dspy_en:
+                # DSPy + RF комбинированный гейт
+                ml_passed, gate_details = combined_gate(signal_data)
+                ml_prob = gate_details.get('rf_prob')
+                if gate_details.get('dspy_score') is not None:
+                    ml_info_extra = f' DSPy={gate_details["dspy_score"]:.1f}'
+                else:
+                    ml_info_extra = ''
+            else:
+                ml_passed, ml_prob = ml_gate_pass(signal_data)
+                ml_info_extra = ''
         # else: группа B — пропускаем без ML Gate (ml_passed уже True)
     except Exception as e:
         log_event(f'⚠️ ml_gate({sym}): {e}')  # модель недоступна → полагаемся на эвристику
@@ -315,6 +359,7 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
         return None  # ML gate: не входить
 
     ml_info = f' ML={ml_prob:.2f}' if ml_prob is not None else ''
+    ml_info += ml_info_extra
     ab_info = f' AB={ab_group}' if ab_group else ''
 
     return {
@@ -334,6 +379,13 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
 def auto_entry_scan(positions):
     """Скрининг и авто-вход по 9-метричному скорингу (v4.0 + LSTM-режим 5.4)."""
     entries = []
+
+    # ── Фаза 5.4: проверка режимного флага LONG ──
+    from . import REGIME_LONG_ENABLED
+    if not REGIME_LONG_ENABLED:
+        log_event('🚫 REGIME_AUTO: LONG отключён по режиму рынка')
+        return entries
+
     active = set(positions.keys())
 
     # ── Фаза 5.4: адаптивные параметры от режима ──
@@ -341,6 +393,18 @@ def auto_entry_scan(positions):
     min_score = regime_params['min_score']
     entry_discount_mult = regime_params['entry_discount']
     aggression = regime_params['aggression']
+
+    # ── Фаза 5.2: Optuna per-symbol min_score (приоритет над режимом) ──
+    _optuna_min_scores = {}
+    if os.environ.get('BYBIT_OPTUNA_ENABLED', '0') == '1':
+        try:
+            from .optuna_tuner import load_optuna_params
+            optuna_p = load_optuna_params()
+            for sym, params in optuna_p.items():
+                if 'min_score' in params:
+                    _optuna_min_scores[sym] = params['min_score']
+        except Exception:
+            pass
     all_watch = list(AUTO_ENTRY_WATCH)
     wl_file = os.path.join(DATA_DIR, 'watchlist_custom.txt')
     if os.path.exists(wl_file):
@@ -379,7 +443,9 @@ def auto_entry_scan(positions):
         if not bb:
             continue
         result = full_score_coin(sym, bb, ticker_line)
-        if result and result['score'] >= min_score:
+        # Per-symbol min_score: Optuna → режим → глобальный
+        sym_min_score = _optuna_min_scores.get(sym, min_score)
+        if result and result['score'] >= sym_min_score:
             scored.append(result)
 
     # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр ──
@@ -505,6 +571,17 @@ def auto_entry_scan(positions):
                     f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
+                # -- Фаза 5.3: A/B-тест стратегий (успешный вход) --
+                try:
+                    from .ab_test import is_ab_enabled, assign_variant, _generate_signal_id, record_paper_entry
+                    if is_ab_enabled():
+                        signal_id = _generate_signal_id(sym, 'Buy')
+                        variant = assign_variant(sym, 'Buy', s['score'])
+                        record_paper_entry(signal_id, variant, sym, 'Buy', 'long',
+                                          price, qty, s['score'])
+                        log_event(f'🧪 A/B: {sym} → вариант {variant} (score={s["score"]})')
+                except Exception as e:
+                    log_event(f'⚠️ ab_test {sym}: {e}')
             elif result is None:
                 # API не ответил — проверяем, не ушёл ли ордер на биржу
                 orders_check = bybit('GET', f'/v5/order/realtime?category=linear&symbol={sym}&limit=1')
@@ -515,13 +592,17 @@ def auto_entry_scan(positions):
                         add_alert('ENTRY',
                             f'⚠️ LONG {sym}: ордер ушёл без подтверждения (таймаут API) — проверь!'
                         )
-                # -- Фаза 5.3: запись в A/B тест --
-                if s.get('signal_id'):
-                    try:
-                        from .ab_test import record_entry as _record_entry
-                        _record_entry(s['signal_id'], sym, 'Buy', qty, price, s['score'], s.get('ml_prob'))
-                    except Exception as e:
-                        log_event(f'⚠️ ab_test record {sym}: {e}')
+                # -- Фаза 5.3: A/B-тест стратегий --
+                try:
+                    from .ab_test import is_ab_enabled, assign_variant, _generate_signal_id, record_paper_entry
+                    if is_ab_enabled():
+                        signal_id = _generate_signal_id(sym, 'Buy')
+                        variant = assign_variant(sym, 'Buy', s['score'])
+                        record_paper_entry(signal_id, variant, sym, 'Buy', 'long',
+                                          price, qty, s['score'])
+                        log_event(f'🧪 A/B: {sym} → вариант {variant} (score={s["score"]})')
+                except Exception as e:
+                    log_event(f'⚠️ ab_test {sym}: {e}')
         except Exception as e:
             log_event(f'⚠️ auto_entry {sym}: {e}')
             continue

@@ -18,10 +18,11 @@ from .state_db import db  # SQLite-дедупликация (persistent)
 
 # Минимальный интервал между алертами одного типа на один символ
 CATEGORY_COOLDOWN = {
-    "STOP": 600,    # 10 мин — SL/ликвидации
-    "TP": 300,      # 5 мин — тейк-профиты
-    "ENTRY": 300,   # 5 мин — входы
-    "INFO": 120,    # 2 мин — инфо (перегрев и т.д.)
+    "STOP": 600,       # 10 мин — SL/ликвидации
+    "TP": 300,         # 5 мин — тейк-профиты
+    "ENTRY": 300,      # 5 мин — входы
+    "INFO": 120,       # 2 мин — инфо (перегрев и т.д.)
+    "CONFLUENCE": 1800,  # 30 мин — сильный конфлюенс 3/3 (Фаза 4.3.4)
 }
 
 
@@ -98,9 +99,15 @@ def add_alert(level, msg):
     with open(ALERTS_LOG, 'a') as f:
         f.write(f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] {entry}\n')
     log_event(f'⚠️ {level}: {msg}')
-    if level in ('STOP', 'TP', 'ENTRY'):
-        emoji = '\U0001F6D1' if level == 'STOP' else ('\U0001F3AF' if level == 'TP' else '\U0001F4CC')
-        send_telegram_alert(f'{emoji} {msg}', level=level)
+    if level in ('STOP', 'TP', 'ENTRY', 'CONFLUENCE'):
+        # Пробуем push-уведомления (ntfy → Telegram fallback)
+        try:
+            from .push_notifier import send_push
+            send_push(msg, level=level)
+        except ImportError:
+            # Если модуль push_notifier не установлен — используем чистый Telegram
+            emoji = '\U0001F6D1' if level == 'STOP' else ('\U0001F3AF' if level == 'TP' else ('\U0001F4CC' if level == 'ENTRY' else '🔥'))
+            send_telegram_alert(f'{emoji} {msg}', level=level)
 
 
 def get_alerts():

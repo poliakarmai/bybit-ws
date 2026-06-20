@@ -83,9 +83,17 @@ def _verify_lstm_file(path: Path) -> bool:
 SEQUENCE_LENGTH = 30
 LOOKAHEAD = 7
 N_CLASSES = 5
+N_FEATURES = 11   # 8 технических + 3 макро (BTC.D, ETH/BTC, Fear&Greed)
 
 CLASS_NAMES = ['TRENDING_UP', 'TRENDING_DOWN', 'RANGING', 'HIGH_VOL', 'LOW_VOL']
 CLASS_IDX = {name: i for i, name in enumerate(CLASS_NAMES)}
+
+# ── Фаза 5.4: Feature flag авто-переключения LONG/SHORT ──
+REGIME_AUTO_ENABLED = os.getenv('BYBIT_REGIME_AUTO', '0') == '1'
+
+# ── Макро-признаки (кеш) ──
+_macro_cache = {'data': None, 'ts': 0}
+_MACRO_CACHE_TTL = 3600  # 1 час
 
 # ── Признаки ─────────────────────────────────────────────────
 
@@ -154,6 +162,105 @@ def _calc_features(closes, highs, lows, volumes):
     return [daily_return, hl_range, bb_pct, bb_width, rsi, atr_pct, vol_ratio, mom_5]
 
 
+# ── Макро-признаки (Фаза 5.4) ─────────────────────────────────
+
+def _fetch_btc_dominance() -> Optional[float]:
+    """Получить BTC Dominance % через CoinGecko API."""
+    import urllib.request, json
+    try:
+        url = 'https://api.coingecko.com/api/v3/global'
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        btc_dom = data.get('data', {}).get('market_cap_percentage', {}).get('btc')
+        if btc_dom is not None:
+            return float(btc_dom)
+    except Exception:
+        pass
+    # Fallback: оценить через объёмы из Bybit API
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        try:
+            from bybit_ws.api import bybit
+        except ImportError:
+            from api import bybit
+        resp = bybit('GET', '/v5/market/tickers?category=linear&symbol=BTCUSDT')
+        if resp and resp.get('retCode') == 0:
+            tickers = resp['result'].get('list', [])
+            if tickers:
+                btc_vol = float(tickers[0].get('turnover24h', 0))
+                # Грубая оценка: BTC.D ~ 40-60% в нормальных условиях
+                # Используем нейтральное значение при недоступности API
+                return 50.0
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_eth_btc_ratio() -> Optional[float]:
+    """Получить ETH/BTC соотношение через Bybit API."""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        try:
+            from bybit_ws.api import bybit
+        except ImportError:
+            from api import bybit
+        # ETHUSDT
+        resp_eth = bybit('GET', '/v5/market/tickers?category=linear&symbol=ETHUSDT')
+        resp_btc = bybit('GET', '/v5/market/tickers?category=linear&symbol=BTCUSDT')
+        if (resp_eth and resp_eth.get('retCode') == 0 and
+                resp_btc and resp_btc.get('retCode') == 0):
+            eth_price = float(resp_eth['result']['list'][0]['lastPrice'])
+            btc_price = float(resp_btc['result']['list'][0]['lastPrice'])
+            if btc_price > 0:
+                return eth_price / btc_price
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_fear_greed() -> Optional[float]:
+    """Получить Fear & Greed индекс через alternative.me API (0-100)."""
+    import urllib.request, json
+    try:
+        url = 'https://api.alternative.me/fng/?limit=1'
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        fg_value = data.get('data', [{}])[0].get('value')
+        if fg_value is not None:
+            return float(fg_value)
+    except Exception:
+        pass
+    return None
+
+
+def _get_macro_features() -> list:
+    """Получить 3 макро-признака с кешированием.
+    Возвращает [btc_dominance, eth_btc_ratio, fear_greed].
+    """
+    global _macro_cache
+    now = time.time()
+    if _macro_cache['data'] is not None and (now - _macro_cache['ts']) < _MACRO_CACHE_TTL:
+        return _macro_cache['data']
+
+    btc_dom = _fetch_btc_dominance()
+    eth_btc = _fetch_eth_btc_ratio()
+    fng = _fetch_fear_greed()
+
+    # Нормализация:
+    # BTC.D: обычно 35-70%, нормируем к ~0-1 (делим на 100)
+    # ETH/BTC: обычно 0.02-0.10, нормируем к ~0-1 (×10)
+    # F&G: 0-100, нормируем к 0-1 (делим на 100)
+    result = [
+        btc_dom / 100.0 if btc_dom is not None else 0.5,
+        eth_btc * 10.0 if eth_btc is not None else 0.5,
+        fng / 100.0 if fng is not None else 0.5,
+    ]
+    _macro_cache = {'data': result, 'ts': now}
+    return result
+
+
 def _label_regime(closes, highs, lows, start_idx, lookahead=LOOKAHEAD):
     """Метка режима на основе будущих свечей."""
     end = start_idx + lookahead
@@ -188,7 +295,7 @@ def _label_regime(closes, highs, lows, start_idx, lookahead=LOOKAHEAD):
 # ── Модель ───────────────────────────────────────────────────
 
 class LSTMModel(nn.Module):
-    def __init__(self, input_size=8, hidden_size=64, num_layers=2, num_classes=N_CLASSES, dropout=0.3):
+    def __init__(self, input_size=N_FEATURES, hidden_size=64, num_layers=2, num_classes=N_CLASSES, dropout=0.3):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
                             batch_first=True, dropout=dropout if num_layers > 1 else 0)
@@ -254,8 +361,11 @@ def fetch_training_data(symbols=('BTCUSDT', 'ETHUSDT'), days=365):
 
 
 def build_dataset(all_data, seq_len=SEQUENCE_LENGTH):
-    """Построить датасет (X, y) из загруженных данных."""
+    """Построить датасет (X, y) из загруженных данных с макро-признаками."""
     X_list, y_list = [], []
+
+    # Получаем макро-признаки (одинаковы для всех сэмплов — текущие значения)
+    macro = _get_macro_features()
 
     for sym_data in all_data:
         closes = sym_data['closes']
@@ -270,7 +380,8 @@ def build_dataset(all_data, seq_len=SEQUENCE_LENGTH):
                 feat = _calc_features(closes[:j + 1], highs[:j + 1], lows[:j + 1], volumes[:j + 1])
                 if feat is None:
                     break
-                features.append(feat)
+                # Добавляем макро-признаки к каждому временному шагу
+                features.append(feat + macro)
             if len(features) != seq_len:
                 continue
 
@@ -418,12 +529,20 @@ def train_model(force=False):
     with open(SCALER_PATH, 'wb') as f:
         pickle.dump(scaler, f)
     _sign_lstm_file(SCALER_PATH)
+    # Макро-значения для логов
+    macro_vals = _get_macro_features()
     with open(FEATURES_PATH, 'w') as f:
         json.dump({
             'n_samples': len(X),
-            'n_features': X.shape[2],
+            'n_features': N_FEATURES,
             'seq_length': SEQUENCE_LENGTH,
             'classes': CLASS_NAMES,
+            'macro_features': ['btc_dominance', 'eth_btc_ratio', 'fear_greed'],
+            'macro_values': {
+                'btc_dominance': round(macro_vals[0] * 100, 1),
+                'eth_btc_ratio': round(macro_vals[1] / 10, 4),
+                'fear_greed': round(macro_vals[2] * 100, 0),
+            },
             'val_accuracy': round(best_val_acc, 3),
             'trained_at': datetime.now().isoformat(),
             'symbols': ['BTCUSDT', 'ETHUSDT'],
@@ -500,6 +619,7 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
 
         # Данные по каждому символу
         all_probs = []
+        macro = _get_macro_features()  # макро-признаки для предсказания
         for sym in symbols:
             data = _fetch_recent_klines(sym)
             if not data:
@@ -517,10 +637,10 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
             for j in range(n - SEQUENCE_LENGTH, n):
                 feat = _calc_features(closes[:j + 1], highs[:j + 1], lows[:j + 1], volumes[:j + 1])
                 if feat is None:
-                    features.append([0] * 8)
+                    features.append([0] * N_FEATURES)
                     zero_features += 1
                 else:
-                    features.append(feat)
+                    features.append(feat + macro)  # добавляем макро-признаки
             if zero_features > SEQUENCE_LENGTH // 2:
                 print(f'⚠️ LSTM: {zero_features}/{SEQUENCE_LENGTH} нулевых признаков — прогноз ненадёжен')
 
@@ -580,6 +700,75 @@ def get_cached_prediction() -> Optional[dict]:
         except Exception:
             pass
     return None
+
+
+# ── Фаза 5.4: Авто-переключение LONG/SHORT по режиму ──────────
+
+def get_regime_strategy(regime: str) -> dict:
+    """Возвращает {LONG_ENABLED, SHORT_ENABLED} на основе режима рынка.
+
+    Правила:
+      TRENDING_UP    → только LONG (SHORT запрещён)
+      TRENDING_DOWN  → только SHORT (LONG запрещён)
+      RANGING        → оба разрешены (боковик)
+      HIGH_VOL       → оба разрешены (волатильность даёт входы в обе стороны)
+      LOW_VOL        → оба разрешены
+      NEUTRAL/другое → оба разрешены (дефолт)
+
+    Feature flag: BYBIT_REGIME_AUTO=1 должен быть установлен.
+    Без флага всегда возвращает оба True.
+    """
+    if not REGIME_AUTO_ENABLED:
+        return {'LONG_ENABLED': True, 'SHORT_ENABLED': True}
+
+    strategy_map = {
+        'TRENDING_UP':    {'LONG_ENABLED': True,  'SHORT_ENABLED': False},
+        'TRENDING_DOWN':  {'LONG_ENABLED': False, 'SHORT_ENABLED': True},
+        'RANGING':        {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
+        'HIGH_VOL':       {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
+        'LOW_VOL':        {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
+        'CHOPPY':         {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
+    }
+    return strategy_map.get(regime, {'LONG_ENABLED': True, 'SHORT_ENABLED': True})
+
+
+def get_current_regime_strategy() -> dict:
+    """Получить текущую стратегию LONG/SHORT на основе предсказанного режима.
+
+    Вызывается из main_async.py на каждом тяжёлом цикле.
+    Возвращает {'LONG_ENABLED': bool, 'SHORT_ENABLED': bool, 'regime': str, 'confidence': int}.
+    """
+    regime = 'NEUTRAL'
+    confidence = 50
+
+    # Пробуем LSTM
+    try:
+        data = predict_regime()
+        if not data:
+            data = get_cached_prediction()
+        if data:
+            regime = data.get('regime', 'NEUTRAL')
+            confidence = data.get('confidence', 50)
+    except Exception:
+        pass
+
+    # Fallback на эвристический regime.py
+    if regime == 'NEUTRAL':
+        try:
+            from .regime import check_regime as _check_regime
+            result = _check_regime()
+            regime = result.get('regime', 'NEUTRAL')
+            confidence = result.get('confidence', 50)
+        except Exception:
+            pass
+
+    strategy = get_regime_strategy(regime)
+    return {
+        'LONG_ENABLED': strategy['LONG_ENABLED'],
+        'SHORT_ENABLED': strategy['SHORT_ENABLED'],
+        'regime': regime,
+        'confidence': confidence,
+    }
 
 
 # ── CLI ─────────────────────────────────────────────────────

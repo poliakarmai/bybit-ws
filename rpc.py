@@ -408,8 +408,14 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_paths()
         elif path == "/rpc/ab_test_report":
             self._handle_ab_test_report()
+        elif path == "/rpc/ab_status":
+            self._handle_ab_status()
         elif path == "/rpc/ml_toggle":
             self._handle_ml_toggle()
+        elif path == "/rpc/risk_full":
+            self._handle_risk_full()
+        elif path == "/rpc/circuit_breaker":
+            self._handle_circuit_breaker()
         elif path == "/rpc" or path == "/":
             self._handle_index()
         else:
@@ -467,7 +473,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             "endpoints": [
                 "/rpc/all", "/rpc/positions", "/rpc/orders",
                 "/rpc/health", "/rpc/trades", "/rpc/alerts", "/rpc/metrics", "/rpc/risk",
-                "/rpc/signals", "/rpc/config", "/rpc/paths", "/rpc/ab_test_report",
+                "/rpc/signals", "/rpc/config", "/rpc/paths", "/rpc/ab_test_report", "/rpc/ab_status",
+                "/rpc/risk_full", "/rpc/circuit_breaker",
                 "/health", "/positions", "/orders", "/metrics", "/risk", "/signals", "/config",
                 "POST /scan", "POST /enter", "POST /close", "POST /reset-token",
                 "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
@@ -505,6 +512,15 @@ class RPCHandler(BaseHTTPRequestHandler):
         except Exception as e:
             _error(self, 'AB test error', str(e), 500)
 
+    def _handle_ab_status(self):
+        """GET /rpc/ab_status — текущий статус A/B тестов стратегий."""
+        try:
+            from .ab_test import get_status as _ab_status
+            status = _ab_status()
+            _json_response(self, status)
+        except Exception as e:
+            _error(self, 'AB status error', str(e), 500)
+
     def _handle_ml_toggle(self):
         """GET /rpc/ml_toggle — статус ML-конвейера (включён/выключен).
         POST /rpc/ml_toggle?enable=0|1 — переключить (требует авторизации)."""
@@ -530,6 +546,50 @@ class RPCHandler(BaseHTTPRequestHandler):
         # GET — показать текущий статус
         from .auto_entry import ML_ENABLED as _ml
         _json_response(self, {'ml_enabled': _ml, 'env_var': 'BYBIT_ML_ENABLED'})
+
+    # ═══ Фаза 6.7: Risk Manager RPC ═══
+
+    def _handle_risk_full(self):
+        """GET /rpc/risk_full — полный отчёт risk-менеджера:
+        daily PnL, маржа, корреляции, circuit_breaker, max_positions."""
+        try:
+            from .risk_manager import get_risk_full
+            report = get_risk_full()
+            _json_response(self, report)
+        except Exception as e:
+            _error(self, 'Risk full error', str(e), 500)
+
+    def _handle_circuit_breaker(self):
+        """GET /rpc/circuit_breaker — статус + сброс.
+        POST /rpc/circuit_breaker с {"action": "reset"} — ручной сброс."""
+        try:
+            from .risk_manager import (
+                get_circuit_breaker_status,
+                reset_circuit_breaker,
+            )
+            if self.command == 'POST':
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length)) if length > 0 else {}
+                action = body.get('action', '')
+                if action == 'reset':
+                    result = reset_circuit_breaker()
+                    _json_response(self, result)
+                    return
+                # Также поддержка query-параметров
+                from urllib.parse import parse_qs, urlparse
+                qs = parse_qs(urlparse(self.path).query)
+                action = qs.get('action', [''])[0]
+                if action == 'reset':
+                    result = reset_circuit_breaker()
+                    _json_response(self, result)
+                    return
+                return _error(self, 'Invalid action', 'Use action=reset', 400)
+
+            # GET — статус
+            status = get_circuit_breaker_status()
+            _json_response(self, status)
+        except Exception as e:
+            _error(self, 'Circuit breaker error', str(e), 500)
 
     def _handle_get_config(self):
         """GET /rpc/config — текущая конфигурация без секретов."""

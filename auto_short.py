@@ -138,10 +138,10 @@ def _check_short_mtf(sym: str):
         except Exception as e:
             log_event(f'⚠️ confluence_paper SHORT {sym}: {e}')
 
-        # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа) ──
+        # ── Фаза 4.3.4: алерт при конфлюенсе 3/3 (ДО входа, с дедупликацией 30 мин) ──
         if conf['confluence'] == 3:
             from .alerts import add_alert as _add_alert
-            _add_alert('ENTRY',
+            _add_alert('CONFLUENCE',
                 f'🔥 STRONG CONFLUENCE: {sym} SHORT D+W+M — '
                 f'ручной вход или увеличенная позиция!'
             )
@@ -275,6 +275,13 @@ def check_auto_short(positions):
     """Сканировать перегретые монеты и ставить SHORT.
     Вызывается каждые 10 циклов (5 мин)."""
     cfg = Config()
+
+    # ── Фаза 5.4: проверка режимного флага SHORT ──
+    from . import REGIME_SHORT_ENABLED
+    if not REGIME_SHORT_ENABLED:
+        log_event('🚫 REGIME_AUTO: SHORT отключён по режиму рынка')
+        return []
+
     ONE_WAY = _get_one_way(cfg)
     TIER_AB = _get_tier_ab(cfg)
     BANNED = set(cfg.risk.get('banned_symbols', []))
@@ -417,6 +424,9 @@ def check_auto_short(positions):
             # Проверка: нет ли уже pending лимитного Sell на этот символ (дедупликация)
             try:
                 all_orders = fetch_orders()
+                if not isinstance(all_orders, dict):
+                    log_event(f'⚠️ Auto-SHORT {sym}: fetch_orders вернул не dict ({type(all_orders).__name__}), пропуск')
+                    continue
                 pending_sells = [o for o in all_orders if o.get('symbol') == sym
                                  and o.get('side') == 'Sell' 
                                  and o.get('orderStatus') == 'New'
@@ -425,7 +435,8 @@ def check_auto_short(positions):
                     log_event(f'⏭️ Auto-SHORT {sym}: уже есть pending лимитка Sell, пропуск')
                     continue
             except Exception as e:
-                log_event(f'⚠️ auto_short pending-check {sym}: {e}')
+                log_event(f'⚠️ Auto-SHORT {sym}: fetch_orders error, пропуск ({e})')
+                continue
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)

@@ -269,6 +269,129 @@ def ml_gate_pass(signal_data: dict) -> tuple[bool, float | None]:
     return ml_prob >= ML_GATE_THRESHOLD, ml_prob
 
 
+# ── Фаза 5.1: DSPy-оптимизация (20.06.2026) ──
+DSPY_ENABLED = os.getenv('BYBIT_DSPY_ENABLED', '0') == '1'
+
+
+def dspy_scorer(signal_data: dict) -> Optional[float]:
+    """
+    DSPy-скоринг: возвращает score 0-100 или None.
+    Вызывается параллельно с RF, результат усредняется.
+    
+    Feature flag: BYBIT_DSPY_ENABLED (default 0).
+    """
+    if not DSPY_ENABLED:
+        return None
+    
+    try:
+        from .dspy_optimizer import predict as dspy_predict
+        return dspy_predict(signal_data)
+    except ImportError:
+        try:
+            from dspy_optimizer import predict as dspy_predict
+            return dspy_predict(signal_data)
+        except ImportError:
+            return None
+    except Exception as e:
+        print(f'[DSPy] scorer error: {e}', file=sys.stderr)
+        return None
+
+
+def dspy_gate(signal_data: dict) -> tuple[bool, Optional[float]]:
+    """
+    DSPy-гейт: проверяет, стоит ли входить в сигнал.
+    Возвращает (passed, dspy_score).
+    """
+    if not DSPY_ENABLED:
+        return True, None
+    
+    try:
+        from .dspy_optimizer import dspy_gate_pass
+        return dspy_gate_pass(signal_data)
+    except ImportError:
+        try:
+            from dspy_optimizer import dspy_gate_pass
+            return dspy_gate_pass(signal_data)
+        except ImportError:
+            return True, None
+    except Exception as e:
+        print(f'[DSPy] gate error: {e}', file=sys.stderr)
+        return True, None
+
+
+def combined_scorer(signal_data: dict) -> float:
+    """
+    Комбинированный ML-скоринг: усреднение RF + DSPy.
+    
+    Возвращает score (0-100). Использует веса из конфига.
+    Если DSPy недоступен → возвращает только RF-результат.
+    
+    Инвариант: fail-closed → ошибка DSPy не блокирует RF.
+    """
+    original = float(signal_data.get('score', 50.0))
+    
+    # RF score
+    rf_score = original
+    try:
+        rf_score = ml_adjusted_score(signal_data)
+    except Exception:
+        pass
+    
+    # DSPy score
+    dspy_sc = dspy_scorer(signal_data)
+    if dspy_sc is not None:
+        # Загружаем веса из конфига
+        try:
+            from .config import Config
+            cfg = Config()
+            rf_w = float(cfg.strategy.ml.get('rf_weight', 0.5))
+            dspy_w = float(cfg.strategy.ml.get('dspy_weight', 0.5))
+        except Exception:
+            rf_w, dspy_w = 0.5, 0.5
+        
+        # Нормализация
+        total_w = rf_w + dspy_w
+        if total_w > 0:
+            rf_w /= total_w
+            dspy_w /= total_w
+        
+        return round(rf_w * rf_score + dspy_w * dspy_sc, 1)
+    
+    return rf_score
+
+
+def combined_gate(signal_data: dict) -> tuple[bool, dict]:
+    """
+    Комбинированный ML-гейт: голосование RF + DSPy.
+    
+    Возвращает:
+        (passed: bool, details: dict)
+        details содержит: rf_passed, rf_prob, dspy_passed, dspy_score, combined_score
+    """
+    rf_passed, rf_prob = ml_gate_pass(signal_data)
+    dspy_passed, dspy_score = dspy_gate(signal_data)
+    
+    combined = combined_scorer(signal_data)
+    
+    # Голосование: нужно ОБА или RF passed + DSPy passed
+    # Если DSPy не включён — только RF
+    if DSPY_ENABLED and dspy_score is not None:
+        passed = rf_passed and dspy_passed
+    else:
+        passed = rf_passed
+    
+    details = {
+        'rf_passed': rf_passed,
+        'rf_prob': rf_prob,
+        'dspy_passed': dspy_passed,
+        'dspy_score': dspy_score,
+        'combined_score': combined,
+        'dspy_enabled': DSPY_ENABLED,
+    }
+    
+    return passed, details
+
+
 # ─── CLI ─────────────────────────────────────────────────────
 if __name__ == "__main__":
     import argparse

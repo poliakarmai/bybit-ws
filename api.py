@@ -230,7 +230,8 @@ def fetch_orders():
         if cursor:
             path += f'&cursor={cursor}'
         data = bybit('GET', path)
-        if not data or data.get('retCode') != 0:
+        # Защита от строкового ответа (HTTP-ошибка, таймаут)
+        if not data or not isinstance(data, dict) or data.get('retCode') != 0:
             break
         olist = data['result'].get('list', [])
         if not olist:
@@ -600,7 +601,7 @@ async def fetch_orders_async():
         if cursor:
             path += f'&cursor={cursor}'
         data = await bybit_async('GET', path)
-        if not data or data.get('retCode') != 0:
+        if not data or not isinstance(data, dict) or data.get('retCode') != 0:
             break
         olist = data['result'].get('list', [])
         if not olist:
