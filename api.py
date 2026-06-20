@@ -86,7 +86,38 @@ def _auth_headers(method, path, body=None):
 # === Retry config ===
 RETRY_DELAYS = [1, 3, 5]
 MAX_RETRIES = len(RETRY_DELAYS)
-REQUEST_TIMEOUT = 15  # совпадает с таймаутом subprocess.communicate
+REQUEST_TIMEOUT = 15
+
+# === Circuit breaker (анти-спам запросами) ===
+# После N ошибок подряд — пауза на M секунд перед следующей попыткой.
+# Сбрасывается при первом успешном запросе.
+_cb_errors = 0         # счётчик последовательных ошибок
+_cb_until = 0.0        # время (time.monotonic()), до которого запросы запрещены
+_CB_THRESHOLD = 5      # ошибок подряд → включаем тормоз
+_CB_COOLDOWN = 300     # секунд паузы при срабатывании (5 мин)
+_CB_MAX_COOLDOWN = 900 # максимум паузы (15 мин) — exponential growth cap
+
+
+def _cb_check() -> bool:
+    """Проверить circuit breaker. True = можно делать запрос."""
+    global _cb_errors, _cb_until
+    if _cb_until > 0 and time.monotonic() < _cb_until:
+        return False  # тормоз активен
+    return True
+
+
+def _cb_record(success: bool):
+    """Записать результат запроса: success=True сбрасывает, False инкрементит."""
+    global _cb_errors, _cb_until
+    if success:
+        _cb_errors = 0
+        _cb_until = 0
+    else:
+        _cb_errors += 1
+        if _cb_errors >= _CB_THRESHOLD:
+            delay = min(_CB_COOLDOWN * (2 ** (_cb_errors - _CB_THRESHOLD)), _CB_MAX_COOLDOWN)
+            _cb_until = time.monotonic() + delay
+            log_event(f'🛑 API circuit breaker: {_cb_errors} ошибок подряд, пауза {delay}с')
 
 
 def bybit(method, path, body=None, retries=None):
@@ -104,6 +135,10 @@ def bybit(method, path, body=None, retries=None):
     if retries is None:
         retries = MAX_RETRIES
 
+    # Circuit breaker: если набрали ошибок — не долбим
+    if not _cb_check():
+        return None
+
     _load_credentials()
     session = _get_session()
     url = _BASE_URL + path
@@ -114,7 +149,6 @@ def bybit(method, path, body=None, retries=None):
             if method == 'GET':
                 resp = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
             else:
-                # Сериализуем с пробелами — как в _sign_request, чтобы HMAC совпадал
                 if isinstance(body, dict):
                     body_bytes = json.dumps(body, separators=(', ', ': ')).encode()
                 elif isinstance(body, str):
@@ -125,13 +159,11 @@ def bybit(method, path, body=None, retries=None):
 
             if resp.status_code != 200:
                 err = f'HTTP {resp.status_code} {method} {path}: {resp.text[:80]}'
-                # 404 = endpoint not found — immediate failure, no retry
                 if resp.status_code == 404:
                     log_event(f'bybit 404 (endpoint not found, skipping): {err}')
                     return None
                 if attempt < retries:
                     if resp.status_code == 429:
-                        # Exponential backoff: 1s → 2s → 4s → 8s → 16s
                         delay = 2 ** attempt
                         log_event(f'bybit 429 rate-limit, backoff {attempt+1}/{retries} in {delay}s')
                     else:
@@ -140,15 +172,37 @@ def bybit(method, path, body=None, retries=None):
                     time.sleep(delay)
                     continue
                 log_event(f'bybit error (final): {err}')
+                _cb_record(False)
                 return None
 
-            return resp.json()
+            result = resp.json()
+            if not isinstance(result, dict):
+                log_event(f'bybit non-dict response ({type(result).__name__}): {method} {path[:60]}')
+                return None
+
+            # 10003 = API key invalid — не ретраить, ключ мёртв
+            if result.get('retCode') == 10003:
+                log_event(f'bybit: API key invalid (10003) — проверь ключ в админке')
+                _cb_record(False)
+                return None
+
+            # 10004 = sign not match — логируем, но ретраим (может быть рассинхрон времени)
+            if result.get('retCode') == 10004:
+                log_event(f'bybit: sign not match (10004) — возможен рассинхрон времени')
+                if attempt < retries:
+                    time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
+                    continue
+                _cb_record(False)
+                return None
+
+            _cb_record(True)
+            return result
 
         except httpx.TimeoutException:
-            log_event(f'bybit timeout after {REQUEST_TIMEOUT}s: {method} {path[:60]}')
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
+            _cb_record(False)
             return None
 
         except httpx.ConnectError as e:
@@ -156,6 +210,7 @@ def bybit(method, path, body=None, retries=None):
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
+            _cb_record(False)
             return None
 
         except json.JSONDecodeError as e:
@@ -163,6 +218,7 @@ def bybit(method, path, body=None, retries=None):
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
+            _cb_record(False)
             return None
 
         except Exception as e:
@@ -170,6 +226,7 @@ def bybit(method, path, body=None, retries=None):
             if attempt < retries:
                 time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
+            _cb_record(False)
             return None
 
     return None
@@ -496,70 +553,25 @@ def fetch_atr(symbol, interval='D', period=14):
 
 import asyncio
 
-_async_client = None
-_async_client_lock = asyncio.Lock()
-
-
-async def _get_async_client():
-    """Ленивый httpx.AsyncClient (connection pooling, HTTP/2)."""
-    global _async_client
-    if _async_client is None:
-        async with _async_client_lock:
-            if _async_client is None:
-                _async_client = httpx.AsyncClient(
-                    headers={
-                        'Content-Type': 'application/json',
-                        'User-Agent': 'bybit-ws/4.4',
-                    },
-                    timeout=httpx.Timeout(15.0),
-                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
-                )
-    return _async_client
-
-
 async def bybit_async(method, path, body=None, retries=None):
-    """Async-версия bybit()."""
-    if retries is None:
-        retries = MAX_RETRIES
+    """Async-версия bybit() через run_in_executor.
 
-    _load_credentials()
-    client = await _get_async_client()
-    url = _BASE_URL + path
-
-    for attempt in range(retries + 1):
-        try:
-            headers = _auth_headers(method, path, body)
-            if method == 'GET':
-                resp = await client.get(url, headers=headers)
-            else:
-                resp = await client.post(url, json=body, headers=headers)
-
-            if resp.status_code != 200:
-                if resp.status_code == 404:
-                    log_event(f'bybit-async 404: {path}')
-                    return None
-                if attempt < retries:
-                    delay = 2 ** attempt if resp.status_code == 429 else RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                    await asyncio.sleep(delay)
-                    continue
-                return None
-
-            return resp.json()
-
-        except httpx.TimeoutException:
-            if attempt < retries:
-                await asyncio.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                continue
-            return None
-
-        except Exception as e:
-            log_event(f'bybit-async error: {e}')
-            if attempt < retries:
-                await asyncio.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                continue
-            return None
-
-    return None
+    Синхронный httpx.Client в отдельном потоке — asyncio может
+    реально отменить ожидание по таймауту (в отличие от httpx.AsyncClient,
+    который блокирует event loop на уровне C-кода h11/h2).
+    """
+    import concurrent.futures
+    loop = asyncio.get_event_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, bybit, method, path, body, retries),
+            timeout=15.0
+        )
+    except asyncio.TimeoutError:
+        log_event(f'bybit-async executor timeout: {method} {path[:60]}')
+        return None
+    except concurrent.futures.CancelledError:
+        return None
 
 
 async def fetch_positions_async():
@@ -651,9 +663,11 @@ async def get_bb_data_async(symbol, interval='D'):
 
 
 async def fetch_positions_and_orders():
-    """Async: параллельная загрузка позиций и ордеров."""
-    positions, orders = await asyncio.gather(
-        fetch_positions_async(),
-        fetch_orders_async(),
-    )
+    """Async: последовательная загрузка позиций и ордеров.
+
+    Последовательные запросы вместо asyncio.gather — намеренно.
+    Таймаут 15с на каждый запрос внутри bybit_async (run_in_executor).
+    """
+    positions = await fetch_positions_async()
+    orders = await fetch_orders_async()
     return positions, orders
