@@ -206,8 +206,8 @@ SL% (2-10%), TP% (5-30%), min_score (10-40) на исторических дан
 - `NTFY_TOPIC` — имя топика (обязательно для ntfy)
 - `NTFY_SERVER` — URL сервера (default: `https://ntfy.sh`)
 
-**Интеграция:** `alerts.py::add_alert()` вызывает `push_notifier.send_push()` для STOP/TP/ENTRY/CONFLUENCE.
-При неудаче ntfy автоматически фоллбечит на Telegram.
+**Интеграция:** `main_async.py` вызывает `send_critical_alert()` / `send_high_alert()` для STOP/ENTRY/TP.
+Telegram-супергруппа не дублируется: `telegram_fallback=False` для trading-алертов (супергруппа — архив, телефон — пуш).
 Если модуль `push_notifier` не импортируется — используется чистый Telegram (как раньше).
 
 **API push_notifier:**
@@ -218,6 +218,26 @@ SL% (2-10%), TP% (5-30%), min_score (10-40) на исторических дан
 | `send_high_alert(msg, level)` | HIGH (вход/TP) |
 | `send_normal_alert(msg, level)` | NORMAL (сигналы/инфо) |
 | `get_push_status()` | Статус каналов (enabled, ntfy_configured, ...) |
+
+## Dry Spell Throttle для SHORT (Фаза 6.8)
+
+**Модуль:** `auto_short.py` — throttle холостых SHORT-циклов.
+
+**Проблема:** `check_auto_short` гоняет бюджет на символах без сигналов (1547+ записей «budget исчерпан»). ETHPERP, BCHUSDT, XMRUSDT и др. проверяются каждые 6 минут безрезультатно.
+
+**Решение:** если символ 3+ цикла подряд не дал ни одного входа — пропускать его 30 минут.
+
+**Константы:**
+- `DRY_SPELL_THRESHOLD = 3` — после 3 холостых проверок
+- `DRY_SPELL_COOLDOWN = 1800` — пропуск 30 минут
+
+**Логика:**
+1. Каждый цикл: символ прошёл BB → `processed_syms.add(sym)`
+2. После цикла: для символов без входа → `dry_spell_count += 1`
+3. При `dry_spell_count >= 3` → пропуск на 30 мин
+4. При любом входе → сброс `dry_spell_count = 0`
+
+**Эффект:** экономия ~80% холостых BB-запросов на «мёртвых» символах.
 
 ## Инварианты (что не должно ломаться)
 
