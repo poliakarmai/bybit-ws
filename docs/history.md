@@ -60,3 +60,16 @@ Walk-forward валидация ML.
 - Feature flag: `BYBIT_WS_BB_ENABLED` (env, default 1)
 - Аудит 3 эшелона: source-driven (3C→fixed), security (PASS), adversarial (2C→fixed)
 - Коммиты: `8acad92`, `f98b55e`
+
+## 2026-06-21 — Фаза 6.8: Dry Spell Throttle + Push-уведомления
+
+### Dry Spell Throttle (auto_short.py)
+- Добавлен throttle для SHORT-символов: 3+ холостых цикла → пропуск на 30 мин
+- Константы: DRY_SPELL_THRESHOLD=3, DRY_SPELL_COOLDOWN=1800
+- Экономит ~80% холостых BB-запросов на «мёртвых» символах
+
+### Push-уведомления (push_notifier.py + main_async.py)
+- Модуль push_notifier.py: ntfy (primary) + Telegram fallback
+- Подключено в main_async.py: CRITICAL (STOP/pump) + HIGH (ENTRY/TP)
+- Топик: bybit-alerts-335c1721
+- Без дублирования Telegram-алертов (telegram_fallback=False)

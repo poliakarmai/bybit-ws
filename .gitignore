@@ -41,3 +41,4 @@ build/
 graphify-out/
 .understand-anything/
 .venv/
+state.db

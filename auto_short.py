@@ -56,6 +56,10 @@ from .state_db import db  # SQLite dual-write
 
 SHORT_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/short_positions.json')
 
+# Фаза 6.8: Throttle «сухих» символов — если 3+ цикла подряд без входа → пропускать 30 мин
+DRY_SPELL_THRESHOLD = 3       # после 3 холостых проверок — throttle
+DRY_SPELL_COOLDOWN = 1800     # 30 минут пропуска
+
 # Tier sets are built from config.tiers
 def _get_tier_ab(cfg):
     """Build TIER_AB set from config tiers A + B."""
@@ -317,6 +321,7 @@ def check_auto_short(positions):
         return []
 
     actions = []
+    processed_syms = set()  # Фаза 6.8: трекинг для dry spell
 
     # Получаем топ-80 тикеров
     try:
@@ -348,7 +353,19 @@ def check_auto_short(positions):
         if sym in state and now - state[sym].get('last_short_ts', 0) < COOLDOWN:
             continue
 
+        # Фаза 6.8: Throttle dry spells — пропускаем «сухие» символы
+        if sym in state:
+            dry_count = state[sym].get('dry_spell_count', 0)
+            dry_since = state[sym].get('dry_spell_since', 0)
+            if dry_count >= DRY_SPELL_THRESHOLD and now - dry_since < DRY_SPELL_COOLDOWN:
+                continue
+            if dry_since and now - dry_since >= DRY_SPELL_COOLDOWN:
+                state[sym]['dry_spell_count'] = 0
+                state[sym]['dry_spell_since'] = 0
+
         is_junk = sym not in TIER_AB  # Tier C/D = шлак
+
+        # Проверка BB
 
         # Проверка BB
         try:
@@ -364,6 +381,8 @@ def check_auto_short(positions):
         except Exception as e:
             log_event(f'⚠️ auto_short BB {sym}: {e}')
             continue
+
+        processed_syms.add(sym)  # Фаза 6.8: символ прошёл BB — считаем проверенным
 
         # Early exit: если time budget исчерпан — не тратим время на threshold-проверки
         if time.time() > deadline:
@@ -427,7 +446,7 @@ def check_auto_short(positions):
                 if not isinstance(all_orders, dict):
                     log_event(f'⚠️ Auto-SHORT {sym}: fetch_orders вернул не dict ({type(all_orders).__name__}), пропуск')
                     continue
-                pending_sells = [o for o in all_orders if o.get('symbol') == sym
+                pending_sells = [o for o in all_orders.values() if o.get('symbol') == sym
                                  and o.get('side') == 'Sell' 
                                  and o.get('orderStatus') == 'New'
                                  and o.get('orderType') == 'Limit']
@@ -562,6 +581,23 @@ def check_auto_short(positions):
 
         except Exception as e:
             log_event(f'⚠️ Auto-SHORT {sym}: исключение — {e}')
+
+    # Фаза 6.8: Dry spell tracking — символы без входов получают штраф
+    action_syms = set(actions)
+    for sym in processed_syms:
+        if sym not in state:
+            state[sym] = {}
+        if sym in action_syms:
+            # Был вход → сброс dry spell
+            state[sym]['dry_spell_count'] = 0
+            state[sym]['dry_spell_since'] = 0
+        else:
+            # Нет входа → инкремент dry spell
+            state[sym]['dry_spell_count'] = state[sym].get('dry_spell_count', 0) + 1
+            if not state[sym].get('dry_spell_since'):
+                state[sym]['dry_spell_since'] = now
+    if processed_syms:
+        _save_state(state)
 
     return actions
 

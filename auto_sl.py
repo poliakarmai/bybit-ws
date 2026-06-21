@@ -205,6 +205,10 @@ def check_breakeven_sl():
         if is_manual_position(sym):
             continue
 
+        # Памп-монеты — пропускаем BE-SL (слишком волатильны, убьёт позицию при отскоке)
+        if sym in pump_state:
+            continue
+
         entry = p['entry']
         mark = p['mark']
         side = p['side']

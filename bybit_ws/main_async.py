@@ -30,6 +30,7 @@ HEALTH_FILE = DATA_DIR / "health.txt"
 from . import EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT
 from .config import Config
 from .alerts import log_event, add_alert, send_telegram_alert
+from .push_notifier import send_critical_alert, send_high_alert
 from .snapshot import save_json, load_json
 
 # Async API
@@ -225,22 +226,26 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
         pump_msgs, _ = await run_in_thread(check_pumps, positions)
         for msg in (pump_msgs or []):
             add_alert('STOP', msg)
+            send_critical_alert(msg)  # Push: 🚨 на телефон
 
         weekly_msgs, _ = await run_in_thread(check_weekly_pumps)
         for msg in (weekly_msgs or []):
             add_alert('STOP', msg)
+            send_critical_alert(msg)  # Push: 🚨 на телефон
 
     # DCA
     if not rpc_state.get("paused"):
         dca_msgs = await run_in_thread(check_dca)
         for msg in (dca_msgs[0] or []):
             add_alert('ENTRY', msg)
+            send_high_alert(msg, level='ENTRY')  # Push: ⚡ на телефон
 
     # Partial TP (каждые 4 цикла)
     if cycle_count % 4 == 0:
         ptp_msgs = await run_in_thread(check_partial_tp)
         for msg in (ptp_msgs[0] or []):
             add_alert('TP', msg)
+            send_high_alert(msg, level='TP')  # Push: ⚡ на телефон
 
     # Ждём параллельные задачи
     if tasks:

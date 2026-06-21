@@ -179,7 +179,7 @@ def send_telegram_alert(msg, level="INFO"):
         return
     try:
         r = safe_run(
-            [HERMES_BIN, 'send', '--to', 'telegram:Poliakarm', msg],
+            [HERMES_BIN, 'send', '--to', 'telegram:-1004317245467:42', msg],
             timeout=15
         )
         if r.returncode != 0:
