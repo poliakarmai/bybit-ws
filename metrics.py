@@ -14,7 +14,7 @@ def record_alert(level, is_false=False):
         metrics = json.load(f)
     today = _today_key()
     if today not in metrics:
-        metrics = {today: {'tp_real': 0, 'tp_false': 0, 'sl_real': 0, 'sl_false': 0,
+        metrics[today] = { {'tp_real': 0, 'tp_false': 0, 'sl_real': 0, 'sl_false': 0,
                            'entry': 0, 'auto_entry_placed': 0, 'auto_entry_filled': 0,
                            'auto_entry_pnl': 0.0}}
     m = metrics[today]
