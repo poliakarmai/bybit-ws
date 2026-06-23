@@ -671,3 +671,21 @@ async def fetch_positions_and_orders():
     positions = await fetch_positions_async()
     orders = await fetch_orders_async()
     return positions, orders
+
+
+# ═══════════════════════════════════════════
+# Phase 6.5: Unified Exchange Adapter Bridge
+# ═══════════════════════════════════════════
+
+def get_bb_data_unified(symbol: str, interval: str = 'D', period: int = 20, std: float = 2.0) -> dict:
+    """Get BB data through unified adapter (supports Bybit/Binance/OKX).
+    Falls back to native Bybit get_bb_data if adapter unavailable.
+    """
+    try:
+        from .exchange_adapter import exchange as get_exchange
+        ex = get_exchange()
+        if ex.name != 'bybit':
+            return ex.get_bb(symbol, interval, period, std)
+    except Exception:
+        pass
+    return get_bb_data(symbol, interval)
