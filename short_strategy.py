@@ -263,6 +263,80 @@ def _load_short_training_data() -> list[dict]:
         return []
 
 
+def _load_long_training_data() -> list[dict]:
+    """Load LONG trade history from state.db for ML training."""
+    try:
+        import sqlite3
+        db = sqlite3.connect(os.path.expanduser('~/.local/share/bybit-ws/state.db'))
+        rows = db.execute("""
+            SELECT symbol, entry_price, exit_price, side, pnl, entry_at
+            FROM trade_history WHERE side='Buy'
+            ORDER BY closed_at DESC LIMIT 200
+        """).fetchall()
+        if not rows:
+            return []
+        return [
+            {'symbol': r[0], 'entry': r[1], 'exit': r[2],
+             'entry_ts': r[5], 'winner': (r[4] or 0) > 0}
+            for r in rows
+        ]
+    except Exception as e:
+        return []
+
+
+def train_long_ml_gate(training_data: list[dict] = None) -> dict:
+    """Train dedicated RandomForest for LONG signals.
+    
+    Features (LONG-specific):
+    - bb_pct (low = good for LONG)
+    - down_days (sequential red candles = oversold)
+    - volume_ratio (volume confirming the move)
+    - funding_rate (positive = longs get paid)
+    - change_24h (negative change = discount)
+    - score (auto_entry score)
+    """
+    try:
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.model_selection import cross_val_score
+        import numpy as np
+    except ImportError:
+        return {'error': 'scikit-learn not installed'}
+    
+    if not training_data:
+        training_data = _load_long_training_data()
+    
+    if len(training_data) < 20:
+        return {'error': f'Need 20+ samples, got {len(training_data)}'}
+    
+    X, y = [], []
+    for d in training_data:
+        features = [
+            d.get('bb_pct', 50),
+            d.get('down_days', 0),
+            d.get('volume_ratio', 1.0),
+            d.get('funding', 0),
+            d.get('change_24h', 0),
+            d.get('score', 0),
+        ]
+        X.append(features)
+        y.append(1 if d.get('winner', False) else 0)
+    
+    X, y = np.array(X), np.array(y)
+    model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+    scores = cross_val_score(model, X, y, cv=3, scoring='f1')
+    model.fit(X, y)
+    
+    return {
+        'f1_mean': float(scores.mean()),
+        'f1_std': float(scores.std()),
+        'feature_importance': dict(zip(
+            ['bb_pct', 'down_days', 'volume_ratio', 'funding', 'change_24h', 'score'],
+            model.feature_importances_
+        )),
+        'n_samples': len(training_data),
+    }
+
+
 # ── 7.4: SHORT x10 mode ──
 
 def x10_short_params(signal: dict, entry_price: float) -> dict:
@@ -407,8 +481,11 @@ if __name__ == '__main__':
             print(f"  {c['symbol']}: score={c['score']}/60 BB={c['bb_pct']}% chg={c['change_24h']}%")
         print(f"  ... {len(candidates)} total candidates")
     
-    elif '--train-ml' in sys.argv:
-        result = train_short_ml_gate()
+    elif '--train-ml' in sys.argv or '--train-ml-long' in sys.argv:
+        side = 'long' if '--train-ml-long' in sys.argv else 'short'
+        fn = train_long_ml_gate if side == 'long' else train_short_ml_gate
+        result = fn()
+        result['side'] = side
         print(json.dumps(result, indent=2))
     
     elif '--backtest' in sys.argv:

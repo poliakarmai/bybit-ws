@@ -446,12 +446,13 @@ class AsyncStateDB:
         if date is None:
             date = datetime.now().strftime('%Y-%m-%d')
         db = await self._ensure_db()
+        # Агрегация
         rows = await db.execute('''
             SELECT side, COUNT(*) as count, SUM(pnl) as total_pnl
             FROM trade_history WHERE date(closed_at, 'unixepoch') = ?
             GROUP BY side
         ''', (date,))
-        result = {'tp_real': 0, 'sl_real': 0, 'entry': 0}
+        result = {'tp_real': 0, 'sl_real': 0, 'entry': 0, 'tp_list': [], 'sl_list': []}
         for r in await rows.fetchall():
             side, count, pnl = r
             if side == 'Buy':
@@ -460,6 +461,22 @@ class AsyncStateDB:
                 result['tp_real'] += count
             else:
                 result['sl_real'] += count
+        # Детализация: какие монеты TP / SL
+        trades = await db.execute('''
+            SELECT symbol, pnl FROM trade_history
+            WHERE date(closed_at, 'unixepoch') = ?
+            ORDER BY closed_at DESC
+        ''', (date,))
+        tp_list = []
+        sl_list = []
+        async for t in trades:
+            symbol, pnl = t
+            if pnl > 0:
+                tp_list.append({'symbol': symbol, 'pnl': round(pnl, 4)})
+            else:
+                sl_list.append({'symbol': symbol, 'pnl': round(pnl, 4)})
+        result['tp_list'] = tp_list
+        result['sl_list'] = sl_list
         return result
 
     async def should_alert(self, key, cooldown_sec):
