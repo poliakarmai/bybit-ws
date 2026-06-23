@@ -57,7 +57,7 @@ _DEFAULT_STRATEGY_SHORT = {
     'leverage': 3,
     'margin': 10,
     'entry_offset': 0.02,
-    'sl_tier_ab': 0.05,
+    'sl_tier_ab': 0.10,   # +10% SL для SHORT Tier A/B (23.06.2026: +5% → +10%)
     'sl_tier_cd': 0.07,
     'bb_threshold': 85,
     'max_positions': 3,

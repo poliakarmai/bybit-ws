@@ -142,14 +142,31 @@ def check_and_fix_sl():
             except Exception as e:
                 log_event(f'⚠️ auto_sl: ошибка чтения pumps.json для {sym}: {e}')
 
-            # Tier-based SL
+            # Tier-based SL с задержкой 20 мин (23.06.2026)
             is_junk = sym not in tier_ab and sym not in one_way
+            
+            # Проверка задержки 20 мин для Tier A/B SHORT
+            if not is_junk:
+                try:
+                    state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'short_positions.json')
+                    with open(state_file) as f:
+                        short_state = json.loads(f.read())
+                    entry_ts = short_state.get(sym, {}).get('last_short_ts', 0)
+                    import time
+                    age_seconds = time.time() - entry_ts
+                    if age_seconds < 1200:  # 20 минут = 1200 сек
+                        log_event(f'⏳ SHORT {sym}: SL отложен ({age_seconds:.0f}с из 1200с до активации)')
+                        continue
+                except Exception as e:
+                    log_event(f'⚠️ auto_sl: задержка {sym}: {e}')
+                    # При ошибке — ставим SL без задержки (безопасный fallback)
+
             if is_junk:
                 sl_price = entry * 1.07
                 sl_desc = '+7% от входа (Tier C/D)'
             else:
-                sl_price = entry * 1.05
-                sl_desc = '+5% от входа (Tier A/B)'
+                sl_price = entry * 1.10
+                sl_desc = '+10% от входа (Tier A/B, задержка 20мин)'
 
         sl_price = round(sl_price, 4)
         # Проверка что SL на правильной стороне

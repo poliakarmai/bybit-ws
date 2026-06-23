@@ -548,32 +548,41 @@ def check_auto_short(positions):
                 log_event(msg)
 
             else:
-                # ── Tier A/B: обычный режим с SL + TP ──
+                # ── Tier A/B: SL отложен на 20 мин (23.06.2026), TP сразу ──
                 sl_pct = SL_PCT_JUNK if sym not in TIER_AB else SL_PCT
                 sl_price = _round_to_tick(price * (1 + sl_pct), sym)
 
-                # SL + TP через trading-stop (единым вызовом)
+                # TP ставим сразу, SL — через trading-stop без stopLoss
                 ts_body = {
                     'category': 'linear',
                     'symbol': sym,
                     'positionIdx': 0,
-                    'stopLoss': str(sl_price),
-                    'slTriggerBy': 'MarkPrice',
                 }
                 if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
                     ts_body['takeProfit'] = str(tp_price)
                     ts_body['tpTriggerBy'] = 'MarkPrice'
+                
+                # SL НЕ ставим при входе — auto_sl поставит через 20 мин
+                # Но если шлак (is_junk) — ставим SL сразу
+                if sym not in TIER_AB:
+                    ts_body['stopLoss'] = str(sl_price)
+                    ts_body['slTriggerBy'] = 'MarkPrice'
+                    state_entry['no_sl'] = False
+                else:
+                    state_entry['no_sl'] = True
+                    state_entry['sl_pending'] = sl_price  # будет установлен auto_sl через 20 мин
+                
                 bybit('POST', '/v5/position/trading-stop', ts_body)
 
                 state_entry['sl'] = sl_price
                 state_entry['tp'] = tp_price
-                state_entry['no_sl'] = False
 
                 state[sym] = state_entry
                 _save_state(state)
 
+                sl_note = '⏳SL-20min' if state_entry.get('no_sl') else f'SL ${sl_price:.4f} (+{sl_pct*100:.0f}%)'
                 msg = (f'🔴 SHORT {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
-                       f'score={short_score} BB={bb_pct:.0f}% | SL ${sl_price:.4f} (+{sl_pct*100:.0f}%) | '
+                       f'score={short_score} BB={bb_pct:.0f}% | {sl_note} | '
                        f'TP ${tp_price:.4f}{mtf_bonus}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
