@@ -248,16 +248,18 @@ def _load_short_training_data() -> list[dict]:
         import sqlite3
         db = sqlite3.connect(os.path.expanduser('~/.local/share/bybit-ws/state.db'))
         rows = db.execute("""
-            SELECT symbol, entry_price, exit_price, side, pnl
-            FROM trades WHERE side='Sell'
-            ORDER BY exit_time DESC LIMIT 200
+            SELECT symbol, entry_price, exit_price, side, pnl, entry_at
+            FROM trade_history WHERE side='Sell'
+            ORDER BY closed_at DESC LIMIT 200
         """).fetchall()
+        if not rows:
+            return []
         return [
-            {'symbol': r[0], 'entry': r[1], 'exit': r[2], 
-             'winner': (r[4] or 0) > 0}
+            {'symbol': r[0], 'entry': r[1], 'exit': r[2],
+             'entry_ts': r[5], 'winner': (r[4] or 0) > 0}
             for r in rows
         ]
-    except Exception:
+    except Exception as e:
         return []
 
 
