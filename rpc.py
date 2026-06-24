@@ -516,6 +516,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_enter(body)
         elif path == "/close":
             self._handle_close(body)
+        elif path == "/move_sl":
+            self._handle_move_sl(body)
         elif path == "/reload-config":
             self._handle_reload_config()
         elif path == "/pause":
@@ -545,7 +547,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 "/rpc/signals", "/rpc/config", "/rpc/paths", "/rpc/ab_test_report", "/rpc/ab_status",
                 "/rpc/risk_full", "/rpc/circuit_breaker",
                 "/health", "/positions", "/orders", "/metrics", "/risk", "/signals", "/config",
-                "POST /scan", "POST /enter", "POST /close", "POST /reset-token",
+                "POST /scan", "POST /enter", "POST /close", "POST /move_sl", "POST /reset-token",
                 "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
             ]
         })
@@ -1384,6 +1386,52 @@ class RPCHandler(BaseHTTPRequestHandler):
             'close_side': close_side,
             'order_id': order_id,
         })
+
+    def _handle_move_sl(self, body: dict):
+        """POST /move_sl — передвинуть стоп-лосс."""
+        symbol = body.get('symbol', '').strip().upper()
+        if not symbol or not symbol.endswith('USDT'):
+            return _error(self, 'Invalid symbol', 'symbol must be like XRPUSDT', 400)
+
+        new_sl = body.get('stop_loss')
+        if new_sl is None:
+            return _error(self, 'Invalid stop_loss', 'stop_loss is required', 400)
+        try:
+            new_sl_float = float(new_sl)
+        except (ValueError, TypeError):
+            return _error(self, 'Invalid stop_loss', 'Must be a valid number', 400)
+        if new_sl_float <= 0:
+            return _error(self, 'Invalid stop_loss', 'Must be > 0', 400)
+        new_sl = new_sl_float  # дальше используем float
+
+        pos = _get_position(symbol)
+        if not pos:
+            return _error(self, 'No position',
+                          f'No open position for {symbol}', 404)
+
+        old_sl = pos.get('stopLoss', 'none')
+        result = _api_call('POST', '/v5/position/trading-stop', {
+            'category': 'linear',
+            'symbol': symbol,
+            'positionIdx': pos.get('positionIdx', 0),
+            'stopLoss': str(new_sl),
+            'slTriggerBy': 'MarkPrice',
+            'tpslMode': 'Full',
+        })
+
+        if result is None:
+            return _error(self, 'SL update failed', 'API call returned no response', 502)
+        if result.get('retCode') == 0:
+            add_alert('SL', f'{symbol}: SL {old_sl} → {new_sl}')
+            return _json_response(self, {
+                'status': 'ok',
+                'symbol': symbol,
+                'old_sl': old_sl,
+                'new_sl': new_sl,
+            })
+        else:
+            return _error(self, 'SL update failed',
+                          result.get('retMsg', 'Unknown'), 400)
 
     def _handle_reload_config(self):
         """POST /reload-config — перечитать config.yaml без рестарта."""
