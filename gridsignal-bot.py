@@ -46,6 +46,8 @@ PAYMENTS_DB = os.path.expanduser("~/.local/share/gridsignal-bot/pro_users.db")
 TON_PRICE = 2.0  # TON
 CRYPTOBOT_TOKEN = os.environ.get("CRYPTOBOT_TOKEN", "")
 TON_INVOICES_DB = os.path.expanduser("~/.local/share/gridsignal-bot/ton_invoices.db")
+GRIDSIGNAL_ADMIN_ID = int(os.environ.get("GRIDSIGNAL_ADMIN_ID", "319665243"))
+GRIDSIGNAL_ADMIN_NOTIFY_CHAT = int(os.environ.get("GRIDSIGNAL_ADMIN_NOTIFY_CHAT", "5529208670"))
 
 def _now() -> str:
     """Единый формат даты: SQLite-совместимый (без 'T')."""
@@ -123,16 +125,17 @@ def init_pro_db():
     conn = sqlite3.connect(PAYMENTS_DB)
     conn.execute("""CREATE TABLE IF NOT EXISTS pro_users (
         user_id INTEGER PRIMARY KEY, username TEXT, paid_at TEXT,
-        expires_at TEXT, active INTEGER DEFAULT 1)""")
+        expires_at TEXT, active INTEGER DEFAULT 1, charge_id TEXT)""")
+    conn.execute("ALTER TABLE pro_users ADD COLUMN charge_id TEXT", [])
     conn.commit()
     return conn
 
-def activate_pro(user_id: int, username: str) -> None:
+def activate_pro(user_id: int, username: str, charge_id: str = "") -> None:
     """Активировать Pro-подписку на 30 дней."""
     conn = init_pro_db()
     conn.execute(
-        "INSERT OR REPLACE INTO pro_users (user_id,username,paid_at,expires_at,active) VALUES (?,?,?,?,1)",
-        (user_id, username, _now(), _expires(30)))
+        "INSERT OR REPLACE INTO pro_users (user_id,username,paid_at,expires_at,active,charge_id) VALUES (?,?,?,?,1,?)",
+        (user_id, username, _now(), _expires(30), charge_id))
     conn.commit()
     conn.close()
 
@@ -1083,7 +1086,17 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     if payload != "gridsignal_pro_30d":
         return
 
-    activate_pro(user_id, username)
+    # Idempotency: skip already-processed payments (scout audit fix #3)
+    charge_id = update.message.successful_payment.telegram_payment_charge_id
+    conn = init_pro_db()
+    existing = conn.execute(
+        "SELECT 1 FROM pro_users WHERE user_id=? AND charge_id=?", (user_id, charge_id)
+    ).fetchone()
+    conn.close()
+    if existing:
+        return  # duplicate callback — already processed
+
+    activate_pro(user_id, username, charge_id)
 
     await update.message.reply_text(
         "🎉 **GridSignal Pro активирован!**\n"
@@ -1096,7 +1109,7 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     # Notify admin
     try:
         await context.bot.send_message(
-            chat_id=5529208670,
+            chat_id=GRIDSIGNAL_ADMIN_NOTIFY_CHAT,
             text=f"🎉 Новый GridSignal Pro!\n@{username} ({user_id})\n⭐ {PRO_PRICE_STARS} Stars"
         )
     except Exception:
@@ -1463,8 +1476,17 @@ print(f"{{price}}\\n{{lower}}\\n{{pos}}")
 # ══ #1 Inline ══
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик inline-запросов: @Gridbolbot BTCUSDT"""
+    """Обработчик inline-запросов: @Gridbolbot BTCUSDT — только для Pro."""
     query = update.inline_query.query.strip().upper()
+    user_id = update.effective_user.id
+
+    # Gate: Pro-only (scout audit fix #1)
+    if not is_pro(user_id):
+        await update.inline_query.answer([], cache_time=300,
+            switch_pm_text="🔒 Pro only",
+            switch_pm_parameter="pro_required")
+        return
+
     if not query:
         await update.inline_query.answer([], cache_time=10)
         return
@@ -1839,7 +1861,7 @@ async def cmd_horoscope(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    is_admin = user_id == 319665243
+    is_admin = user_id == GRIDSIGNAL_ADMIN_ID
     conn = init_db()
     lang = get_lang(conn, user_id)
 
