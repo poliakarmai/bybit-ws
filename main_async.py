@@ -71,6 +71,8 @@ SHUTDOWN = False
 # Async helpers
 # ═══════════════════════════════════════════════════════════
 
+_TIMEOUT_SENTINEL = object()  # sentinel for timeout detection
+
 async def run_in_thread(fn, *args, timeout=25):
     """Выполнить синхронную функцию в потоке с таймаутом."""
     try:
@@ -81,7 +83,9 @@ async def run_in_thread(fn, *args, timeout=25):
         )
         return result, None
     except asyncio.TimeoutError:
-        return [], fn.__name__ if hasattr(fn, '__name__') else 'unknown'
+        fn_name = fn.__name__ if hasattr(fn, '__name__') else 'unknown'
+        log_event(f'⚠️ TIMEOUT {fn_name} after {timeout}s — result discarded')
+        return _TIMEOUT_SENTINEL, fn_name
     except Exception as e:
         return [], str(e)
 
