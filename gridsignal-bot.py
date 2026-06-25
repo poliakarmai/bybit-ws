@@ -30,18 +30,17 @@ def _load_rpc_token():
         row = db.execute("SELECT value FROM kv_store WHERE key='rpc_auth_token'").fetchone()
         if row:
             RPC_TOKEN = row[0]
-            print(f"[GridSignal] RPC token loaded")
+            print("[GridSignal] ✅ RPC token loaded — using direct RPC (fast)")
         else:
-            print("[GridSignal] WARNING: RPC token not found in state.db")
+            print("[GridSignal] ⚠️ RPC token NOT FOUND in state.db — scans will fall back to CLI (slow)")
     except Exception as e:
-        print(f"[GridSignal] RPC token load error: {e}")
+        print(f"[GridSignal] ❌ RPC token load FAILED: {e} — scans will use CLI fallback (slow, may break)")
 
 
 BOT_VERSION = "5.0"
 
 # Pro subscription
 PRO_PRICE_STARS = 300  # ~400 ₽
-PRO_CHANNEL_ID = os.environ.get("GRIDSIGNAL_PRO_CHANNEL", "")
 PAYMENTS_DB = os.path.expanduser("~/.local/share/gridsignal-bot/pro_users.db")
 TON_PRICE = 2.0  # TON
 CRYPTOBOT_TOKEN = os.environ.get("CRYPTOBOT_TOKEN", "")
@@ -60,6 +59,7 @@ def _expires(days: int = 30) -> str:
 
 def init_ton_db():
     conn = sqlite3.connect(TON_INVOICES_DB)
+    conn.execute('PRAGMA journal_mode=WAL')
     conn.execute("""CREATE TABLE IF NOT EXISTS ton_invoices (
         invoice_id INTEGER PRIMARY KEY, user_id INTEGER,
         status TEXT DEFAULT 'pending', created_at TEXT)""")
@@ -122,7 +122,8 @@ async def check_ton_payment(invoice_id: int) -> bool:
     return False
 
 def init_pro_db():
-    conn = sqlite3.connect(PAYMENTS_DB)
+    conn = sqlite3.connect(PAYMENTS_DB, check_same_thread=False)
+    conn.execute('PRAGMA journal_mode=WAL')
     conn.execute("""CREATE TABLE IF NOT EXISTS pro_users (
         user_id INTEGER PRIMARY KEY, username TEXT, paid_at TEXT,
         expires_at TEXT, active INTEGER DEFAULT 1, charge_id TEXT)""")
@@ -160,6 +161,7 @@ def _escape_mdv2(text: str) -> str:
 SCAN_COOLDOWN = 60
 MAX_SCANS_PER_DAY = 2
 MAX_ALERTS_PER_USER = 5
+_ton_cooldown = {}  # user_id → last check timestamp (rate limit)
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
@@ -423,7 +425,7 @@ T = {
             f"🌐 `/lang ru` — Русская версия\n"
             f"📊 `/stats` — статистика и винрейт\n"
             f"📐 `/rules` — стратегия\n\n"
-            "⚡ Бесплатно: до 3 сканов в сутки.\n\n"
+            "⚡ Бесплатно: до 2 сканов в сутки.\n\n"
             "💰 **Реферальная ссылка Bybit:**\n"
             "`https://www.bybit.com/invite?ref=DQ0EAQ`\n\n"
             "⚠️ **Дисклеймер:** Бот даёт торговые сигналы на основе Bollinger Bands. Это не финансовая рекомендация. "
@@ -474,7 +476,7 @@ T = {
     'en': {
         'lang_set': '🇬🇧 Language: **English**',
         'start': (
-            "🚀 **GridSignal Bot v4.0**\n\n"
+            f"🚀 **GridSignal Bot v{BOT_VERSION}**\n\n"
             "Bollinger Grid signals: Bollinger Bands + 8-metric scoring + RSI.\n\n"
             "📊 `/scan` — top-5 LONG signals\n"
             "🔴 `/scan short` — top-5 SHORT signals\n"
@@ -1156,6 +1158,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_status(update, context)
     elif data.startswith("check_ton_"):
         invoice_id = int(data.split("_")[-1])
+
+        # Rate limit: не чаще 10 сек между проверками TON на пользователя
+        now_ts = time.time()
+        last = _ton_cooldown.get(query.from_user.id, 0)
+        if now_ts - last < 10:
+            await query.answer("⏳ Подождите 10 сек между проверками", show_alert=False)
+            return
+        _ton_cooldown[query.from_user.id] = now_ts
+
         await query.message.reply_text("⏳ Проверяю платёж...")
 
         # Проверить что инвойс принадлежит этому пользователю
@@ -2056,7 +2067,12 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t('chart_usage', lang))
         return
 
-    symbol = args[0].upper()
+    symbol = args[0].upper().strip()
+    # Validate: only alphanumeric, 4-12 chars (USDT suffix optional)
+    symbol_clean = symbol.replace('USDT', '') if symbol.endswith('USDT') else symbol
+    if not re.match(r'^[A-Z0-9]{2,12}$', symbol_clean):
+        await update.message.reply_text(f'❌ Invalid symbol: {symbol}')
+        return
     if not symbol.endswith('USDT'):
         symbol += 'USDT'
 
@@ -2160,7 +2176,11 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn2.close()
 
     except Exception as e:
-        await status_msg.edit_text(t('chart_error', lang, str(e)[:200]))
+        err_msg = str(e)
+        # Sanitize: убираем системные пути из сообщений об ошибках
+        err_msg = re.sub(r'/home/\S+', '[path]', err_msg)
+        err_msg = re.sub(r'/tmp/\S+', '[tmp]', err_msg)
+        await status_msg.edit_text(t('chart_error', lang, err_msg[:200]))
 
 
 # ══ Обработчик инлайн-кнопок (язык) ══
