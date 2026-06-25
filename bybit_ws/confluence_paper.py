@@ -12,11 +12,10 @@ Confluence Paper Tracker — Фаза 4.3.5
 """
 
 import json
-import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 TRACKER_FILE = DATA_DIR / "confluence_tracker.json"

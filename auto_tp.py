@@ -1,8 +1,7 @@
 """Auto-TP с retry с exponential backoff."""
-import time, math
-from datetime import datetime
-from . import TP_FAIL_COUNT, TP_FAIL_BACKOFF, TP_FAIL_DELAYS, TP_MAX_FAILS, TP_PERM_SKIP, TP_PERM_SKIP_SIZES, TP_SKIP_FILE, DATA_DIR
-from .api import bybit, get_bb_data
+import time
+from . import TP_FAIL_COUNT, TP_FAIL_BACKOFF, TP_FAIL_DELAYS, TP_MAX_FAILS, TP_PERM_SKIP, TP_PERM_SKIP_SIZES, TP_SKIP_FILE
+from .api import get_bb_data
 from .alerts import log_event
 from .manual_positions import is_manual_position
 from .file_utils import safe_json_write

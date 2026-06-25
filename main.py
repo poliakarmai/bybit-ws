@@ -2,8 +2,8 @@
 # Этот файл оставлен для совместимости и будет удалён в следующей версии
 import sys; sys.exit('Use main_async.py — синхронный main.py удалён. См. bybit-ws-full.md раздел 6.1')
 from . import (DATA_DIR, EVENTS_LOG, ALERTS, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
-               ORDERS_METADATA, BYBIT_CLI, HERMES_BIN, WATCHDOG_LAST, SHUTDOWN_REQUESTED,
-               COVERAGE_CHECK_INTERVAL, TRAIL_CHECK_INTERVAL, METRICS_FILE)
+               ORDERS_METADATA, BYBIT_CLI, SHUTDOWN_REQUESTED,
+               COVERAGE_CHECK_INTERVAL, TRAIL_CHECK_INTERVAL)
 from .config import Config
 
 # Health-check: файл с timestamp последнего успешного цикла
@@ -36,7 +36,7 @@ from .alerts import log_event, add_alert, get_alerts, send_telegram_alert, _is_d
 from .auto_tp import auto_take_profit, apply_auto_tp
 from .trailing_sl import trailing_sl, trailing_sl_x10, apply_trailing_sl
 from .junk_trail import trailing_junk_tp
-from .funding_rotation import check_funding_rotation, execute_rotation
+from .funding_rotation import check_funding_rotation
 from .overbought import check_overbought, rotate_watchlist
 from .pump_detect import check_pumps, check_weekly_pumps
 from .file_utils import safe_json_write, locked_open
@@ -67,8 +67,8 @@ from .bb_scalp import check_scalp_signals, execute_scalp
 from .mean_revert import check_mean_revert, execute_mean_revert
 from .funding_entry import check_funding_signals, execute_funding_entry
 from .atr_sizer import check_position_risk, validate_entry
-from .x10_limits import record_x10_trade, x10_entry_allowed, get_x10_stats, track_x10_entry, get_x10_strategy, clear_x10_position
-from .manual_positions import is_manual_position, mark_manual_position
+from .x10_limits import record_x10_trade, x10_entry_allowed, track_x10_entry, get_x10_strategy, clear_x10_position
+from .manual_positions import is_manual_position
 from .partial_tp import check_partial_tp  # Phase 3
 
 # Дедупликация STOP-алертов: кулдаун 5 минут на символ
@@ -1006,7 +1006,6 @@ def main_loop():
 
 def handle_sigterm(signum, frame):
     global SHUTDOWN_REQUESTED
-    from . import SHUTDOWN_REQUESTED as s
     log_event('Получен SIGTERM — graceful shutdown')
     import bybit_ws
     bybit_ws.SHUTDOWN_REQUESTED = True
@@ -1014,7 +1013,7 @@ def handle_sigterm(signum, frame):
 
     # Проверить все позиции имеют SL
     try:
-        from .auto_sl import check_and_fix_sl, check_breakeven_sl
+        from .auto_sl import check_and_fix_sl
         sl_alerts = check_and_fix_sl()
         for msg in sl_alerts:
             log_event(f'  Shutdown SL check: {msg}')

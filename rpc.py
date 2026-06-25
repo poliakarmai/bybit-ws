@@ -41,7 +41,6 @@ from statistics import mean, stdev
 import urllib.request
 
 from .api import bybit as _bybit_api
-from .api import fetch_positions as _fetch_positions
 from .state_db import db as _db
 from .alerts import add_alert
 
@@ -147,6 +146,45 @@ def _save_bb_cache():
         _BB_CACHE_FILE.write_text(json.dumps(_BB_CACHE))
     except Exception:
         pass
+
+
+def verify_state_consistency() -> dict:
+    """C3 fix: проверка консистентности состояния при старте.
+    Возвращает {'ok': True} или {'ok': False, 'issues': [...]}."""
+    issues = []
+
+    # 1. SQLite state.db доступен и не повреждён
+    try:
+        conn = _db.conn
+        conn.execute("SELECT COUNT(*) FROM kv_store").fetchone()
+        wal_path = str(DATA_DIR / "state.db-wal")
+        if os.path.exists(wal_path) and os.path.getsize(wal_path) > 100 * 1024 * 1024:
+            issues.append("WAL file > 100MB — run PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception as e:
+        issues.append(f"SQLite state.db error: {e}")
+
+    # 2. BB-кеш JSON валиден
+    try:
+        if _BB_CACHE_FILE.exists():
+            data = json.loads(_BB_CACHE_FILE.read_text())
+            if not isinstance(data, dict):
+                issues.append("bb_cache.json corrupted (not dict) — rebuilding")
+                _BB_CACHE_FILE.unlink(missing_ok=True)
+    except (json.JSONDecodeError, OSError) as e:
+        issues.append(f"bb_cache.json corrupted ({e}) — rebuilding")
+        _BB_CACHE_FILE.unlink(missing_ok=True)
+
+    # 3. Нет расхождения между rpc_state и SQLite
+    try:
+        conn = _db.conn
+        db_started = conn.execute("SELECT value FROM kv_store WHERE key='started_at'").fetchone()
+        if db_started and abs(float(db_started[0]) - rpc_state["started_at"]) > 3600:
+            issues.append("rpc_state.started_at diverged from SQLite — resetting")
+            rpc_state["started_at"] = float(db_started[0])
+    except Exception as e:
+        issues.append(f"State divergence check failed: {e}")
+
+    return {"ok": len(issues) == 0, "issues": issues}
 
 
 def _get_bb_for_symbol(symbol: str, interval: str = 'D') -> dict | None:

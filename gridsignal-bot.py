@@ -7,7 +7,7 @@ v4.0: SHORT-сигналы, Multi-TF (D/5/3/W/M), RSI(14), батчевый chec
 Бесплатная версия: до 2 /scan в сутки на пользователя.
 """
 
-import os, sys, json, time, asyncio, re, sqlite3, subprocess, threading, urllib.parse, urllib.request, urllib.error
+import os, sys, json, time, asyncio, re, sqlite3, subprocess, urllib.parse, urllib.request, urllib.error
 from datetime import datetime, timezone
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler
@@ -1594,7 +1594,7 @@ async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Индекс страха на основе BB позиций топ-10 монет."""
-    import random, subprocess, json, re
+    import subprocess, json, re
 
     await update.message.reply_text("😱 Сканирую настроение рынка...")
     conn_tmp = init_db(); log_event(conn_tmp, update.effective_user.id, 'fear', update); conn_tmp.close()

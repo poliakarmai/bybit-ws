@@ -1,6 +1,5 @@
 """Проверки здоровья: ликвидация, squeeze, funding, просадка, корреляция."""
-import json, math, os, time
-from datetime import datetime
+import os, time
 from . import BYBIT_CLI, DATA_DIR, DAILY_DRAWDOWN_LIMIT, DAILY_START_EQUITY
 from .alerts import log_event  # для except-логирования
 from . import safe_run

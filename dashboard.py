@@ -10,7 +10,6 @@ v2.7: + секция использования маржи (из positions.json)
 
 import json
 import os
-import re
 import sys
 
 from datetime import datetime

@@ -25,12 +25,11 @@ lstm_regime.py — LSTM-классификатор рыночного режим
 import hashlib
 import hmac
 import json
-import math
 import os
 import pickle  # только для обратной совместимости, новые модели через json
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 

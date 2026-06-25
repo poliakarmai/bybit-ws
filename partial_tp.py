@@ -14,7 +14,6 @@ Phase 3: Partial TP — динамический сплит тейк-профи�
 """
 
 import json
-import math
 import os
 import sys
 import time

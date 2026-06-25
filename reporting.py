@@ -2,7 +2,7 @@
 import os
 from . import safe_run
 from datetime import datetime, timedelta
-from . import DATA_DIR, BYBIT_CLI, HERMES_BIN, COVERAGE_CHECK_INTERVAL
+from . import DATA_DIR, BYBIT_CLI
 from .snapshot import load_json, save_json
 from .alerts import log_event, send_telegram_alert
 from .manual_positions import is_manual_position
@@ -91,7 +91,6 @@ def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref='', strategy=
         f.write(line + '\n')
 
     # JSONL для машиночитаемого доступа (дашборд, RPC)
-    import json as _json
     trade_record = {
         'date': now_iso,
         'symbol': sym,

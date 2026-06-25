@@ -20,15 +20,12 @@ Feature flag: BYBIT_AB_ENABLED (env, default 0).
 SQLite таблица: ab_results (в state.db)
 """
 
-import asyncio
 import hashlib
 import math
 import os
 import random
 import sqlite3
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Optional
 
 # ── Пути ─────────────────────────────────────────────────────

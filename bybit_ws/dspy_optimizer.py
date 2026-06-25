@@ -249,7 +249,6 @@ def train_dspy(
     Returns:
         Оптимизированный модуль или None при ошибке.
     """
-    import sqlite3
 
     try:
         log_event('🚀 DSPy: загрузка trade_history...')

@@ -1,7 +1,7 @@
 """Trailing SL для разогнанных позиций."""
-import math, os
+import os
 from . import TRAIL_SL_PERCENT
-from .api import bybit, get_bb_data, place_stop_loss
+from .api import get_bb_data, place_stop_loss
 from .alerts import log_event
 from .manual_positions import is_manual_position
 

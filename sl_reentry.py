@@ -4,7 +4,7 @@ v2: режимы simple (DESIGN.md: один re-entry на Lower BB) и ladder (
 Конфигурируемые параметры (фикс код-ревью Manus AI).
 """
 
-import json, math, os, time
+import json, os, time
 from datetime import datetime
 
 from .api import bybit, get_bb_data

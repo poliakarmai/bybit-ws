@@ -1,6 +1,5 @@
 """Авто-снятие просроченных сеток и очистка мусорных ордеров."""
-import os, time
-from . import DATA_DIR, ORDERS_METADATA, GRID_TIMEOUTS
+from . import ORDERS_METADATA, GRID_TIMEOUTS
 from .api import cancel_order
 from .alerts import log_event, add_alert
 from .snapshot import load_json, save_json

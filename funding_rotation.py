@@ -20,7 +20,6 @@ from datetime import datetime
 from .api import bybit
 from .alerts import log_event, add_alert
 from .manual_positions import is_manual_position
-from .position_sizing import margin_for_strategy
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 ROTATION_STATE_FILE = os.path.join(DATA_DIR, 'funding_rotation_state.json')

@@ -16,10 +16,9 @@ import json
 import math
 import os
 import time
-from datetime import datetime
 
 from .api import bybit
-from .alerts import log_event, add_alert, _is_duplicate
+from .alerts import log_event, _is_duplicate
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 ATR_CACHE_FILE = os.path.join(DATA_DIR, 'atr_cache.json')

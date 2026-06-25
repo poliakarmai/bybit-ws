@@ -1,7 +1,6 @@
 """Мониторинг перегретых монет + watchlist-ротация."""
-import json, math, os, time
+import json, os, time
 from . import safe_run
-from datetime import datetime
 from . import BYBIT_CLI, DATA_DIR, SHORT_ALERT_LAST, SHORT_ALERT_COOLDOWN, WATCHLIST_UPDATED_FILE, _save_short_alerts
 from .api import get_bb_data
 

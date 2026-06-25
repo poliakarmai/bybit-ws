@@ -3,7 +3,7 @@
 Уровни, маржа и лимиты — из конфига strategy.dca (фикс код-ревью Manus AI).
 """
 
-import json, math, os, time
+import json, os, time
 from .api import bybit, fetch_positions, get_bb_data
 from .alerts import log_event
 from .config import Config

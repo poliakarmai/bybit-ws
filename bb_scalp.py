@@ -14,10 +14,9 @@ import json
 import math
 import os
 import time
-from datetime import datetime
 
 from .api import bybit
-from .alerts import log_event, add_alert, _is_duplicate
+from .alerts import log_event, _is_duplicate
 from .position_sizing import margin_for_strategy
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')

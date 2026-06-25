@@ -7,7 +7,6 @@ If no config exists, creates config.example.yaml with defaults.
 
 import os
 import re
-import shutil
 from pathlib import Path
 
 import yaml

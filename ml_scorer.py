@@ -14,7 +14,6 @@ import os
 import joblib
 import numpy as np
 import pickle  # только для train() — сохранение, загрузка через joblib+HMAC
-import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -135,7 +134,6 @@ def train():
     """
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import cross_val_score, train_test_split
-    from sklearn.metrics import classification_report
 
     signals = _load_signals()
     if len(signals) < 20:

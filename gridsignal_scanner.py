@@ -11,12 +11,8 @@ v4.0: SHORT-режим, честный Multi-TF (D/5/3), RSI(14) метрика.
 
 import json
 import subprocess
-import sys
 import math
-import re
-from datetime import datetime
 from typing import Optional
-from functools import lru_cache
 
 
 # ═══════════════════════════════════════════════════════════════

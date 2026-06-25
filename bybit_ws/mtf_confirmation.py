@@ -11,7 +11,7 @@ Multi-Timeframe Confirmation (v1.0) — Фаза 4.3.1
 """
 
 import math
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, List, Tuple
 
 from .api import bybit
 

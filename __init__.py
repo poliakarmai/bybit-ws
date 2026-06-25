@@ -24,7 +24,6 @@ Bybit WS Monitor v3.10.1 — модульный монитор позиций и
 """
 
 import os
-import sys
 
 HOME = os.path.expanduser('~')
 DATA_DIR = os.path.join(HOME, '.local', 'share', 'bybit-ws')

@@ -10,11 +10,10 @@
 """
 
 import json
-import math
 import os
 import time
 
-from .api import bybit, cancel_order, place_take_profit
+from .api import cancel_order, place_take_profit
 from .alerts import log_event, add_alert
 
 TRAIL_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/junk_trail.json')

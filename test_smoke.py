@@ -4,7 +4,7 @@
 Запуск: cd /home/openclaw && python3 bybit_ws/test_smoke.py
 (требуется symlink bybit_ws → bybit-ws в /home/openclaw)
 """
-import sys, os, json, tempfile
+import sys, os, tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 

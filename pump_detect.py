@@ -15,9 +15,9 @@ import math
 import os
 import time
 
-from . import DATA_DIR, BYBIT_CLI
+from . import DATA_DIR
 from .api import bybit
-from .alerts import log_event, add_alert
+from .alerts import log_event
 from .position_sizing import margin_for_strategy
 from .state_db import db  # SQLite dual-write
 

@@ -6,11 +6,9 @@
     positions = px.fetch_positions()  # возвращает мок-позиции
     px.place_order('BTCUSDT', 'Buy', 'Market', 0.01)  # симулирует ордер
 """
-import json
 import os
 import time
 import sqlite3
-import math
 import random
 from pathlib import Path
 

@@ -14,8 +14,6 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
-from pathlib import Path
 
 BYBIT_CLI = os.path.expanduser("~/.local/bin/bybit")
 
