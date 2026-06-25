@@ -163,12 +163,16 @@ def _send_ntfy(
     ntfy_priority = NTFY_PRIORITY_MAP.get(priority, "default")
     ntfy_tags = tags or NTFY_TAGS_MAP.get(priority, "")
 
+    # Очищаем от не-ASCII (эмодзи в заголовках HTTP ломают httpx)
+    safe_title = (title or "Bybit WS Alert").encode("ascii", errors="ignore").decode("ascii")
+    safe_tags = ntfy_tags.encode("ascii", errors="ignore").decode("ascii") if ntfy_tags else ""
+
     headers = {
-        "Title": title or "Bybit WS Alert",
+        "Title": safe_title,
         "Priority": ntfy_priority,
     }
-    if ntfy_tags:
-        headers["Tags"] = ntfy_tags
+    if safe_tags:
+        headers["Tags"] = safe_tags
 
     url = f"{NTFY_SERVER}/{NTFY_TOPIC}"
 

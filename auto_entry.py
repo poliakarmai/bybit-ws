@@ -315,6 +315,7 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     ml_prob = None
     ml_info_extra = ''
     ab_group = None
+    gate_details = None
     try:
         from .ab_test import assign_group as _assign_group
         ab_group = _assign_group(signal_id)
@@ -356,6 +357,20 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
         log_event(f'⚠️ ml_gate({sym}): {e}')  # модель недоступна → полагаемся на эвристику
 
     if not ml_passed:
+        # Логируем причину блокировки — какой гейт не прошёл
+        reason_parts = []
+        if gate_details:
+            rf_ok = gate_details.get('rf_passed', True)
+            dspy_ok = gate_details.get('dspy_passed', True)
+            if not rf_ok:
+                rf_val = gate_details.get('rf_prob', '?')
+                reason_parts.append(f'RF={rf_val}')
+            if not dspy_ok:
+                dspy_val = gate_details.get('dspy_score', '?')
+                reason_parts.append(f'DSPy={dspy_val}')
+        else:
+            reason_parts.append(f'RF={ml_prob:.2f}' if ml_prob is not None else 'RF=?')
+        log_event(f'⛔ ML Gate BLOCKED {sym}: {", ".join(reason_parts)}')
         return None  # ML gate: не входить
 
     ml_info = f' ML={ml_prob:.2f}' if ml_prob is not None else ''

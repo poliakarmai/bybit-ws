@@ -19,34 +19,6 @@ from typing import Optional, Tuple
 
 _log = logging.getLogger('bybit.risk_manager')
 
-# ── Config singleton (ленивая загрузка, failsafe) ─────────────────────────
-_cfg_instance = None
-
-
-class _FailsafeConfig:
-    """Заглушка Config с дефолтными значениями risk — fallback при ошибке импорта."""
-    @property
-    def risk(self):
-        return {
-            'banned_symbols': [],
-            'max_daily_loss': 50,
-        }
-
-
-def _get_config():
-    """Ленивая загрузка Config. При ошибке — логирует и возвращает _FailsafeConfig."""
-    global _cfg_instance
-    if _cfg_instance is not None:
-        return _cfg_instance
-    try:
-        from .config import Config
-        _cfg_instance = Config()
-    except Exception as e:
-        _log.error(f'risk_manager: Config load failed, using failsafe defaults: {e}')
-        _cfg_instance = _FailsafeConfig()
-    return _cfg_instance
-
-
 # ── Пути ──────────────────────────────────────────────────────────────────
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 RISK_STATE_FILE = DATA_DIR / "risk_manager.json"
@@ -562,10 +534,15 @@ def check(
         return True, ''
 
     # ── 2. Проверка banned_symbols ──
-    cfg = config if config is not None else _get_config()
-    banned = cfg.risk.get('banned_symbols', []) if hasattr(cfg, 'risk') else []
-    if new_symbol in banned:
-        return False, f'{new_symbol} в бан-листе — вход запрещён'
+    try:
+        if config is None:
+            from .config import Config
+            config = Config()
+        banned = config.risk.get('banned_symbols', []) if hasattr(config, 'risk') else []
+        if new_symbol in banned:
+            return False, f'{new_symbol} в бан-листе — вход запрещён'
+    except Exception:
+        pass
 
     # ── 3. Проверка max positions ──
     dyn_max = get_dynamic_max_positions()
@@ -587,8 +564,13 @@ def check(
 
     # ── 5. Проверка daily PnL (лимит) ──
     daily = get_daily_pnl()
-    cfg = config if config is not None else _get_config()
-    max_daily_loss = float(cfg.risk.get('max_daily_loss', 50))
+    try:
+        if config is None:
+            from .config import Config
+            config = Config()
+        max_daily_loss = float(config.risk.get('max_daily_loss', 50))
+    except Exception:
+        max_daily_loss = 50.0
 
     if daily['total_pnl'] <= -max_daily_loss:
         return False, (

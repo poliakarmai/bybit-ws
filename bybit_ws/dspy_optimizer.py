@@ -284,9 +284,25 @@ def train_dspy(
 
     # ── Конфигурация LM ──
     if api_key is None:
-        api_key = os.getenv('OPENAI_API_KEY', 'sk-placeholder')
+        api_key = os.getenv('OPENAI_API_KEY')
     if api_base is None:
-        api_base = os.getenv('OPENAI_BASE_URL', 'http://localhost:1234/v1')
+        api_base = os.getenv('OPENAI_BASE_URL')
+
+    if not api_key or api_key == '***':
+        msg = '⚠️ DSPy: OPENAI_API_KEY не задан — обучение пропущено'
+        try:
+            log_event(msg)
+        except Exception:
+            print(msg, flush=True)
+        return None
+
+    if not api_base:
+        msg = '⚠️ DSPy: OPENAI_BASE_URL не задан — обучение пропущено'
+        try:
+            log_event(msg)
+        except Exception:
+            print(msg, flush=True)
+        return None
 
     try:
         lm = dspy.LM(
