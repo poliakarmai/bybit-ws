@@ -334,7 +334,13 @@ async def async_main_loop():
     # RPC — запускаем в отдельном потоке (как в main.py)
     rpc_thread = None
     try:
-        from .rpc import start_rpc_server, rpc_state
+        from .rpc import start_rpc_server, rpc_state, verify_state_consistency
+        # C3 fix: проверка консистентности состояния перед стартом
+        consistency = verify_state_consistency()
+        if not consistency["ok"]:
+            log_event(f'⚠️ State consistency check: {consistency["issues"]}')
+        else:
+            log_event('✅ State consistency OK')
         rpc_bind = cfg.rpc.bind
         rpc_port = cfg.rpc.port
         rpc_thread = threading.Thread(
