@@ -339,7 +339,7 @@ def _run_x10_cycle(cfg, new_positions, cycle_count, correlation_stop):
             if passed:
                 if execute_scalp(entry):
                     track_x10_entry(entry['symbol'], 'scalp')
-                record_auto_entry(placed=True)
+                record_auto_entry(placed=True, symbol=entry['symbol'])
             else:
                 log_event(f'⏭️ СКАЛЬП {entry["symbol"]}: {reason}')
 
@@ -622,7 +622,7 @@ def main_loop():
                         pnl_pct = (rpnl / (size * entry)) * 100 if size and entry else 0
                         emoji = '🔴' if rpnl < 0 else '🛑'
                         add_alert('STOP', f'{emoji} {sym} SL: ${entry:.6f}→${exit_price:.6f} | {rpnl:+.1f}$ ({pnl_pct:+.1f}%) | {size:.0f}×{lev:.0f}x {side}')
-                        record_alert('SL')
+                        record_alert('SL', symbol=sym)
                         # ── Фаза 4.3.5: запись закрытия в confluence paper ──
                         try:
                             from .confluence_paper import record_close
@@ -650,7 +650,7 @@ def main_loop():
                             rpnl = size * (exit_price - entry)
                         pnl_pct = (rpnl / (size * entry)) * 100 if size and entry else 0
                         add_alert('TP', f'🎯 {sym} TP: ${entry:.6f}→${exit_price:.6f} | +{rpnl:.1f}$ (+{pnl_pct:.1f}%) | {size:.0f}×{lev:.0f}x {side}')
-                        record_alert('TP')
+                        record_alert('TP', symbol=sym)
                         # ── Фаза 4.3.5: запись закрытия в confluence paper ──
                         try:
                             from .confluence_paper import record_close
@@ -680,7 +680,7 @@ def main_loop():
                         continue
                     if change_type == 'TP_HIT':
                         add_alert('TP', f'🎯 {msg}')
-                        record_alert('TP', is_false=(sym in new_positions and sym not in reduced_syms))
+                        record_alert('TP', is_false=(sym in new_positions and sym not in reduced_syms), symbol=sym)
                     elif change_type == 'SL_HIT':
                         # Dedup: позиция не в снапшоте (гонка) — кулдаун 5 минут
                         if sym not in new_positions:
@@ -689,10 +689,10 @@ def main_loop():
                                 continue
                             _SL_DEDUP[sym] = _now
                         add_alert('STOP', f'🛑 {msg}')
-                        record_alert('SL', is_false=(sym in new_positions))
+                        record_alert('SL', is_false=(sym in new_positions), symbol=sym)
                     elif change_type == 'ENTRY_HIT':
                         add_alert('ENTRY', f'📌 {msg}')
-                        record_alert('ENTRY')
+                        record_alert('ENTRY', symbol=sym)
                     elif change_type == 'CLOSED':
                         add_alert('INFO', msg)
                     elif change_type == 'NEW':
@@ -918,7 +918,9 @@ def main_loop():
                         for msg in auto_entries:
                             add_alert('ENTRY', msg)
                             send_telegram_alert(msg)
-                            record_auto_entry(placed=True)
+                            # Extract symbol from message: "🤖 Авто-вход BTCUSDT @ ..."
+                            _sym = msg.split()[2] if len(msg.split()) > 2 else None
+                            record_auto_entry(placed=True, symbol=_sym)
 
             # SL re-entry: лесенка после стоп-лосса (каждые 10 циклов = 5 мин)
             # correlation_stop НЕ передаём — ре-энтри восстанавливает позицию, а не наращивает exposure
