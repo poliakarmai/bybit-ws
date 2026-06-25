@@ -81,9 +81,9 @@ def _load_trade_history() -> list[dict]:
 
     conn = sqlite3.connect(str(STATE_DB_PATH))
     rows = conn.execute(
-        f'SELECT * FROM {TRADE_HISTORY_TABLE} WHERE entry_price > 0 AND exit_price > 0 ORDER BY closed_at DESC'
+        f'SELECT * FROM {TRADE_HISTORY_TABLE} WHERE entry_price > 0 AND exit_price > 0 ORDER BY closed_at DESC'  # gsc:ignore — TRADE_HISTORY_TABLE is a constant
     ).fetchall()
-    cols = [d[1] for d in conn.execute(f'PRAGMA table_info({TRADE_HISTORY_TABLE})')]
+    cols = [d[1] for d in conn.execute(f'PRAGMA table_info({TRADE_HISTORY_TABLE})'  # gsc:ignore — TRADE_HISTORY_TABLE is a constant)]
     conn.close()
     return [dict(zip(cols, r)) for r in rows]
 
