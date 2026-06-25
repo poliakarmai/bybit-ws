@@ -44,6 +44,8 @@ PRO_PRICE_STARS = 300  # ~400 ₽
 PAYMENTS_DB = os.path.expanduser("~/.local/share/gridsignal-bot/pro_users.db")
 TON_PRICE = 2.0  # TON
 CRYPTOBOT_TOKEN = os.environ.get("CRYPTOBOT_TOKEN", "")
+# M8: remove from process environ to prevent leak via /proc/PID/environ
+os.environ.pop("CRYPTOBOT_TOKEN", None)
 TON_INVOICES_DB = os.path.expanduser("~/.local/share/gridsignal-bot/ton_invoices.db")
 GRIDSIGNAL_ADMIN_ID = int(os.environ.get("GRIDSIGNAL_ADMIN_ID", "319665243"))
 GRIDSIGNAL_ADMIN_NOTIFY_CHAT = int(os.environ.get("GRIDSIGNAL_ADMIN_NOTIFY_CHAT", "5529208670"))
@@ -58,7 +60,7 @@ def _expires(days: int = 30) -> str:
     return (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
 def init_ton_db():
-    conn = sqlite3.connect(TON_INVOICES_DB)
+    conn = sqlite3.connect(TON_INVOICES_DB, check_same_thread=False)
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute("""CREATE TABLE IF NOT EXISTS ton_invoices (
         invoice_id INTEGER PRIMARY KEY, user_id INTEGER,
@@ -294,11 +296,11 @@ def reset_daily_counts(conn):
 async def _reset_counts_job():
     """Job queue wrapper: открыть коннект, сбросить, закрыть."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         reset_daily_counts(conn)
         conn.close()
-    except Exception:
-        pass  # тихо, не ронять бота
+    except Exception as e:
+        print(f"[GridSignal] _reset_counts_job failed: {e}")
 
 
 def save_signals(signals: list, user_id: int = None, timeframe: str = 'D', mode: str = 'long'):
