@@ -465,7 +465,9 @@ def check_auto_short(positions):
                     for acc in wallet['result'].get('list', []):
                         for coin in acc.get('coin', []):
                             if coin.get('coin') == 'USDT':
-                                available_usdt = float(coin.get('availableToWithdraw', 0))
+                                balance = float(coin.get('walletBalance', 0))
+                                margin_used = float(coin.get('totalPositionIM', 0))
+                                available_usdt = balance - margin_used
                                 break
                 required = short_margin * 1.05
                 if available_usdt < required:

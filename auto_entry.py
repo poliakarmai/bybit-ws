@@ -567,12 +567,15 @@ def auto_entry_scan(positions):
                     for acc in wallet['result'].get('list', []):
                         for coin in acc.get('coin', []):
                             if coin.get('coin') == 'USDT':
-                                available_usdt = float(coin.get('availableToWithdraw', 0))
+                                # walletBalance - totalPositionIM = реально свободно
+                                balance = float(coin.get('walletBalance', 0))
+                                margin_used = float(coin.get('totalPositionIM', 0))
+                                available_usdt = balance - margin_used
                                 break
                 required = margin * 1.05  # +5% запас на комиссию
                 if available_usdt < required:
                     log_event(f'💰 LOW FUNDS {sym}: need ${required:.1f}, have ${available_usdt:.1f} — cooling down 30min')
-                    record_sl_hit(sym)  # reuse SL cooldown logic
+                    record_sl_hit(sym)  # кулдаун через cooldown.json
                     continue
             except Exception:
                 pass  # API может отвалиться — лучше войти без проверки чем пропустить сигнал
