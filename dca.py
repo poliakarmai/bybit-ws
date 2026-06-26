@@ -10,6 +10,17 @@ from .config import Config
 from .file_utils import safe_json_write
 
 DCA_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/dca_state.json')
+COOLDOWN_FILE = os.path.expanduser('~/.local/share/bybit-ws/cooldown.json')
+
+
+def _load_cooldown():
+    if os.path.exists(COOLDOWN_FILE):
+        try:
+            with open(COOLDOWN_FILE) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
 
 
 def _get_dca_config(cfg):
@@ -78,6 +89,16 @@ def check_dca():
         side = p['side']
         if side != 'Buy':
             continue
+
+        # ── Проверка кулдауна ──
+        try:
+            cd = _load_cooldown()
+            if sym in cd:
+                elapsed = time.time() - cd[sym]
+                if elapsed < 3600:  # 1 час кулдауна
+                    continue
+        except Exception:
+            pass
 
         entry = p['entry']
         mark = p['mark']
