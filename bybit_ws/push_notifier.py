@@ -232,11 +232,11 @@ def send_push(
 
     # Формируем заголовок с эмодзи
     emoji_map = {
-        "CRITICAL": "🚨",
-        "HIGH": "⚡",
-        "NORMAL": "📢",
+        "CRITICAL": "[!!!]",
+        "HIGH": "[!!]",
+        "NORMAL": "[i]",
     }
-    emoji = emoji_map.get(priority, "📢")
+    emoji = emoji_map.get(priority, "[i]")
 
     if not title:
         # Авто-заголовок на основе level
@@ -269,9 +269,9 @@ def send_push(
 
         # Добавляем префикс приоритета для Telegram
         prefix_map = {
-            "CRITICAL": "🚨🚨🚨",
-            "HIGH": "⚡",
-            "NORMAL": "ℹ️",
+            "CRITICAL": "[!!!]",
+            "HIGH": "[!!]",
+            "NORMAL": "[i]",
         }
         prefix = prefix_map.get(priority, "")
         telegram_msg = f"{prefix} {msg}" if prefix else msg
