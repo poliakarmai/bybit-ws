@@ -553,12 +553,16 @@ def run():
         global SHUTDOWN
         SHUTDOWN = True
         log_event('SIGTERM received, shutting down...')
+        # Wake up the event loop immediately
+        loop.call_soon_threadsafe(loop.stop)
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             loop.add_signal_handler(sig, _shutdown)
-        except NotImplementedError:
-            pass
+        except (NotImplementedError, RuntimeError) as e:
+            # Fallback: use traditional signal handler
+            signal.signal(sig, lambda s, f: _shutdown())
+            log_event(f'Signal handler fallback for {sig.name}: {e}')
 
     try:
         loop.run_until_complete(async_main_loop())
