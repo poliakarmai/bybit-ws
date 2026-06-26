@@ -364,6 +364,19 @@ def _get_position(symbol: str) -> dict | None:
     return None
 
 
+def _get_journal_snapshot() -> dict | None:
+    """Получить кешированный снапшот торгового дневника из kv_store."""
+    try:
+        from .state_db import db as _db
+        raw = _db.get_kv('journal_snapshot')
+        if raw:
+            import json as _json
+            return _json.loads(raw)
+    except Exception:
+        pass
+    return None
+
+
 def _get_auth_token() -> str:
     """Получить RPC токен. Автогенерация при первом запуске (SQLite)."""
     try:
@@ -523,6 +536,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_risk_full()
         elif path == "/rpc/circuit_breaker":
             self._handle_circuit_breaker()
+        elif path == "/rpc/analyze_history":
+            self._handle_analyze_history()
         elif path == "/rpc" or path == "/":
             self._handle_index()
         else:
@@ -700,6 +715,21 @@ class RPCHandler(BaseHTTPRequestHandler):
         except Exception as e:
             _error(self, 'Circuit breaker error', str(e), 500)
 
+    def _handle_analyze_history(self):
+        """GET /rpc/analyze_history — анализ торговой истории (Trade Journal)."""
+        try:
+            # Пробуем кешированный снапшот (обновляется каждые 10 циклов)
+            snapshot = _get_journal_snapshot()
+            if snapshot:
+                _json_response(self, snapshot)
+                return
+            # Fallback: живой расчёт
+            from .journal.adapter import load_from_sqlite
+            result = load_from_sqlite()
+            _json_response(self, result)
+        except Exception as e:
+            _error(self, 'Journal analysis error', str(e), 500)
+
     def _handle_get_config(self):
         """GET /rpc/config — текущая конфигурация без секретов."""
         try:
@@ -777,6 +807,7 @@ class RPCHandler(BaseHTTPRequestHandler):
             "alerts": alerts,
             "metrics": metrics,
             "trades": trades,
+            "journal": _get_journal_snapshot(),
             "monitor": {
                 "alive": rpc_state["alive"],
                 "uptime": int(time.time() - rpc_state["started_at"]),
@@ -866,6 +897,14 @@ class RPCHandler(BaseHTTPRequestHandler):
 
     def _handle_metrics(self):
         metrics = _load_json(DATA_DIR / "metrics.json")
+        journal = _get_journal_snapshot()
+        if journal and 'profile' in journal:
+            metrics['journal'] = {
+                'total_pnl': journal['profile'].get('total_pnl'),
+                'win_rate': journal['profile'].get('win_rate'),
+                'total_roundtrips': journal['profile'].get('total_roundtrips'),
+                'alerts': journal.get('alerts', []),
+            }
         _json_response(self, metrics)
 
     def _handle_metrics_prometheus(self):

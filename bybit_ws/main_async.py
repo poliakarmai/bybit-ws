@@ -476,6 +476,18 @@ async def async_main_loop():
                 except Exception as e:
                     log_event(f'⚠️ ab_status log: {e}')
 
+            # ── Торговый дневник: обновление каждые 10 циклов ──
+            if cycle % 10 == 0:
+                try:
+                    from .journal.adapter import load_from_sqlite
+                    journal = load_from_sqlite()
+                    if 'profile' in journal:
+                        from .state_db import adb as _adb
+                        import json as _json
+                        await _adb.set_kv('journal_snapshot', _json.dumps(journal, default=str))
+                except Exception as e:
+                    log_event(f'⚠️ journal update: {e}')
+
             elapsed = time.monotonic() - t0
             if cycle % 10 == 0:
                 pos_count = len(new_positions) if new_positions else 0
