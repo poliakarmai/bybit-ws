@@ -76,6 +76,10 @@ def _get_lot_step(sym):
 def check_dca():
     """Проверить позиции на DCA-уровни и поставить лимитки при необходимости."""
     alerts = []
+
+    # Бан-лист: символы, для которых DCA временно отключён
+    DCA_BLACKLIST = {"FLOWUSDT"}  # недостаточно баланса для докупки
+
     positions = fetch_positions()
     if not positions:
         return alerts
@@ -88,6 +92,10 @@ def check_dca():
     for sym, p in positions.items():
         side = p['side']
         if side != 'Buy':
+            continue
+
+        # Пропустить забаненные символы
+        if sym in DCA_BLACKLIST:
             continue
 
         # ── Проверка кулдауна ──
