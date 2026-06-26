@@ -131,6 +131,24 @@ def check_dca():
                 qty = round(qty, len(str(lot_step).split('.')[-1]))
             qty = max(qty, lot_step)
 
+            # ── Проверка свободных средств перед DCA-ордером ──
+            try:
+                wallet = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
+                available_usdt = 0.0
+                if wallet and wallet.get('retCode') == 0:
+                    for acc in wallet['result'].get('list', []):
+                        for coin in acc.get('coin', []):
+                            if coin.get('coin') == 'USDT':
+                                balance = float(coin.get('walletBalance', 0))
+                                margin_used = float(coin.get('totalPositionIM', 0))
+                                available_usdt = balance - margin_used
+                                break
+                if available_usdt < margin * 1.05:
+                    log_event(f'💰 LOW FUNDS DCA {sym}: need ${margin*1.05:.1f}, have ${available_usdt:.1f} — skipping')
+                    continue
+            except Exception:
+                pass
+
             link_id = f'dca_{sym.lower()}_{int(time.time())}'
 
             body = {
