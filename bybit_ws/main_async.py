@@ -485,6 +485,15 @@ async def async_main_loop():
                         from .state_db import adb as _adb
                         import json as _json
                         await _adb.set_kv('journal_snapshot', _json.dumps(journal, default=str))
+
+                        # ── Self-learning: adaptive parameters from journal ──
+                        try:
+                            from .journal.self_learn import apply_journal_insights
+                            adjustments = await apply_journal_insights(journal, cfg)
+                            if adjustments:
+                                log_event(f'🧠 Self-learn adjustments: {_json.dumps(adjustments, default=str)[:200]}')
+                        except Exception as _se:
+                            log_event(f'⚠️ self-learn: {_se}')
                 except Exception as e:
                     log_event(f'⚠️ journal update: {e}')
 
