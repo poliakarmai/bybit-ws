@@ -1,0 +1,37 @@
+[Unit]
+Description=Bybit WS Monitor — Async (asyncio-миграция Фаза 5.3)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/openclaw/bybit-ws
+EnvironmentFile=/home/openclaw/.config/bybit-ws/env
+Environment=PYTHONUNBUFFERED=1
+# ── Security hardening (GSC 26.06.2026) ──
+ProtectProc=invisible
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/openclaw/.local/share/bybit-ws /home/openclaw/.config/bybit-ws
+RestrictAddressFamilies=AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RemoveIPC=true
+LockPersonality=true
+# ── Restart policy ──
+ExecStart=%h/.hermes/hermes-agent/venv/bin/python3 -m bybit_ws.main_async
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=3
+StartLimitInterval=120
+# ── Resource limits ──
+MemoryMax=512M
+MemoryHigh=400M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
