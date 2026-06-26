@@ -559,6 +559,24 @@ def auto_entry_scan(positions):
             if skip_symbol:
                 continue
 
+            # ── Проверка свободных средств перед отправкой ордера ──
+            try:
+                wallet = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
+                available_usdt = 0.0
+                if wallet and wallet.get('retCode') == 0:
+                    for acc in wallet['result'].get('list', []):
+                        for coin in acc.get('coin', []):
+                            if coin.get('coin') == 'USDT':
+                                available_usdt = float(coin.get('availableToWithdraw', 0))
+                                break
+                required = margin * 1.05  # +5% запас на комиссию
+                if available_usdt < required:
+                    log_event(f'💰 LOW FUNDS {sym}: need ${required:.1f}, have ${available_usdt:.1f} — cooling down 30min')
+                    record_sl_hit(sym)  # reuse SL cooldown logic
+                    continue
+            except Exception:
+                pass  # API может отвалиться — лучше войти без проверки чем пропустить сигнал
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}

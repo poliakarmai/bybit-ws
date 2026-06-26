@@ -457,6 +457,23 @@ def check_auto_short(positions):
                 log_event(f'⚠️ Auto-SHORT {sym}: fetch_orders error, пропуск ({e})')
                 continue
 
+            # ── Проверка свободных средств перед отправкой ордера ──
+            try:
+                wallet = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
+                available_usdt = 0.0
+                if wallet and wallet.get('retCode') == 0:
+                    for acc in wallet['result'].get('list', []):
+                        for coin in acc.get('coin', []):
+                            if coin.get('coin') == 'USDT':
+                                available_usdt = float(coin.get('availableToWithdraw', 0))
+                                break
+                required = short_margin * 1.05
+                if available_usdt < required:
+                    log_event(f'💰 LOW FUNDS SHORT {sym}: need ${required:.1f}, have ${available_usdt:.1f} — skipping')
+                    continue
+            except Exception:
+                pass
+
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
             order = None
