@@ -476,6 +476,16 @@ def check_auto_short(positions):
             except Exception:
                 pass
 
+            # ── Orderbook imbalance filter (27.06) ──
+            try:
+                from .orderbook_filter import should_enter_by_imbalance
+                ob_ok, ob_reason = should_enter_by_imbalance(sym, 'Sell')
+                if not ob_ok:
+                    log_event(f'📊 OB BLOCK {sym}: {ob_reason}')
+                    continue
+            except Exception:
+                pass
+
             # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
             try:
                 from .entry_judge import should_enter as judge_should_enter

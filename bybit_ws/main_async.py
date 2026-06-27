@@ -314,6 +314,19 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
         if missing:
             log_event(f'🔴 TP/SL ALERT: {", ".join(missing)}')
 
+    # ── Time-based exit (закрытие застрявших позиций) ──
+    if positions:
+        try:
+            from .time_exit import check_time_exit, apply_time_exits
+            stale = check_time_exit(positions, orders)
+            if stale:
+                result = apply_time_exits(stale)
+                if result['closed'] > 0:
+                    closed_count = result['closed']
+                    log_event(f'⏰ Time exit: {closed_count} позиций закрыто')
+        except Exception as e:
+            log_event(f'⚠️ time_exit error: {e}')
+
     elapsed = time.time() - t0
     log_event(f'⚡ heavy cycle #{cycle_count} done in {elapsed:.2f}s')
 

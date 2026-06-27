@@ -580,6 +580,16 @@ def auto_entry_scan(positions):
             except Exception:
                 pass  # API может отвалиться — лучше войти без проверки чем пропустить сигнал
 
+            # ── Orderbook imbalance filter (27.06) ──
+            try:
+                from .orderbook_filter import should_enter_by_imbalance
+                ob_ok, ob_reason = should_enter_by_imbalance(sym, 'Buy')
+                if not ob_ok:
+                    log_event(f'📊 OB BLOCK {sym}: {ob_reason}')
+                    continue
+            except Exception:
+                pass  # фильтр недоступен → не блокируем
+
             # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
             try:
                 from .entry_judge import should_enter as judge_should_enter
