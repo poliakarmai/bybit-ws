@@ -325,6 +325,31 @@ def fetch_orders():
     return orders
 
 
+def fetch_open_orders() -> list[dict]:
+    """Получить активные ордера как список dict (сырой формат API).
+
+    Используется TP/SL self-check — нужны поля symbol, side, orderType,
+    stopOrderType, orderStatus из оригинального ответа Bybit.
+    """
+    all_orders = []
+    cursor = ''
+    while True:
+        path = f'/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
+        if cursor:
+            path += f'&cursor={cursor}'
+        data = bybit('GET', path)
+        if not data or not isinstance(data, dict) or data.get('retCode') != 0:
+            break
+        olist = data['result'].get('list', [])
+        if not olist:
+            break
+        all_orders.extend(olist)
+        cursor = data['result'].get('nextPageCursor', '')
+        if not cursor:
+            break
+    return all_orders
+
+
 def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
     """Поставить/обновить стоп-лосс через trading-stop.
 

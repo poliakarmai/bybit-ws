@@ -284,35 +284,55 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
 
     # ── Авто-TP (восстановление пропавших тейк-профитов) ──
     try:
+        # В WS-режиме orders может быть пустым — дёргаем REST один раз за цикл
+        if not orders or (isinstance(orders, dict) and len(orders) == 0):
+            try:
+                from .api import fetch_open_orders
+                orders = fetch_open_orders()
+            except Exception:
+                pass
         tp_actions = auto_take_profit(positions or {}, orders or {})
         if tp_actions:
             apply_auto_tp(tp_actions)
     except Exception as e:
         log_event(f'⚠️ auto_tp error: {e}')
 
-    # ── TP/SL Self-Check (каждый тяжёлый цикл) ──
-    if positions and orders is not None:
-        missing = []
-        for sym, p in positions.items():
-            side = p.get('side', 'Buy')
-            tp_side = 'Sell' if side == 'Buy' else 'Buy'
-            has_sl = any(
-                o['symbol'] == sym and o.get('stopOrderType') == 'StopLoss'
-                for o in (orders.values() if isinstance(orders, dict) else orders)
-                if isinstance(o, dict)
-            )
-            has_tp = any(
-                o['symbol'] == sym and o['side'] == tp_side
-                and o.get('reduceOnly') and o.get('orderStatus') in ('New', 'Untriggered')
-                for o in (orders.values() if isinstance(orders, dict) else orders)
-                if isinstance(o, dict)
-            )
-            if not has_sl or not has_tp:
-                no_sl = "NO SL" if not has_sl else ""
-                no_tp = " NO TP" if not has_tp else ""
-                missing.append(f'{sym}({no_sl}{no_tp})')
-        if missing:
-            log_event(f'🔴 TP/SL ALERT: {", ".join(missing)}')
+    # ── TP/SL Self-Check: прямой запрос к Bybit REST ──
+    if positions:
+        try:
+            from .api import fetch_open_orders as _fco
+            real_orders = _fco()
+            missing = []
+            for sym, p in positions.items():
+                side = p.get('side', 'Buy')
+                tp_side = 'Sell' if side == 'Buy' else 'Buy'
+
+                # Check SL: stopOrderType='StopLoss' + active
+                has_sl = any(
+                    o.get('symbol') == sym
+                    and o.get('stopOrderType') == 'StopLoss'
+                    and o.get('orderStatus') in ('New', 'Untriggered')
+                    for o in real_orders
+                )
+
+                # Check TP: reduceOnly + Sell(для LONG)/Buy(для SHORT) + Limit + active
+                has_tp = any(
+                    o.get('symbol') == sym
+                    and o.get('side') == tp_side
+                    and o.get('orderType') == 'Limit'
+                    and o.get('orderStatus') in ('New', 'Untriggered')
+                    for o in real_orders
+                )
+
+                if not has_sl or not has_tp:
+                    no_sl = "NO SL" if not has_sl else ""
+                    no_tp = " NO TP" if not has_tp else ""
+                    missing.append(f'{sym}({no_sl}{no_tp})')
+
+            if missing:
+                log_event(f'🔴 TP/SL ALERT: {", ".join(missing)}')
+        except Exception as e:
+            log_event(f'⚠️ TP/SL check error: {e}')
 
     # ── Time-based exit (закрытие застрявших позиций) ──
     if positions:
