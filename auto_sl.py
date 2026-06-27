@@ -1,23 +1,93 @@
-"""Авто-SL: ставит SL по стратегии (BB-based, Tier-based) вместо жестких -7%.
-
-DESIGN.md §Стратегия:
-- LONG: SL = Lower BB Daily * 0.93 (−7% от Lower BB)
-- SHORT Tier A/B: SL = +5% от входа
-- SHORT Tier C/D: SL = +7% от входа
-Фикс код-ревью Manus AI.
 """
+Авто-SL v2 — ATR-adaptive (27.06.2026).
 
-import os, json
+SL = entry ± k × ATR(14), где k зависит от волатильности:
+  - trending:  k = 2.0 (даём дышать)
+  - normal:    k = 1.5 (баланс)
+  - choppy:    k = 1.2 (плотный SL)
+  - high_vol:  k = 2.5 (широкий, чтобы не выбило шумом)
+
+Fallback на BB-based если ATR недоступен.
+"""
+import os, json, time
 from .api import bybit, fetch_positions, get_bb_data
 from .config import Config
 from .alerts import log_event
 from .manual_positions import is_manual_position
 
-# WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
 
+# ATR SL multipliers by regime
+ATR_SL_MULTIPLIERS = {
+    'trending': 2.0,
+    'normal': 1.5,
+    'choppy': 1.2,
+    'high_vol': 2.5,
+    'low_vol': 1.3,
+}
+ATR_SL_DEFAULT = 1.5
+
+# ATR cache TTL (секунд)
+_ATR_CACHE = {}
+_ATR_CACHE_TTL = 60
+
+
+def _get_atr(symbol: str, period: int = 14, interval: str = '60') -> float | None:
+    """Получить ATR(14) для символа с кешированием."""
+    now = time.time()
+    cache_key = f"{symbol}:{interval}"
+    if cache_key in _ATR_CACHE and now - _ATR_CACHE[cache_key]['ts'] < _ATR_CACHE_TTL:
+        return _ATR_CACHE[cache_key]['value']
+
+    try:
+        kline = bybit('GET',
+            f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={period + 1}')
+        if not kline or kline.get('retCode') != 0:
+            return None
+
+        candles = kline['result']['list']
+        if len(candles) < period:
+            return None
+
+        ranges = []
+        for c in candles[:period]:
+            high = float(c[2])
+            low = float(c[3])
+            ranges.append(high - low)
+
+        atr = sum(ranges) / len(ranges)
+        _ATR_CACHE[cache_key] = {'ts': now, 'value': atr}
+        return atr
+    except Exception:
+        return None
+
+
+def _get_sl_multiplier(symbol: str) -> float:
+    """Определить множитель SL по ATR в зависимости от волатильности."""
+    atr = _get_atr(symbol)
+    if atr is None:
+        return ATR_SL_DEFAULT
+
+    try:
+        ticker = bybit('GET', f'/v5/market/tickers?category=linear&symbol={symbol}')
+        if ticker and ticker.get('retCode') == 0:
+            price = float(ticker['result']['list'][0]['lastPrice'])
+            atr_pct = atr / price if price > 0 else 0.03
+
+            if atr_pct > 0.05:
+                return ATR_SL_MULTIPLIERS['high_vol']
+            elif atr_pct > 0.03:
+                return ATR_SL_MULTIPLIERS['trending']
+            elif atr_pct < 0.01:
+                return ATR_SL_MULTIPLIERS['low_vol']
+    except Exception:
+        pass
+
+    return ATR_SL_DEFAULT
+
+
 def _get_bb_ws(symbol, interval='D'):
-    """Получить BB: сначала WS-кеш, fallback на REST."""
+    """BB: сначала WS-кеш, fallback на REST."""
     if _WS_BB_ENABLED:
         try:
             from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
@@ -31,24 +101,21 @@ def _get_bb_ws(symbol, interval='D'):
 
 
 def _get_tiers(cfg):
-    """Вернуть (TIER_AB, ONE_WAY) из конфига."""
     tier_ab = set()
     one_way = set()
     try:
         tier_ab = set(cfg.tiers.A) | set(cfg.tiers.B)
-    except Exception as e:
-        log_event(f'⚠️ auto_sl tiers.A/B: {e}')
-        tier_ab = set()
+    except Exception:
+        pass
     try:
         one_way = set(cfg.tiers.one_way)
-    except Exception as e:
-        log_event(f'⚠️ auto_sl tiers.one_way: {e}')
-        one_way = set()
+    except Exception:
+        pass
     return tier_ab, one_way
 
 
 def check_and_fix_sl():
-    """Проверить все позиции, поставить SL тем у кого нет. Возвращает список алертов."""
+    """Проверить все позиции, поставить ATR-adaptive SL тем у кого нет."""
     alerts = []
     positions = fetch_positions()
     if not positions:
@@ -58,7 +125,6 @@ def check_and_fix_sl():
     tier_ab, one_way = _get_tiers(cfg)
 
     for sym, p in positions.items():
-        # Ручные позиции — не трогаем SL (пользователь управляет сам)
         if is_manual_position(sym):
             continue
 
@@ -67,15 +133,13 @@ def check_and_fix_sl():
             sl_val = float(sl)
             entry = p['entry']
             side = p['side']
-            # 🔒 Правило: SL выше точки входа (LONG) / ниже точки входа (SHORT) — не перезатирать!
-            # Пользователь вручную зафиксировал прибыль
             if side == 'Buy' and sl_val > entry:
-                log_event(f'🔒 {sym}: SL ${sl_val:.4f} > entry ${entry:.4f} — ручная фиксация, не трогаем')
+                log_event(f'🔒 {sym}: SL ${sl_val:.4f} > entry ${entry:.4f} — ручная фиксация')
                 continue
             if side == 'Sell' and sl_val < entry:
-                log_event(f'🔒 {sym}: SL ${sl_val:.4f} < entry ${entry:.4f} — ручная фиксация, не трогаем')
+                log_event(f'🔒 {sym}: SL ${sl_val:.4f} < entry ${entry:.4f} — ручная фиксация')
                 continue
-            continue  # SL уже есть
+            continue
 
         mark = p['mark']
         side = p['side']
@@ -83,7 +147,7 @@ def check_and_fix_sl():
         size = p['size']
         entry = p['entry']
 
-        # 🔒 Ставить SL даже на прибыльные. Если в плюсе — безубыток (entry)
+        # BE-SL: в плюсе → безубыток
         if side == 'Buy' and mark > entry:
             sl_price = round(entry, 4)
             if sl_price < mark:
@@ -91,7 +155,7 @@ def check_and_fix_sl():
                         'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
                 data = bybit('POST', '/v5/position/trading-stop', body)
                 if data and data.get('retCode') == 0:
-                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, +{((mark-entry)/entry*100):.1f}%)')
+                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток)')
                 else:
                     err = data.get('retMsg', '?') if data else 'no response'
                     alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
@@ -103,79 +167,54 @@ def check_and_fix_sl():
                         'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
                 data = bybit('POST', '/v5/position/trading-stop', body)
                 if data and data.get('retCode') == 0:
-                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, +{((entry-mark)/entry*100):.1f}%)')
+                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток)')
                 else:
                     err = data.get('retMsg', '?') if data else 'no response'
                     alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
             continue
 
-        if side == 'Buy':
-            # LONG: SL = -7% от Lower BB Daily
-            bb = _get_bb_ws(sym, 'D')
-            if bb and bb['lower'] > 0:
-                sl_price = bb['lower'] * 0.93
-                sl_desc = f'-7% от Lower BB (${bb["lower"]:.4f})'
+        # ── ATR-adaptive SL ──
+        atr = _get_atr(sym)
+        if atr and atr > 0:
+            multiplier = _get_sl_multiplier(sym)
+            if side == 'Buy':
+                sl_price = round(entry - multiplier * atr, 4)
+                sl_desc = f'ATR(14)={atr:.4f} ×{multiplier}'
             else:
-                # Fallback: -7% от mark
-                sl_price = mark * 0.93
-                sl_desc = f'-7% от Mark (нет BB)'
+                sl_price = round(entry + multiplier * atr, 4)
+                sl_desc = f'ATR(14)={atr:.4f} ×{multiplier}'
+
+            # Проверка что SL на правильной стороне
+            if side == 'Buy' and sl_price >= mark:
+                continue
+            if side == 'Sell' and sl_price <= mark:
+                continue
         else:
-            # SHORT: проверка на JUNK через pumps.json (помечены pump_detect/auto_short)
-            try:
-                state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')
-                with open(state_file) as f:
-                    pump_state = json.loads(f.read())
-                entry = pump_state.get(sym, {})
-                # Прямой short_entry_ts (от auto_short / _place_pump_short)
-                if entry.get('short_entry_ts'):
-                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (short_entry_ts)')
-                    continue
-                # Pump detector tracking (first_seen_ts + alerts) — ручные JUNK-входы
-                # pump_detect перезаписывает pumps.json каждый цикл, стирая short_entry_ts
-                if entry.get('first_seen_ts') and entry.get('alerts'):
-                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (pump_detect tracking)')
-                    continue
-                # Ручной JUNK без стопа (daily_pump / manual флаг)
-                if entry.get('daily_pump') or entry.get('manual'):
-                    log_event(f'⏭️ JUNK {sym}: пропуск авто-SL (manual/daily_pump)')
-                    continue
-            except Exception as e:
-                log_event(f'⚠️ auto_sl: ошибка чтения pumps.json для {sym}: {e}')
-
-            # Tier-based SL с задержкой 20 мин (23.06.2026)
-            is_junk = sym not in tier_ab and sym not in one_way
-            
-            # Проверка задержки 20 мин для Tier A/B SHORT
-            if not is_junk:
-                try:
-                    state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'short_positions.json')
-                    with open(state_file) as f:
-                        short_state = json.loads(f.read())
-                    entry_ts = short_state.get(sym, {}).get('last_short_ts', 0)
-                    import time
-                    age_seconds = time.time() - entry_ts
-                    if age_seconds < 1200:  # 20 минут = 1200 сек
-                        log_event(f'⏳ SHORT {sym}: SL отложен ({age_seconds:.0f}с из 1200с до активации)')
-                        continue
-                except Exception as e:
-                    log_event(f'⚠️ auto_sl: задержка {sym}: {e}')
-                    # При ошибке — ставим SL без задержки (безопасный fallback)
-
-            if is_junk:
-                sl_price = entry * 1.07
-                sl_desc = '+7% от входа (Tier C/D)'
+            # ── Fallback: BB-based SL ──
+            if side == 'Buy':
+                bb = _get_bb_ws(sym, 'D')
+                if bb and bb['lower'] > 0:
+                    sl_price = bb['lower'] * 0.93
+                    sl_desc = f'BB Lower×0.93 (${bb["lower"]:.4f})'
+                else:
+                    sl_price = mark * 0.93
+                    sl_desc = 'Mark×0.93 (нет BB)'
             else:
-                sl_price = entry * 1.10
-                sl_desc = '+10% от входа (Tier A/B, задержка 20мин)'
+                is_junk = sym not in tier_ab and sym not in one_way
+                if is_junk:
+                    sl_price = entry * 1.07
+                    sl_desc = '+7% от входа (Tier C/D)'
+                else:
+                    sl_price = entry * 1.10
+                    sl_desc = '+10% от входа (Tier A/B)'
 
-        sl_price = round(sl_price, 4)
-        # Проверка что SL на правильной стороне
-        if side == 'Buy' and sl_price >= mark:
-            continue
-        if side == 'Sell' and sl_price <= mark:
-            continue
+            sl_price = round(sl_price, 4)
+            if side == 'Buy' and sl_price >= mark:
+                continue
+            if side == 'Sell' and sl_price <= mark:
+                continue
 
-        # Bybit v5 trading-stop: только category, symbol, positionIdx, stopLoss, slTriggerBy
+        # Bybit v5 trading-stop
         body = {
             'category': 'linear',
             'symbol': sym,
@@ -186,24 +225,18 @@ def check_and_fix_sl():
 
         data = bybit('POST', '/v5/position/trading-stop', body)
         if data and data.get('retCode') == 0:
-            msg = f'🛡 Авто-SL {sym}: ${sl_price:.4f} ({sl_desc}, вход ${entry:.4f})'
+            msg = f'🛡 SL {sym}: ${sl_price:.4f} ({sl_desc}, вход ${entry:.4f})'
             alerts.append(msg)
         else:
             err = data.get('retMsg', '?') if data else 'no response'
-            msg = f'⚠️ Авто-SL {sym} НЕ встал: {err}'
+            msg = f'⚠️ SL {sym} НЕ встал: {err}'
             alerts.append(msg)
 
     return alerts
 
 
 def check_breakeven_sl():
-    """Автомат: при росте >10% — поставить SL выше точки входа (безубыток).
-    
-    Для LONG:  mark > entry × 1.10  →  SL = entry × 1.01 (+1% буфер)
-    Для SHORT: mark < entry × 0.90  →  SL = entry × 0.99 (−1% буфер)
-    
-    Не перезатирает ручные SL (manual_sl в pumps.json).
-    """
+    """Безубыток: при движении +10% → SL = entry + 1%."""
     alerts = []
     positions = fetch_positions()
     if not positions:
@@ -213,16 +246,12 @@ def check_breakeven_sl():
         state_file = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')
         with open(state_file) as f:
             pump_state = json.loads(f.read())
-    except Exception as e:
-        log_event(f'⚠️ auto_sl pumps.json: {e}')
+    except Exception:
         pump_state = {}
 
     for sym, p in positions.items():
-        # Ручные позиции — не трогаем
         if is_manual_position(sym):
             continue
-
-        # Памп-монеты — пропускаем BE-SL (слишком волатильны, убьёт позицию при отскоке)
         if sym in pump_state:
             continue
 
@@ -234,29 +263,20 @@ def check_breakeven_sl():
         sl_val = float(sl) if sl and sl != '' and sl != '0' else None
 
         if side == 'Buy':
-            # LONG: +10% от входа
             if mark < entry * 1.10:
                 continue
-            
-            # Уже есть SL выше входа — не трогаем
             if sl_val and sl_val > entry:
                 continue
-            
             sl_price = round(entry * 1.01, 4)
             sl_desc = f'безубыток +1% (рост +{(mark/entry-1)*100:.0f}%)'
         else:
-            # SHORT: −10% от входа
             if mark > entry * 0.90:
                 continue
-            
-            # Уже есть SL ниже входа — не трогаем
             if sl_val and sl_val < entry:
                 continue
-            
             sl_price = round(entry * 0.99, 4)
             sl_desc = f'безубыток −1% (падение −{(1-mark/entry)*100:.0f}%)'
 
-        # Не ставить SL если он на неправильной стороне
         if side == 'Buy' and sl_price >= mark:
             continue
         if side == 'Sell' and sl_price <= mark:
@@ -272,8 +292,7 @@ def check_breakeven_sl():
 
         data = bybit('POST', '/v5/position/trading-stop', body)
         if data and data.get('retCode') == 0:
-            msg = f'🛡 Б/у-SL {sym}: ${sl_price:.4f} ({sl_desc}, вход ${entry:.4f})'
-            alerts.append(msg)
+            alerts.append(f'🛡 Б/у-SL {sym}: ${sl_price:.4f} ({sl_desc})')
         else:
             err = data.get('retMsg', '?') if data else 'no response'
             log_event(f'⚠️ Б/у-SL {sym} НЕ встал: {err}')

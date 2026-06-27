@@ -610,6 +610,21 @@ def auto_entry_scan(positions):
             except Exception as e:
                 log_event(f'⚠️ entry_judge {sym}: {e}')
 
+            # ── Correlation-adjusted sizing (27.06) ──
+            corr_sizer = 1.0
+            if positions:
+                try:
+                    from .correlation import max_corr_with_open
+                    max_c, corr_sym = max_corr_with_open(sym, positions)
+                    if abs(max_c) > 0.85:
+                        log_event(f'🔗 CORR BLOCK {sym}: r={max_c:.2f} с {corr_sym} > 0.85')
+                        continue
+                    elif abs(max_c) > 0.70:
+                        corr_sizer = 0.5
+                        log_event(f'🔗 CORR {sym}: r={max_c:.2f} с {corr_sym} → size ×0.5')
+                except Exception:
+                    pass
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}

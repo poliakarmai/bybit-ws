@@ -63,6 +63,49 @@ def pearson_r(x, y):
     return numerator / denominator
 
 
+def max_corr_with_open(new_symbol: str, positions: dict, interval: str = '60', limit: int = 24) -> tuple:
+    """Максимальная корреляция нового символа с уже открытыми позициями.
+
+    Используется для correlation-adjusted sizing:
+    - Если max_corr > 0.7 → размер позиции × 0.5
+    - Если max_corr > 0.85 → блок входа (диверсификация отсутствует)
+
+    Returns:
+        (max_corr: float, most_correlated_symbol: str)
+    """
+    if not positions or len(positions) < 1:
+        return 0.0, ''
+
+    new_prices = fetch_klines(new_symbol, interval=interval, limit=limit)
+    if not new_prices or len(new_prices) < MIN_CANDLES:
+        return 0.0, ''
+
+    new_returns = price_returns(new_prices)
+    max_corr = 0.0
+    max_sym = ''
+
+    for sym in positions:
+        if sym == new_symbol:
+            continue
+        existing_prices = fetch_klines(sym, interval=interval, limit=limit)
+        if not existing_prices or len(existing_prices) < MIN_CANDLES:
+            continue
+
+        existing_returns = price_returns(existing_prices)
+
+        # Align lengths
+        min_len = min(len(new_returns), len(existing_returns))
+        if min_len < MIN_CANDLES:
+            continue
+
+        corr = pearson_r(new_returns[:min_len], existing_returns[:min_len])
+        if abs(corr) > abs(max_corr):
+            max_corr = corr
+            max_sym = sym
+
+    return round(max_corr, 4), max_sym
+
+
 def price_returns(prices):
     """Convert price series to log returns for correlation."""
     if len(prices) < 2:

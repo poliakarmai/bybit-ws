@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Карта проекта, команды, правила.  
-> Обновлено: 2026-06-27 (авто-TP fix, Entry Judge DeepSeek fallback, TP/SL self-check)
+> Обновлено: 2026-06-27 (orderbook filter, time-based exit, emergency close, ATR-adaptive TP, atomic deploy)
 
 ## Что это
 
@@ -13,21 +13,27 @@ Systemd-сервис `bybit-ws-async`, ~35 MB RAM, SQLite — SSOT.
 ```
 ЦИКЛ (30с)
   ├─ Снапшот позиций (WS + REST-fallback)
+  ├─ Black Swan check — emergency close при экстриме
   ├─ Лёгкие проверки (каждый цикл):
   │   ├─ SL check + fix
   │   ├─ Trailing SL
-  │   └─ Funding rotation
+  │   ├─ Breakeven SL (каждые 4 цикла)
+  │   └─ Margin utilization
+  ├─ Circuit breaker check
   ├─ Тяжёлый цикл (каждые N×30с):
   │   ├─ Режим рынка (LSTM)
-  │   ├─ Auto-SHORT
-  │   ├─ Корреляции
-  │   ├─ Пампы / перекупленность
-  │   ├─ DCA
-  │   ├─ Partial TP
-  │   ├─ Auto-Entry (LONG) + Entry Judge + Risk Manager
-  │   ├─ Auto-TP ← (добавлен 27.06)
-  │   └─ TP/SL Self-Check ← (добавлен 27.06)
-  ├─ SL re-entry
+  │   ├─ Auto-SHORT + Dry Spell Throttle
+  │   ├─ Корреляции + Пампы/Перекупленность
+  │   ├─ DCA + Partial TP
+  │   ├─ Auto-Entry (LONG):
+  │   │   ├─ MTF Confluence
+  │   │   ├─ ORDERBOOK IMBALANCE ← 27.06
+  │   │   ├─ Entry Judge (Nemotron → DeepSeek)
+  │   │   └─ Risk Manager
+  │   ├─ Auto-TP (ATR-adaptive)
+  │   ├─ TP/SL Self-Check
+  │   └─ TIME-BASED EXIT ← 27.06
+  ├─ SL re-entry (с режимным фильтром)
   └─ Отчётность
 ```
 
@@ -36,17 +42,18 @@ Systemd-сервис `bybit-ws-async`, ~35 MB RAM, SQLite — SSOT.
 ```
 bybit-ws/
 ├── main_async.py         ← Главный цикл (asyncio, 30с)
-├── main.py               ← Старый синхронный цикл (не используется)
 ├── api.py                ← Bybit v5 REST API + HMAC
 ├── ws_client.py          ← WebSocket (публичные + приватные потоки)
 ├── rpc.py                ← JSON-RPC (:8766) + /metrics
 ├── state_db.py           ← SQLite SSOT (8 таблиц, WAL)
-├── auto_entry.py         ← Авто-вход LONG + Entry Judge
+├── auto_entry.py         ← Авто-вход LONG + Orderbook + Entry Judge
 ├── auto_short.py         ← Авто-SHORT + Dry Spell Throttle
 ├── auto_sl.py            ← Авто-SL + безубыток
-├── auto_tp.py            ← Авто-TP (20% middle BB + 80% upper BB)
+├── auto_tp.py            ← Авто-TP v2 (ATR-adaptive split)
 ├── trailing_sl.py        ← Трейлинг-SL
-├── entry_judge.py        ← Cross-model judge (Nemotron → DeepSeek fallback)
+├── orderbook_filter.py   ← Фильтр стакана (27.06)
+├── time_exit.py           ← Time-based exit (27.06)
+├── entry_judge.py        ← Cross-model judge (Nemotron → DeepSeek)
 ├── ml_scorer.py          ← ML Gate (RF)
 ├── dspy_optimizer.py     ← DSPy-оптимизация (LLM)
 ├── lstm_regime.py        ← LSTM-классификатор режима
@@ -55,10 +62,14 @@ bybit-ws/
 ├── correlation.py        ← Корреляции
 ├── position_sizing.py    ← Динамическая маржа
 ├── x10_limits.py         ← Дневной лимит x10
-├── risk_manager.py       ← Глобальный risk-менеджмент + circuit breaker
+├── risk_manager.py       ← Risk manager + black swan + emergency close
 ├── push_notifier.py      ← Push (ntfy + Telegram)
-├── web/                  ← Дашборд v5.0 (:9999)
-├── deploy.sh             ← Атомарный деплой
+├── journal/              ← Журнал + самообучение
+│   ├── analyzer.py       ← Анализатор сделок (FIFO, bias)
+│   └── self_learn.py     ← Self-learning с персистентным логом
+├── scripts/
+│   └── walkforward_rf.py ← Walk-forward RF валидация
+├── deploy.sh             ← Атомарный деплой (symlink swap)
 └── test_smoke.py         ← Интеграционные тесты
 ```
 
@@ -71,6 +82,8 @@ systemctl --user status bybit-ws-async
 
 # Деплой
 cp ~/bybit-ws/bybit_ws/*.py ~/.local/lib/bybit_ws/ && systemctl --user restart bybit-ws-async
+# или атомарный:
+bash deploy.sh
 
 # Тесты
 python3 test_smoke.py          # 16 интеграционных
@@ -88,7 +101,8 @@ python3 test_ml_smoke.py       # 3 ML
 | Конфиг | `~/.config/bybit-ws/config.yaml` |
 | Креды | `~/.config/bybit-ws/env` (chmod 600) |
 | RPC | `http://127.0.0.1:8766` |
-| Токен RPC | `SELECT value FROM kv_store WHERE key='rpc_auth_token'` из state.db |
+| Self-learning лог | `~/.local/share/bybit-ws/self_learn.jsonl` |
+| Walk-forward RF | `~/.local/share/bybit-ws/rf_walkforward.json` |
 
 ## MCP-инструменты
 
@@ -99,44 +113,83 @@ python3 test_ml_smoke.py       # 3 ML
 | `get_metrics()` | Дневные метрики (TP/SL/входы) |
 | `get_risk_status()` | Лимиты риска + circuit breaker |
 | `place_entry(symbol, side, qty)` | Вход в позицию |
+| `get_journal()` | Анализ торгового журнала (FIFO, bias) |
 
 **Воркфлоу:** `scan_market` → `get_risk_status` → `get_positions` → `place_entry`
 
-## Entry Judge (27.06.2026)
+## Цепочка входа (полная)
 
-Двухэтапная проверка перед каждым входом:
+```
+BB-сигнал
+  → MTF confluence (D+W+M)
+  → ORDERBOOK IMBALANCE (bid/(bid+ask) >0.55 LONG, <0.45 SHORT)
+  → Entry Judge (Nemotron → DeepSeek fallback)
+  → Risk Manager (circuit breaker, margin, correlation, max positions)
+  → Ордер
+```
+
+## Orderbook Imbalance Filter (27.06)
+
+- Запрашивает стакан ±0.5% от mid
+- bid_vol/(bid_vol+ask_vol) >0.55 → LONG OK (покупатели давят)
+- <0.45 → SHORT OK (продавцы давят)
+- Середина → блок (~40-60% ложных входов на пробоях отсекается)
+- API недоступен → pass (не блокируем)
+
+## Time-Based Exit (27.06)
+
+- Позиция >6 часов без движения
+- PnL < 0% от входа
+- Нет частичного TP (значит не дошла даже до middle BB)
+- → MARKET close, освобождает слот
+
+## Entry Judge (27.06)
+
+Двухэтапная проверка:
 1. **Nemotron** (OpenRouter, бесплатный) → verdict pass/revise
 2. **DeepSeek** fallback если Nemotron недоступен
 
-Скрипт: `~/.hermes/scripts/cross-model-judge.py`  
-Feature flag: `BYBIT_ENTRY_JUDGE_ENABLED=1`  
-Таймаут: 15 сек (entry_judge.py), 120 сек (API call)
+Таймаут: 15 сек, fail-open (оба упали → pass)
 
-Логика: если оба судьи недоступны → `pass` (консервативно, не блокируем вход)
+## Auto-TP v2 — ATR-adaptive (27.06)
 
-## Auto-TP (27.06.2026 — ИСПРАВЛЕНО)
+| Волатильность | ATR/Price | Ближний TP | Дальний TP |
+|-------------|-----------|-----------|-----------|
+| Высокая | >5% | 40% | 60% |
+| Нормальная | 2-5% | 25% | 75% |
+| Низкая | <2% | 15% | 85% |
 
-**Баг:** `main_async.py` импортировал `auto_tp`, но не вызывал. TP не выставлялись.  
-**Фикс:** добавлен вызов `auto_take_profit()` + `apply_auto_tp()` в тяжёлый цикл.
+PERM_SKIP с time-decay 24ч (автосброс).
 
-Стратегия TP:
-- LONG: 20% на middle BB, 80% на upper BB
-- SHORT: 20% на middle BB, 80% на lower BB
-- Min qty < 0.5 → весь объём на дальний TP
-- 3 фейла → PERM_SKIP (ждут докупки, сбрасывается при росте позиции на 20%+)
+## Black Swan / Emergency Close (27.06)
 
-Файл skip-листа: `~/.local/share/bybit-ws/tp_skip.json`
+Триггеры:
+1. PnL > 2× max_daily_loss
+2. BTC упал >15% за час
 
-## TP/SL Self-Check (27.06.2026)
+Действие: MARKET close ВСЕХ позиций, пауза до конца цикла.
 
-Каждый тяжёлый цикл проверяет: у всех позиций есть SL и TP ордера.  
-При отсутствии — `🔴 TP/SL ALERT` в лог + попытка авто-исправления через auto_tp.
+## Self-Learning (27.06)
 
-## ML Gate / DSPy
+- `self_learn.py` — адаптивный min_score, TP/SL ratio
+- Каждое изменение пишется в `self_learn.jsonl` (дата, параметр, старое/новое, причина)
+- Просмотр: `python3 ~/.hermes/scripts/trading-self-learn-view.py`
 
-| Feature flag | Default | Что делает |
-|-------------|---------|-----------|
-| `BYBIT_ML_ENABLED` | 0 | RF ML Gate (F1=0.921) |
+## Risk Manager
+
+| Параметр | Значение |
+|----------|---------|
+| Max позиций | 12 (5 при высокой волатильности, BTC ATR proxy) |
+| Max дневной убыток | -$50 |
+| Max маржа | $300 |
+| Circuit breaker | 80% от max_daily_loss |
+| Black swan close | 2× max_daily_loss или BTC -15%/час |
+
+## Feature Flags
+
+| Флаг | Default | Что делает |
+|------|---------|-----------|
+| `BYBIT_ML_ENABLED` | 0 | RF ML Gate |
 | `BYBIT_DSPY_ENABLED` | 1 | DSPy Gate (LLM: GPT-4o-mini) |
 | `BYBIT_ENTRY_JUDGE_ENABLED` | 1 | Entry Judge (Nemotron→DeepSeek) |
 | `BYBIT_WS_FULL_ENABLED` | 0 | Полный WS (приватные потоки) |
@@ -144,22 +197,13 @@ Feature flag: `BYBIT_ENTRY_JUDGE_ENABLED=1`
 | `BYBIT_REGIME_AUTO` | 0 | Авто LONG/SHORT по режиму |
 | `BYBIT_OPTUNA_ENABLED` | 0 | Optuna-параметры |
 
-## Risk Manager
-
-| Параметр | Значение |
-|----------|---------|
-| Max позиций | 12 (5 при высокой волатильности) |
-| Max дневной убыток | -$50 |
-| Max маржа | $300 |
-| Circuit breaker | авто при превышении лимитов |
-
 ## Инварианты
 
-1. SQLite — SSOT. JSON не может противоречить state.db
+1. SQLite — SSOT
 2. SL не перезатирается хуже (только в сторону прибыли)
-3. ML fail-closed: ошибка → нейтрально, не блокирует вход
+3. Все фильтры fail-open: ошибка → пропускаем, не блокируем вход
 4. HMAC-подпись ML-моделей
 5. API-ключи только из env
-6. Circuit breaker — только новые входы, существующие позиции не трогает
-7. Entry Judge fail-open: ошибка → pass (не блокирует вход)
-8. Auto-TP + Self-Check каждый тяжёлый цикл
+6. Circuit breaker — только новые входы
+7. Black swan — закрытие ВСЕХ позиций
+8. Auto-TP + Time-Exit + Self-Check каждый тяжёлый цикл

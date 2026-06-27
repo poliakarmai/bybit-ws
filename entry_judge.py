@@ -96,25 +96,25 @@ Check:
             result = json.loads(proc.stdout)
             return result
         else:
-            # Судья не ответил или ошибка — пропускаем вход (conservative)
+            # Судья не ответил или ошибка — БЛОКИРУЕМ вход (fail-closed, 27.06)
             return {
-                "verdict": "pass",
-                "blocking_issues": [],
-                "confidence": 0.5,
-                "notes": f"judge timeout/error: {proc.stderr[:100] if proc.stderr else 'no output'}",
+                "verdict": "revise",
+                "blocking_issues": ["Judge script error"],
+                "confidence": 0.0,
+                "notes": f"judge error: {proc.stderr[:100] if proc.stderr else 'no output'}",
             }
     except subprocess.TimeoutExpired:
         return {
-            "verdict": "pass",
+            "verdict": "revise",
             "blocking_issues": [],
-            "confidence": 0.5,
+            "confidence": 0.0,
             "notes": "judge timeout",
         }
     except Exception as e:
         return {
-            "verdict": "pass",
+            "verdict": "revise",
             "blocking_issues": [],
-            "confidence": 0.5,
+            "confidence": 0.0,
             "notes": f"judge error: {e}",
         }
 
