@@ -347,6 +347,37 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
         except Exception as e:
             log_event(f'⚠️ time_exit error: {e}')
 
+    # ── Post-trade cluster analysis (раз в сутки, цикл кратный 2880 = 24ч) ──
+    if cycle_count > 0 and cycle_count % 2880 == 0:
+        try:
+            from .post_trade import analyze_clusters
+            result = analyze_clusters()
+            if result['blocked']:
+                blocked_count = len(result['blocked'])
+                log_event(f'🔬 CLUSTER BLOCK: {blocked_count} кластеров заблокировано')
+                for b in result['blocked']:
+                    wr = b['win_rate']
+                    trades = b['trades']
+                    pnl = b['pnl']
+                    log_event(f'  🚫 {b["cluster"]}: WR={wr:.0%} ({trades} сделок, PnL=${pnl:.2f})')
+        except Exception as e:
+            log_event(f'⚠️ post_trade error: {e}')
+
+    # ── Self-learning: журнал → адаптация порогов (раз в сутки) ──
+    if cycle_count > 0 and cycle_count % 2880 == 0:
+        try:
+            from .journal.self_learn import apply_journal_insights
+            adjustments = apply_journal_insights()
+            if adjustments:
+                log_event(f'🧠 Self-learning: {len(adjustments)} корректировок')
+                for adj in adjustments[:5]:
+                    param = adj.get('param', '?')
+                    old_val = adj.get('old', '?')
+                    new_val = adj.get('new', '?')
+                    log_event(f'  📐 {param}: {old_val} → {new_val}')
+        except Exception as e:
+            log_event(f'⚠️ self_learn error: {e}')
+
     elapsed = time.time() - t0
     log_event(f'⚡ heavy cycle #{cycle_count} done in {elapsed:.2f}s')
 

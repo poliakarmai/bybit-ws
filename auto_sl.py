@@ -184,6 +184,18 @@ def check_and_fix_sl():
                 sl_price = round(entry + multiplier * atr, 4)
                 sl_desc = f'ATR(14)={atr:.4f} ×{multiplier}'
 
+            # ── SL cap: не шире -50% / +50% от входа ──
+            if side == 'Buy':
+                min_sl = round(entry * 0.5, 4)
+                if sl_price < min_sl:
+                    sl_price = min_sl
+                    sl_desc += f' (capped -50%)'
+            else:
+                max_sl = round(entry * 1.5, 4)
+                if sl_price > max_sl:
+                    sl_price = max_sl
+                    sl_desc += f' (capped +50%)'
+
             # Проверка что SL на правильной стороне
             if side == 'Buy' and sl_price >= mark:
                 continue

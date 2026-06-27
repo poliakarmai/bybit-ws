@@ -590,6 +590,16 @@ def auto_entry_scan(positions):
             except Exception:
                 pass  # фильтр недоступен → не блокируем
 
+            # ── Volume confirmation filter (28.06) ──
+            try:
+                from .volume_filter import volume_ok
+                vol_ok, vol_reason = volume_ok(sym)
+                if not vol_ok:
+                    log_event(f'📊 VOL BLOCK {sym}: {vol_reason}')
+                    continue
+            except Exception:
+                pass  # фильтр недоступен → не блокируем
+
             # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
             try:
                 from .entry_judge import should_enter as judge_should_enter
