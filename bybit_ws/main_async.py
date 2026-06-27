@@ -605,6 +605,21 @@ async def async_main_loop():
 
             await asyncio.sleep(sleep_time)
 
+            # ── Heartbeat (каждые 12 часов) ──
+            if cycle % 1440 == 0:  # 1440 циклов × 30с = 12 часов
+                try:
+                    pnl = sum(
+                        float(p.get('upnl', 0) or 0)
+                        for p in (new_positions or {}).values()
+                        if isinstance(p, dict)
+                    )
+                    send_telegram_alert(
+                        f'💓 Heartbeat | Uptime: {cycle*30//3600}h | '
+                        f'{len(new_positions or {})} pos | PnL: ${pnl:+.2f}'
+                    )
+                except Exception:
+                    pass
+
         except asyncio.CancelledError:
             break
         except Exception as e:

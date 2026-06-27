@@ -28,6 +28,12 @@ JUDGE_MIN_SCORE = 20
 _judge_verdict_cache: dict[str, tuple[float, dict]] = {}
 _JUDGE_VERDICT_CACHE_TTL = 300
 
+# ── LLM Circuit Breaker ──
+_llm_failures = 0
+_llm_disabled_until = 0.0
+LLM_FAILURE_THRESHOLD = 3
+LLM_COOLDOWN = 3600  # 1 час
+
 
 def judge_entry(
     symbol: str,
@@ -89,7 +95,20 @@ Check:
 """
 
     try:
-        # ── Кеш вердиктов: хэш контекста → вердикт ──
+        # ── LLM Circuit Breaker: 3 падения → отключение на 1ч ──
+        now = time.time()
+        if now < _llm_disabled_until:
+            return {
+                "verdict": "revise",
+                "blocking_issues": [
+                    f"LLM circuit open — Entry Judge disabled for "
+                    f"{int(_llm_disabled_until - now)}s"
+                ],
+                "confidence": 0.0,
+                "notes": "circuit_breaker",
+            }
+
+        # ── Кеш вердиктов ──
         cache_key = f"{symbol}:{side}:{score}:{bb_pos:.0f}:{funding_rate:.4f}"
         now = time.time()
         if cache_key in _judge_verdict_cache:
@@ -107,28 +126,38 @@ Check:
         if proc.returncode == 0 and proc.stdout.strip():
             result = json.loads(proc.stdout)
             _judge_verdict_cache[cache_key] = (now, result)
+            _llm_failures = 0  # успех → сброс счётчика
             return result
         else:
-            # Судья не ответил или ошибка — БЛОКИРУЕМ вход (fail-closed, 27.06)
+            # Судья не ответил или ошибка — БЛОКИРУЕМ вход (fail-closed)
+            _llm_failures += 1
+            if _llm_failures >= LLM_FAILURE_THRESHOLD:
+                _llm_disabled_until = time.time() + LLM_COOLDOWN
             return {
                 "verdict": "revise",
                 "blocking_issues": ["Judge script error"],
                 "confidence": 0.0,
-                "notes": f"judge error: {proc.stderr[:100] if proc.stderr else 'no output'}",
+                "notes": f"judge error ({_llm_failures}/{LLM_FAILURE_THRESHOLD}): {proc.stderr[:100] if proc.stderr else 'no output'}",
             }
     except subprocess.TimeoutExpired:
+        _llm_failures += 1
+        if _llm_failures >= LLM_FAILURE_THRESHOLD:
+            _llm_disabled_until = time.time() + LLM_COOLDOWN
         return {
             "verdict": "revise",
             "blocking_issues": [],
             "confidence": 0.0,
-            "notes": "judge timeout",
+            "notes": f"judge timeout ({_llm_failures}/{LLM_FAILURE_THRESHOLD})",
         }
     except Exception as e:
+        _llm_failures += 1
+        if _llm_failures >= LLM_FAILURE_THRESHOLD:
+            _llm_disabled_until = time.time() + LLM_COOLDOWN
         return {
             "verdict": "revise",
             "blocking_issues": [],
             "confidence": 0.0,
-            "notes": f"judge error: {e}",
+            "notes": f"judge error ({_llm_failures}/{LLM_FAILURE_THRESHOLD}): {e}",
         }
 
 
