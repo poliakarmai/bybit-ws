@@ -223,7 +223,9 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
     # Пампы, перекупленность — последовательно (не CPU-heavy)
     if positions:
         overbought_msgs, _ = await run_in_thread(check_overbought, positions)
-        for msg in (overbought_msgs or []):
+        if not isinstance(overbought_msgs, list):
+            overbought_msgs = []
+        for msg in overbought_msgs:
             add_alert('INFO', msg)
 
         pump_msgs, _ = await run_in_thread(check_pumps, positions)
@@ -231,7 +233,9 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
             add_alert('STOP', msg)
 
         weekly_msgs, _ = await run_in_thread(check_weekly_pumps)
-        for msg in (weekly_msgs or []):
+        if not isinstance(weekly_msgs, list):
+            weekly_msgs = []
+        for msg in weekly_msgs:
             add_alert('STOP', msg)
 
     # DCA
