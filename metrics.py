@@ -64,6 +64,22 @@ def record_auto_entry(placed=False, filled=False, pnl=0.0, symbol=None):
     
     safe_json_write(METRICS_FILE, metrics)
 
+
+def ensure_today():
+    """Гарантирует что today есть в metrics.json (даже без событий)."""
+    try:
+        with open(METRICS_FILE) as f:
+            metrics = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        metrics = {}
+    today = _today_key()
+    if today not in metrics:
+        metrics[today] = {'tp_real': 0, 'tp_false': 0, 'sl_real': 0, 'sl_false': 0,
+                          'entry': 0, 'auto_entry_placed': 0, 'auto_entry_filled': 0,
+                          'auto_entry_pnl': 0.0,
+                          'tp_coins': [], 'sl_coins': [], 'entry_coins': []}
+        safe_json_write(METRICS_FILE, metrics)
+
 def get_metrics():
     with open(METRICS_FILE) as f:
         metrics = json.load(f)

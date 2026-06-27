@@ -11,7 +11,7 @@ import os, sys, json, time, asyncio, re, sqlite3, subprocess, urllib.parse, urll
 from datetime import datetime, timezone
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler
-from telegram import InlineQueryResultArticle, InputTextMessageContent
+from telegram import InlineQueryResultArticle, InputTextMessageContent, InlineQueryResultsButton
 
 SCANNER_SCRIPT = os.path.expanduser('~/.local/bin/gridsignal_scanner.py')
 DB_PATH = os.path.expanduser('~/.local/share/gridsignal-bot/users.db')
@@ -1495,9 +1495,13 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Gate: Pro-only (scout audit fix #1)
     if not is_pro(user_id):
-        await update.inline_query.answer([], cache_time=300,
-            switch_pm_text="🔒 Pro only",
-            switch_pm_parameter="pro_required")
+        await update.inline_query.answer(
+            [], cache_time=300,
+            button=InlineQueryResultsButton(
+                text="🔒 Pro only",
+                start_parameter="pro_required"
+            )
+        )
         return
 
     if not query:

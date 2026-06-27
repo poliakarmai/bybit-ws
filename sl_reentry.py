@@ -81,7 +81,11 @@ def notify_sl_hit(symbol, sl_price, entry_price):
 
 
 def check_sl_reentry(positions, correlation_stop=False):
-    """Проверить очередь и выставить лимитки."""
+    """Проверить очередь и выставить лимитки.
+    
+    Режимный фильтр (27.06): re-entry только если направление совпадает с режимом.
+    TRENDING_DOWN → LONG re-entry запрещён. TRENDING_UP → SHORT re-entry запрещён.
+    """
     if correlation_stop:
         if not _is_duplicate('SL re-entry blocked by correlation', 'STOP'):
             log_event('🔕 SL re-entry: correlation_stop активен')
@@ -102,6 +106,17 @@ def check_sl_reentry(positions, correlation_stop=False):
     except Exception:
         banned = set()
 
+    # ── Regime check ──
+    regime = 'NEUTRAL'
+    try:
+        if os.environ.get('BYBIT_REGIME_AUTO') == '1':
+            from .lstm_regime import predict_regime
+            reg_data = predict_regime()
+            if reg_data:
+                regime = reg_data.get('regime', 'NEUTRAL')
+    except Exception:
+        pass
+
     for sym, info in list(state.items()):
         if sym in banned:
             info['pending'] = False
@@ -110,6 +125,13 @@ def check_sl_reentry(positions, correlation_stop=False):
         if not info.get('pending'):
             continue
         if sym in active_syms:
+            info['pending'] = False
+            state[sym] = info
+            continue
+
+        # Режимный фильтр: не входить против тренда
+        if regime == 'TRENDING_DOWN':
+            log_event(f'🔕 SL re-entry {sym}: TRENDING_DOWN — LONG запрещён')
             info['pending'] = False
             state[sym] = info
             continue

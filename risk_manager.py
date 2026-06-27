@@ -13,7 +13,7 @@ import logging
 import math
 import os
 import time
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -372,113 +372,6 @@ def check_circuit_breaker(config=None) -> Tuple[bool, str]:
 def is_circuit_breaker_active() -> bool:
     """Активен ли circuit breaker прямо сейчас."""
     return _circuit_breaker_active
-
-
-# ── Black Swan / Emergency Close ───────────────────────────────────────────
-BLACK_SWAN_PNL_PCT = 2.0          # 2x daily loss limit → black swan
-BLACK_SWAN_PRICE_DROP = 0.15      # 15% drop in BTC за 1 час → black swan
-_emergency_close_active = False
-
-
-def check_black_swan(positions: dict) -> Tuple[bool, str]:
-    """Проверить условия black swan — экстремальные события.
-
-    Триггеры:
-    1. PnL > 2x от max_daily_loss
-    2. BTC упал >15% за последний час
-
-    Returns:
-        (black_swan: bool, reason: str)
-    """
-    # Триггер 1: PnL
-    daily = get_daily_pnl()
-    try:
-        max_loss = float(_get_config().risk.get('max_daily_loss', 50))
-    except Exception:
-        max_loss = 50.0
-
-    if daily['total_pnl'] <= -max_loss * BLACK_SWAN_PNL_PCT:
-        pnl_limit = max_loss * BLACK_SWAN_PNL_PCT
-        return True, (
-            f'BLACK SWAN: PnL ${daily["total_pnl"]:.2f} > '
-            f'{BLACK_SWAN_PNL_PCT}x loss limit (${pnl_limit:.0f})'
-        )
-
-    # Триггер 2: BTC crash >15% за час
-    try:
-        from .correlation import fetch_klines
-        btc = fetch_klines('BTCUSDT', interval='15', limit=4)  # 4 × 15min = 1 hour
-        if btc and len(btc) >= 2:
-            drop = (btc[0] - btc[-1]) / btc[0]
-            if drop > BLACK_SWAN_PRICE_DROP:
-                return True, (
-                    f'BLACK SWAN: BTC упал на {drop*100:.1f}% за час '
-                    f'(> {BLACK_SWAN_PRICE_DROP*100:.0f}%)'
-                )
-    except Exception:
-        pass
-
-    return False, ''
-
-
-def emergency_close_all(reason: str, positions: dict) -> dict:
-    """Закрыть ВСЕ позиции по рынку.
-
-    Вызывается при black swan — не ждёт, не обсуждает.
-    Использует MARKET ордера с reduceOnly=True.
-
-    Returns:
-        {'closed': int, 'failed': int, 'errors': [...]}
-    """
-    global _emergency_close_active
-    _emergency_close_active = True
-
-    from .api import bybit
-    result = {'closed': 0, 'failed': 0, 'errors': []}
-
-    _log.critical(f'🚨 EMERGENCY CLOSE: {reason}')
-
-    for sym, p in positions.items():
-        if not isinstance(p, dict):
-            continue
-        size = float(p.get('size', 0))
-        if size <= 0:
-            continue
-
-        side = 'Sell' if p.get('side') == 'Buy' else 'Buy'
-        idx = p.get('positionIdx', 0)
-        qty = str(size)
-
-        try:
-            order = bybit('POST', '/v5/order/create', {
-                'category': 'linear',
-                'symbol': sym,
-                'side': side,
-                'orderType': 'Market',
-                'qty': qty,
-                'positionIdx': idx,
-                'reduceOnly': True,
-                'timeInForce': 'IOC',
-            })
-            if order and order.get('retCode') == 0:
-                result['closed'] += 1
-                _log.critical(f'🚨 EMERGENCY CLOSE {sym}: {qty} @ MARKET')
-            else:
-                result['failed'] += 1
-                err = order.get('retMsg', '?') if order else 'no response'
-                result['errors'].append(f'{sym}: {err}')
-                _log.error(f'🚨 EMERGENCY CLOSE {sym} FAILED: {err}')
-        except Exception as e:
-            result['failed'] += 1
-            result['errors'].append(f'{sym}: {e}')
-            _log.error(f'🚨 EMERGENCY CLOSE {sym} EXCEPTION: {e}')
-
-    return result
-
-
-def is_emergency_close_active() -> bool:
-    """Активен ли режим emergency close."""
-    return _emergency_close_active
 
 
 def reset_circuit_breaker() -> dict:

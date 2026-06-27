@@ -30,6 +30,7 @@ HEALTH_FILE = DATA_DIR / "health.txt"
 from . import EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT
 from .config import Config
 from .alerts import log_event, add_alert, send_telegram_alert
+from .push_notifier import send_critical_alert, send_high_alert
 from .snapshot import save_json, load_json
 
 # Async API
@@ -60,7 +61,7 @@ from .funding_entry import check_funding_signals, execute_funding_entry
 from .bb_scalp import check_scalp_signals, execute_scalp
 from .mean_revert import check_mean_revert, execute_mean_revert
 from .partial_tp import check_partial_tp
-from .metrics import record_alert, record_auto_entry
+from .metrics import record_alert, record_auto_entry, ensure_today
 from .risk_manager import check as risk_check, is_circuit_breaker_active
 
 # ── Константы ──
@@ -223,32 +224,32 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
     # Пампы, перекупленность — последовательно (не CPU-heavy)
     if positions:
         overbought_msgs, _ = await run_in_thread(check_overbought, positions)
-        if not isinstance(overbought_msgs, list):
-            overbought_msgs = []
-        for msg in overbought_msgs:
+        for msg in (overbought_msgs or []):
             add_alert('INFO', msg)
 
         pump_msgs, _ = await run_in_thread(check_pumps, positions)
         for msg in (pump_msgs or []):
             add_alert('STOP', msg)
+            send_critical_alert(msg)  # Push: 🚨 на телефон
 
         weekly_msgs, _ = await run_in_thread(check_weekly_pumps)
-        if not isinstance(weekly_msgs, list):
-            weekly_msgs = []
-        for msg in weekly_msgs:
+        for msg in (weekly_msgs or []):
             add_alert('STOP', msg)
+            send_critical_alert(msg)  # Push: 🚨 на телефон
 
     # DCA
     if not rpc_state.get("paused"):
         dca_msgs = await run_in_thread(check_dca)
         for msg in (dca_msgs[0] or []):
             add_alert('ENTRY', msg)
+            send_high_alert(msg, level='ENTRY')  # Push: ⚡ на телефон
 
     # Partial TP (каждые 4 цикла)
     if cycle_count % 4 == 0:
         ptp_msgs = await run_in_thread(check_partial_tp)
         for msg in (ptp_msgs[0] or []):
             add_alert('TP', msg)
+            send_high_alert(msg, level='TP')  # Push: ⚡ на телефон
 
     # Ждём параллельные задачи
     if tasks:
@@ -338,13 +339,7 @@ async def async_main_loop():
     # RPC — запускаем в отдельном потоке (как в main.py)
     rpc_thread = None
     try:
-        from .rpc import start_rpc_server, rpc_state, verify_state_consistency
-        # C3 fix: проверка консистентности состояния перед стартом
-        consistency = verify_state_consistency()
-        if not consistency["ok"]:
-            log_event(f'⚠️ State consistency check: {consistency["issues"]}')
-        else:
-            log_event('✅ State consistency OK')
+        from .rpc import start_rpc_server, rpc_state
         rpc_bind = cfg.rpc.bind
         rpc_port = cfg.rpc.port
         rpc_thread = threading.Thread(
@@ -384,11 +379,23 @@ async def async_main_loop():
             cycle += 1
             t0 = time.monotonic()
 
+            if cycle <= 2 or cycle % 10 == 0:
+                log_event(f'🔄 cycle #{cycle}: starting...')
+
             # ── Параллельная загрузка позиций + ордеров ──
             # Фаза 6.3: при BYBIT_WS_FULL_ENABLED=1 — WS-push с REST-сверкой
-            new_positions, new_orders, _last_rest_sync = await async_positions_snapshot_ws(
-                _last_rest_sync, _REST_SYNC_INTERVAL
-            )
+            # Жёсткий таймаут 20с: httpx keep-alive может виснуть на Bybit
+            try:
+                new_positions, new_orders, _last_rest_sync = await asyncio.wait_for(
+                    async_positions_snapshot_ws(_last_rest_sync, _REST_SYNC_INTERVAL),
+                    timeout=20.0
+                )
+            except asyncio.TimeoutError:
+                log_event(f'⚠️ positions snapshot TIMEOUT (20s), using empty')
+                new_positions, new_orders = {}, {}
+            except Exception as e:
+                log_event(f'⚠️ positions snapshot error: {e}')
+                new_positions, new_orders = {}, {}
 
             # ── Обновляем RPC-состояние ──
             try:
@@ -397,8 +404,8 @@ async def async_main_loop():
                 _rpc_state['cycle_count'] = cycle
                 _rpc_state['last_cycle'] = time.time()
                 _rpc_health(alive=True)
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ RPC state update error: {e}')
 
             # ── Health-файл ──
             await run_in_thread(
@@ -510,6 +517,7 @@ async def async_main_loop():
             # Ждём до следующего цикла
             cycle_sec = float(cfg.monitor.cycle_seconds)
             sleep_time = max(0.1, cycle_sec - elapsed)
+
             await asyncio.sleep(sleep_time)
 
         except asyncio.CancelledError:

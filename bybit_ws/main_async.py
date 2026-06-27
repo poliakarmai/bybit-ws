@@ -175,7 +175,7 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
 # Тяжёлый цикл (sync → async wrapper)
 # ═══════════════════════════════════════════════════════════
 
-async def heavy_cycle_async(cfg, positions, cycle_count):
+async def heavy_cycle_async(cfg, positions, orders, cycle_count):
     """Async-обёртка над синхронным тяжёлым циклом."""
     HEAVY_CYCLE = cfg.monitor.heavy_cycle
     if cycle_count % HEAVY_CYCLE != 0:
@@ -281,6 +281,38 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
             send_telegram_alert(entry)
     except Exception as e:
         log_event(f'⚠️ auto_entry error: {e}')
+
+    # ── Авто-TP (восстановление пропавших тейк-профитов) ──
+    try:
+        tp_actions = auto_take_profit(positions or {}, orders or {})
+        if tp_actions:
+            apply_auto_tp(tp_actions)
+    except Exception as e:
+        log_event(f'⚠️ auto_tp error: {e}')
+
+    # ── TP/SL Self-Check (каждый тяжёлый цикл) ──
+    if positions and orders is not None:
+        missing = []
+        for sym, p in positions.items():
+            side = p.get('side', 'Buy')
+            tp_side = 'Sell' if side == 'Buy' else 'Buy'
+            has_sl = any(
+                o['symbol'] == sym and o.get('stopOrderType') == 'StopLoss'
+                for o in (orders.values() if isinstance(orders, dict) else orders)
+                if isinstance(o, dict)
+            )
+            has_tp = any(
+                o['symbol'] == sym and o['side'] == tp_side
+                and o.get('reduceOnly') and o.get('orderStatus') in ('New', 'Untriggered')
+                for o in (orders.values() if isinstance(orders, dict) else orders)
+                if isinstance(o, dict)
+            )
+            if not has_sl or not has_tp:
+                no_sl = "NO SL" if not has_sl else ""
+                no_tp = " NO TP" if not has_tp else ""
+                missing.append(f'{sym}({no_sl}{no_tp})')
+        if missing:
+            log_event(f'🔴 TP/SL ALERT: {", ".join(missing)}')
 
     elapsed = time.time() - t0
     log_event(f'⚡ heavy cycle #{cycle_count} done in {elapsed:.2f}s')
@@ -456,8 +488,28 @@ async def async_main_loop():
                 _rpc['circuit_breaker'] = False
                 _rpc['circuit_breaker_reason'] = ''
 
+            # ── Black Swan check (каждый цикл) ──
+            if new_positions:
+                try:
+                    from .risk_manager import check_black_swan, emergency_close_all
+                    bs_active, bs_reason = check_black_swan(new_positions)
+                    if bs_active:
+                        log_event(f'🚨 {bs_reason}')
+                        result = emergency_close_all(bs_reason, new_positions)
+                        closed_count = result['closed']
+                        failed_count = result['failed']
+                        log_event(
+                            f'🚨 EMERGENCY CLOSE: {closed_count} closed, '
+                            f'{failed_count} failed'
+                        )
+                        add_alert('STOP', f'🚨 BLACK SWAN: {bs_reason}')
+                        # Скипаем тяжёлый цикл — не входим после экстренного закрытия
+                        continue
+                except Exception as e:
+                    log_event(f'⚠️ black swan check error: {e}')
+
             # ── Тяжёлый цикл ──
-            await heavy_cycle_async(cfg, new_positions, cycle)
+            await heavy_cycle_async(cfg, new_positions, new_orders, cycle)
 
             # ── SL re-entry ──
             if new_positions:

@@ -364,19 +364,6 @@ def _get_position(symbol: str) -> dict | None:
     return None
 
 
-def _get_journal_snapshot() -> dict | None:
-    """Получить кешированный снапшот торгового дневника из kv_store."""
-    try:
-        from .state_db import db as _db
-        raw = _db.get_kv('journal_snapshot')
-        if raw:
-            import json as _json
-            return _json.loads(raw)
-    except Exception:
-        pass
-    return None
-
-
 def _get_auth_token() -> str:
     """Получить RPC токен. Автогенерация при первом запуске (SQLite)."""
     try:
@@ -532,6 +519,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_ab_status()
         elif path == "/rpc/ml_toggle":
             self._handle_ml_toggle()
+        elif path == "/rpc/symbol_stats":
+            self._handle_symbol_stats()
         elif path == "/rpc/risk_full":
             self._handle_risk_full()
         elif path == "/rpc/circuit_breaker":
@@ -673,6 +662,35 @@ class RPCHandler(BaseHTTPRequestHandler):
 
     # ═══ Фаза 6.7: Risk Manager RPC ═══
 
+
+    def _handle_symbol_stats(self):
+        """GET /rpc/symbol_stats — per-symbol PnL из trade_history."""
+        import sqlite3
+        db_path = DATA_DIR / "state.db"
+        if not db_path.exists():
+            _json_response(self, {"error": "no database"})
+            return
+        db = sqlite3.connect(str(db_path))
+        cur = db.cursor()
+        cur.execute("""
+            SELECT symbol,
+                   count(*) as cnt,
+                   round(sum(pnl),2) as total_pnl,
+                   round(avg(pnl),2) as avg_pnl,
+                   round(sum(case when pnl>0 then 1 else 0 end)*100.0/count(*),1) as win_rate
+            FROM trade_history
+            GROUP BY symbol HAVING cnt>=2
+            ORDER BY total_pnl DESC
+        """)
+        rows = []
+        for row in cur.fetchall():
+            rows.append({
+                "symbol": row[0], "trades": row[1], "total_pnl": row[2],
+                "avg_pnl": row[3], "win_rate": row[4]
+            })
+        db.close()
+        _json_response(self, {"symbols": rows})
+
     def _handle_risk_full(self):
         """GET /rpc/risk_full — полный отчёт risk-менеджера:
         daily PnL, маржа, корреляции, circuit_breaker, max_positions."""
@@ -718,12 +736,6 @@ class RPCHandler(BaseHTTPRequestHandler):
     def _handle_analyze_history(self):
         """GET /rpc/analyze_history — анализ торговой истории (Trade Journal)."""
         try:
-            # Пробуем кешированный снапшот (обновляется каждые 10 циклов)
-            snapshot = _get_journal_snapshot()
-            if snapshot:
-                _json_response(self, snapshot)
-                return
-            # Fallback: живой расчёт
             from .journal.adapter import load_from_sqlite
             result = load_from_sqlite()
             _json_response(self, result)
@@ -807,7 +819,6 @@ class RPCHandler(BaseHTTPRequestHandler):
             "alerts": alerts,
             "metrics": metrics,
             "trades": trades,
-            "journal": _get_journal_snapshot(),
             "monitor": {
                 "alive": rpc_state["alive"],
                 "uptime": int(time.time() - rpc_state["started_at"]),
@@ -897,14 +908,6 @@ class RPCHandler(BaseHTTPRequestHandler):
 
     def _handle_metrics(self):
         metrics = _load_json(DATA_DIR / "metrics.json")
-        journal = _get_journal_snapshot()
-        if journal and 'profile' in journal:
-            metrics['journal'] = {
-                'total_pnl': journal['profile'].get('total_pnl'),
-                'win_rate': journal['profile'].get('win_rate'),
-                'total_roundtrips': journal['profile'].get('total_roundtrips'),
-                'alerts': journal.get('alerts', []),
-            }
         _json_response(self, metrics)
 
     def _handle_metrics_prometheus(self):
