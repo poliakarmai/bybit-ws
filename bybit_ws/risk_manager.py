@@ -376,7 +376,7 @@ def is_circuit_breaker_active() -> bool:
 
 # ── Black Swan / Emergency Close ───────────────────────────────────────────
 BLACK_SWAN_PNL_PCT = 2.0          # 2x daily loss limit → black swan
-BLACK_SWAN_PRICE_DROP = 0.15      # 15% drop in BTC за 1 час → black swan
+BLACK_SWAN_PRICE_DROP = 0.08      # 8% drop in BTC за 1 час → black swan (was 15%)
 _emergency_close_active = False
 
 

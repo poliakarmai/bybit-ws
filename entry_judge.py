@@ -13,7 +13,7 @@ import time
 from typing import Optional
 
 JUDGE_SCRIPT = os.path.expanduser("~/.hermes/scripts/cross-model-judge.py")
-JUDGE_TIMEOUT = 15  # секунд на вызов судьи
+JUDGE_TIMEOUT = 5  # секунд на вызов судьи (жёсткий таймаут, 27.06)
 JUDGE_ENABLED = os.environ.get("BYBIT_ENTRY_JUDGE_ENABLED", "0") == "1"
 
 # Символы которые НИКОГДА не судим (чёрный список)
@@ -23,6 +23,10 @@ JUDGE_BLACKLIST = {
 
 # Минимальный score для вызова судьи (не тратим токены на слабые сигналы)
 JUDGE_MIN_SCORE = 20
+
+# Кеш вердиктов (TTL=300с — не гоняем LLM на одинаковые сигналы)
+_judge_verdict_cache: dict[str, tuple[float, dict]] = {}
+_JUDGE_VERDICT_CACHE_TTL = 300
 
 
 def judge_entry(
@@ -85,6 +89,14 @@ Check:
 """
 
     try:
+        # ── Кеш вердиктов: хэш контекста → вердикт ──
+        cache_key = f"{symbol}:{side}:{score}:{bb_pos:.0f}:{funding_rate:.4f}"
+        now = time.time()
+        if cache_key in _judge_verdict_cache:
+            ts, cached = _judge_verdict_cache[cache_key]
+            if now - ts < _JUDGE_VERDICT_CACHE_TTL:
+                return cached
+
         proc = subprocess.run(
             ["python3", JUDGE_SCRIPT, "--mode", "general", "--json", "-"],
             input=signal_context,
@@ -94,6 +106,7 @@ Check:
         )
         if proc.returncode == 0 and proc.stdout.strip():
             result = json.loads(proc.stdout)
+            _judge_verdict_cache[cache_key] = (now, result)
             return result
         else:
             # Судья не ответил или ошибка — БЛОКИРУЕМ вход (fail-closed, 27.06)

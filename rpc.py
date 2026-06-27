@@ -560,6 +560,10 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_close(body)
         elif path == "/move_sl":
             self._handle_move_sl(body)
+        elif path == "/emergency_close":
+            self._handle_emergency_close()
+        elif path == "/kill_switch":
+            self._handle_kill_switch()
         elif path == "/reload-config":
             self._handle_reload_config()
         elif path == "/pause":
@@ -1579,3 +1583,26 @@ def update_health(alive=True, cycle_count=0, cycle_duration=0.0):
     rpc_state["cycle_count"] = cycle_count
     rpc_state["last_cycle"] = time.time()
     rpc_state["cycle_duration"] = cycle_duration
+
+    def _handle_emergency_close(self):
+        """Emergency close: MARKET close ALL positions. Use: POST /emergency_close"""
+        try:
+            from .risk_manager import emergency_close_all
+            from .api import fetch_positions
+            positions = fetch_positions()
+            if not positions:
+                self._json_reply({"status": "ok", "closed": 0, "message": "No open positions"})
+                return
+            result = emergency_close_all("MANUAL KILL SWITCH via RPC", positions)
+            self._json_reply({"status": "ok", **result})
+        except Exception as e:
+            self._json_reply({"status": "error", "message": str(e)})
+
+    def _handle_kill_switch(self):
+        """Universal kill switch: emergency close + circuit breaker + pause.
+        Use: POST /kill_switch  or  GET /rpc/kill_switch"""
+        from .risk_manager import _circuit_breaker_active
+        from .rpc import rpc_state
+        rpc_state["paused"] = True
+        self._handle_emergency_close()
+

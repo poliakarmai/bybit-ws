@@ -10,6 +10,7 @@ from typing import Optional
 
 # Конфиг
 TIME_EXIT_HOURS = 6  # максимум часов в позиции без движения
+TIME_EXIT_MAX_HOURS = 48  # абсолютный максимум — закрыть в любом случае
 TIME_EXIT_MIN_PNL = 0.0  # минимальный PnL для «живой» позиции (в процентах от входа)
 TIME_EXIT_ENABLED = True
 
@@ -51,6 +52,7 @@ def check_time_exit(positions: dict, open_orders: dict = None) -> list:
             continue
 
         age_hours = (now - opened_ts) / 3600
+
         if age_hours < TIME_EXIT_HOURS:
             continue
 
@@ -63,6 +65,16 @@ def check_time_exit(positions: dict, open_orders: dict = None) -> list:
             continue
 
         pnl_pct = (mark - entry) / entry * 100
+
+        # Абсолютный максимум: >48ч → закрыть в любом случае
+        if age_hours > TIME_EXIT_MAX_HOURS:
+            reason = (
+                f"TIME EXIT {sym}: {age_hours:.0f}h (max holding), "
+                f"PnL={pnl_pct:+.1f}%"
+            )
+            exits.append((sym, reason, size, p.get('positionIdx', 0), p.get('side', 'Buy')))
+            continue
+
         if pnl_pct > TIME_EXIT_MIN_PNL:
             continue  # позиция в плюсе — пусть живёт
 
