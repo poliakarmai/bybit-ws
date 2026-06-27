@@ -325,3 +325,129 @@ websocket-client (optional) — WS-потоки
 | Тесты | 53 теста (smoke + module + ML) |
 | CI/CD | GitHub Actions |
 | Документация | AGENTS.md, roadmap, troubleshooting |
+
+## ═══════════════════════════════════════
+## НАВИГАЦИЯ ДЛЯ AI-АГЕНТОВ
+## ═══════════════════════════════════════
+
+### Если нужно найти — смотри
+
+| Задача | Файл | Строка/функция |
+|--------|------|---------------|
+| Почему позиция без SL? | `auto_sl.py` + `events.log` | `check_and_fix_sl()` + grep "NO SL" |
+| Почему позиция без TP? | `auto_tp.py` + `events.log` | `auto_take_profit()` + grep "NO TP" |
+| Почему нет новых входов? | grep "OB BLOCK\|VOL BLOCK\|ENTRY JUDGE BLOCK\|CORR BLOCK" | `events.log` |
+| Где логика входа? | `auto_entry.py` | `auto_entry_scan()` |
+| Где риск-менеджмент? | `risk_manager.py` | `check_risk_limits()`, `check_black_swan()` |
+| Где стоп-лоссы? | `auto_sl.py` | `check_and_fix_sl()`, `check_breakeven_sl()` |
+| Где тейк-профиты? | `auto_tp.py` | `auto_take_profit()` |
+| Где самообучение? | `journal/self_learn.py` | `apply_journal_insights()` |
+| Где кластерный анализ? | `post_trade.py` | `analyze_clusters()`, `is_cluster_blocked()` |
+| Где сессии? | `session_params.py` | `get_session()` |
+| Где конфиг? | `~/.config/bybit-ws/config.yaml` | `~/.config/bybit-ws/env` |
+| Где API-ключи? | `~/.config/bybit-ws/env` | chmod 600 |
+| Как деплоить? | `deploy.sh` | атомарный symlink swap |
+
+### Быстрый поиск по коду
+
+```bash
+# Найти все вызовы конкретной функции
+grep -rn "check_black_swan\|emergency_close" ~/bybit-ws/bybit_ws/
+
+# Найти где используется фича-флаг
+grep -rn "BYBIT_WS_FULL\|BYBIT_ENTRY_JUDGE\|BYBIT_ATR_TP" ~/bybit-ws/bybit_ws/
+
+# Найти все импорты модуля
+grep -rn "from .auto_sl import\|import.*auto_sl" ~/bybit-ws/bybit_ws/
+
+# Найти все места записи в БД
+grep -rn "execute\|commit\|INSERT\|UPDATE" ~/bybit-ws/bybit_ws/state_db.py
+
+# Найти все HTTP-запросы к Bybit
+grep -rn "bybit(\|fetch_\|place_\|cancel_" ~/bybit-ws/bybit_ws/api.py
+```
+
+### Точки входа
+
+```
+python -m bybit_ws.main_async    ← Основной процесс (сервис)
+python -m bybit_ws.rpc           ← RPC сервер (:8766)
+deploy.sh                        ← Скрипт деплоя
+test_smoke.py                    ← Тесты (запускать перед коммитом)
+backtest/__init__.py             ← Backtesting engine
+```
+
+### Граф зависимостей (кто кого импортит)
+
+```
+main_async.py
+  ├── api.py (REST)
+  ├── ws_client.py (WebSocket)
+  ├── auto_entry.py
+  │   ├── orderbook_filter.py
+  │   ├── volume_filter.py
+  │   ├── entry_judge.py
+  │   └── correlation.py
+  ├── auto_short.py
+  │   ├── orderbook_filter.py
+  │   ├── volume_filter.py
+  │   └── entry_judge.py
+  ├── auto_sl.py (ATR-adaptive)
+  ├── auto_tp.py (ATR-based TP)
+  ├── trailing_sl.py
+  ├── time_exit.py
+  ├── risk_manager.py (black swan + emergency)
+  ├── bb_prefetch.py
+  ├── session_params.py
+  ├── post_trade.py
+  └── journal/self_learn.py
+
+api.py ── самостоятельный (REST-клиент Bybit v5)
+state_db.py ── самостоятельный (SQLite SSOT)
+rpc.py ── самостоятельный (HTTP-сервер)
+```
+
+### Data flow
+
+```
+Bybit API ──REST──▶ main_async ──▶ SQLite (state.db)
+                  │
+                  ├──▶ auto_entry ──▶ Entry Judge (LLM) ──▶ ордер
+                  ├──▶ auto_sl ──▶ trading-stop
+                  ├──▶ auto_tp ──▶ limit-ордера
+                  └──▶ time_exit ──▶ market-close
+
+События ──▶ events.log ──▶ grep для отладки
+Метрики ──▶ metrics.json ──▶ Prometheus /metrics
+Сделки  ──▶ trade_history (SQLite) ──▶ journal analyzer
+```
+
+### Принятие решений
+
+```
+Позиция без SL?
+  ├─ is_manual_position? → skip
+  ├─ mark > entry (LONG)? → BE-SL = entry
+  ├─ ATR available? → SL = entry ± k×ATR (capped -50%)
+  └─ no ATR? → SL = BB-based fallback
+
+Позиция без TP?
+  ├─ is_manual_position? → skip
+  ├─ qty < min_order? → PERM_SKIP (поставится при DCA)
+  ├─ PERM_SKIP active? → skip (time-decay 24ч)
+  └─ OK → TP1=entry+1.0×ATR(40%), TP2=2.0×ATR(35%), TP3=3.0×ATR(25%)
+
+Новый сигнал?
+  ├─ MTF confluence < 2? → skip
+  ├─ orderbook imbalance нейтрален? → skip
+  ├─ volume в шумовой зоне (0.7-1.3×SMA)? → skip
+  ├─ Entry Judge → revise? → skip
+  ├─ correlation > 0.85 с открытой? → skip
+  ├─ post-trade cluster WR < 40%? → skip
+  ├─ circuit breaker active? → skip
+  └─ все OK → вход!
+
+Black swan?
+  ├─ BTC -8% за час? → emergency close ALL
+  └─ PnL > 2× daily limit? → emergency close ALL
+```
