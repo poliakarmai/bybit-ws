@@ -451,3 +451,199 @@ Black swan?
   ├─ BTC -8% за час? → emergency close ALL
   └─ PnL > 2× daily limit? → emergency close ALL
 ```
+
+## ═══════════════════════════════════════
+## СХЕМА БД (state.db)
+## ═══════════════════════════════════════
+
+| Таблица | Назначение | Ключевые поля |
+|---------|-----------|--------------|
+| `positions` | Открытые позиции (SSOT) | symbol, side, qty, entry, mark, stopLoss, upnl, opened_at |
+| `trade_history` | Закрытые сделки | symbol, side, entry_price, exit_price, size, pnl, fees, strategy, entry_at, closed_at |
+| `orders` | История ордеров | orderId, symbol, status, kind, price, qty, side, createdTime |
+| `circuit_breakers` | Состояние CB | name, failures, cooldown_until |
+| `cooldowns` | Кулдауны SL re-entry | symbol, side, until_ts |
+| `short_state` | SHORT позиции | symbol, last_short_ts, entry_price |
+| `pump_state` | Памп-монеты | symbol, first_seen_ts, alerts |
+| `x10_limits` | Дневные лимиты x10 | date, pnl, margin_used, entries |
+| `kv_store` | Ключ-значение | key, value (rpc_auth_token, config) |
+| `metrics_daily` | Дневные метрики | date, tp_count, sl_count, pnl, win_rate |
+
+### Быстрые запросы к БД
+
+```bash
+DB=~/.local/share/bybit-ws/state.db
+
+# Открытые позиции с PnL
+sqlite3 $DB "SELECT symbol, side, entry, mark, upnl FROM positions"
+
+# Последние 10 сделок
+sqlite3 $DB "SELECT symbol, side, pnl, datetime(closed_at,'unixepoch') FROM trade_history ORDER BY closed_at DESC LIMIT 10"
+
+# Статус circuit breaker
+sqlite3 $DB "SELECT * FROM circuit_breakers"
+
+# Токен для RPC
+sqlite3 $DB "SELECT value FROM kv_store WHERE key='rpc_auth_token'"
+
+# Проверка целостности
+sqlite3 $DB "PRAGMA integrity_check"
+
+# Размер БД
+ls -lh $DB
+```
+
+## ═══════════════════════════════════════
+## ДИАГНОСТИКА ПО ЛОГАМ (events.log)
+## ═══════════════════════════════════════
+
+```bash
+LOG=~/.local/share/bybit-ws/events.log
+
+# Последние ошибки
+grep -iE "error|exception|traceback" $LOG | tail -20
+
+# Почему бот не входит (какой фильтр сработал)
+grep -E "OB BLOCK|VOL BLOCK|ENTRY JUDGE BLOCK|CORR BLOCK|CB BLOCK|CLUSTER BLOCK" $LOG | tail -30
+
+# Все срабатывания Black Swan
+grep "BLACK SWAN\|emergency close" $LOG
+
+# Время тяжёлого цикла (должно быть <100с)
+grep "heavy cycle.*done" $LOG | tail -5
+
+# TP/SL алерты
+grep "TP/SL ALERT" $LOG | tail -5
+
+# Новые входы
+grep "ENTRY:" $LOG | tail -10
+
+# LLM fallback
+grep "ENTRY JUDGE" $LOG | grep -E "fallback|timeout|fail|circuit" | tail -10
+
+# Позиции через время (сколько часов висят)
+grep "max holding\|TIME EXIT" $LOG | tail -5
+
+# BB prefetch статистика
+grep "BB prefetch" $LOG | tail -5
+
+# Heartbeat (должен быть <13ч назад)
+grep "Heartbeat" $LOG | tail -1
+```
+
+## ═══════════════════════════════════════
+## ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (~/.config/bybit-ws/env)
+## ═══════════════════════════════════════
+
+| Переменная | Обязательная | Назначение |
+|-----------|-------------|-----------|
+| `BYBIT_API_KEY` | ✅ | Bybit API ключ (read+write+trade) |
+| `BYBIT_API_SECRET` | ✅ | Bybit секрет для HMAC-подписи |
+| `BYBIT_TESTNET` | — | 0=mainnet, 1=testnet |
+| `TELEGRAM_BOT_TOKEN` | ⚠️ | Telegram бот для алертов |
+| `TELEGRAM_CHAT_ID` | ⚠️ | Куда слать (супергруппа, топик) |
+| `NTFY_URL` | ⚠️ | ntfy URL для push |
+| `OPENROUTER_KEY` | ⚠️ | Entry Judge LLM (Nemotron) |
+| `DEEPSEEK_API_KEY` | ⚠️ | Entry Judge fallback |
+| `GEMINI_API_KEY` | ⚠️ | Vision (скриншоты) |
+| `BYBIT_WS_BB_ENABLED` | — | Публичный WS (default: 1) |
+| `BYBIT_WS_FULL_ENABLED` | — | Приватный WS (default: 0) |
+| `BYBIT_ML_ENABLED` | — | RF ML Gate (default: 0) |
+| `BYBIT_DSPY_ENABLED` | — | DSPy Gate (default: 1) |
+| `BYBIT_ENTRY_JUDGE_ENABLED` | — | Entry Judge (default: 1) |
+| `BYBIT_ATR_TP_ENABLED` | — | ATR-based TP (default: 1) |
+| `BYBIT_AB_ENABLED` | — | A/B-тест (default: 0) |
+| `BYBIT_REGIME_AUTO` | — | Авто LONG/SHORT (default: 0) |
+| `BYBIT_OPTUNA_ENABLED` | — | Optuna (default: 0) |
+
+## ═══════════════════════════════════════
+## RUNBOOK: ТИПИЧНЫЕ ИНЦИДЕНТЫ
+## ═══════════════════════════════════════
+
+### Бот не отвечает >15 минут
+
+```bash
+systemctl --user status bybit-ws-async
+journalctl --user -u bybit-ws-async --since "15 min ago" -n 50
+# Если завис — SIGKILL + старт:
+systemctl --user kill -s SIGKILL bybit-ws-async
+systemctl --user start bybit-ws-async
+# Проверить heartbeat:
+grep "Heartbeat" ~/.local/share/bybit-ws/events.log | tail -1
+```
+
+### Entry Judge постоянно в fallback/circuit
+
+```bash
+# Посмотреть что с LLM
+grep "ENTRY JUDGE" ~/.local/share/bybit-ws/events.log | tail -20
+# Проверить OpenRouter API
+curl -s https://openrouter.ai/api/v1/models | head -5
+# Сбросить CB: systemctl --user restart bybit-ws-async
+# Если API мёртв — отключить judge временно:
+# BYBIT_ENTRY_JUDGE_ENABLED=0 → restart
+```
+
+### Внезапный рост маржи >$250
+
+```bash
+# Срочно закрыть всё
+curl -X POST http://127.0.0.1:8766/emergency_close \
+  -H "Authorization: Bearer *** ~/.local/share/bybit-ws/state.db \"SELECT value FROM kv_store WHERE key='rpc_auth_token'\")"
+# Проверить логи на пам-сигналы
+grep "PUMP\|margin\|ALERT" ~/.local/share/bybit-ws/events.log | tail -30
+```
+
+### SQLite locked
+
+```bash
+# busy_timeout=5000 уже стоит. Проверить WAL:
+DB=~/.local/share/bybit-ws/state.db
+sqlite3 $DB "PRAGMA wal_checkpoint(TRUNCATE);"
+# Проверить другие процессы:
+lsof $DB 2>/dev/null || fuser $DB
+# Проверить размер WAL:
+ls -lh ${DB}-wal
+```
+
+### Позиция без TP/SL (самодиагностика)
+
+```bash
+# 1. Ручная ли позиция?
+grep "manual_position\|is_manual" ~/.local/share/bybit-ws/events.log | tail -5
+# 2. qty < min_order?
+grep "truncated\|PERM_SKIP" ~/.local/share/bybit-ws/events.log | tail -5
+# 3. Поставить вручную через Bybit UI или curl
+```
+
+## ═══════════════════════════════════════
+## PRE-DEPLOY CHECKLIST
+## ═══════════════════════════════════════
+
+- [ ] `python3 test_smoke.py` → 45/45 PASS
+- [ ] `python3 test_modules.py` → 5/5 PASS
+- [ ] `python3 test_ml_smoke.py` → 3/3 PASS
+- [ ] `sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA integrity_check"` → ok
+- [ ] `curl -s http://127.0.0.1:8766/health` → {"status":"alive"}
+- [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий (<13ч)
+- [ ] `df -h ~/.local/share/bybit-ws/` → >500MB свободно
+- [ ] `free -h` → >200MB RAM свободно
+- [ ] `bash deploy.sh` → атомарный swap
+
+## ═══════════════════════════════════════
+## ГЛОССАРИЙ
+## ═══════════════════════════════════════
+
+| Термин | Расшифровка |
+|--------|------------|
+| BB | Bollinger Bands (полосы Боллинджера) |
+| ATR | Average True Range — мера волатильности |
+| MTF | Multi-Timeframe — свёртка D+W+M таймфреймов |
+| DCA | Dollar Cost Averaging — усреднение позиции |
+| CB | Circuit Breaker — предохранитель |
+| SSOT | Single Source of Truth — единственный источник (SQLite) |
+| WAL | Write-Ahead Log — режим SQLite для concurrent access |
+| Fail-open | При ошибке фильтр пропускает (безопасно) |
+| Fail-closed | При ошибке фильтр блокирует (консервативно) |
+| Dry Spell | Период без входов после серии убытков |
+| PERM_SKIP | Перманентный пропуск TP (time-decay 24ч) |
