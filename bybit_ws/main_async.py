@@ -12,8 +12,10 @@ RPC-сервер — в отдельном потоке (как и раньше)
 """
 
 import asyncio
+import json
 import os
 import signal
+import sys
 import time
 import threading
 from datetime import datetime
@@ -25,16 +27,17 @@ DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 HEALTH_FILE = DATA_DIR / "health.txt"
 
 # ── Импорты ──
-from . import POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT
+from . import EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT
 from .config import Config
 from .alerts import log_event, add_alert, send_telegram_alert
 from .push_notifier import send_critical_alert, send_high_alert
-from .snapshot import save_json
+from .snapshot import save_json, load_json
 
 # Async API
 from .api import (
     fetch_positions_and_orders,
     get_bb_data_async,
+    bybit_async,
 )
 
 # Async DB
@@ -42,17 +45,23 @@ from .state_db import adb
 
 # Синхронные модули (вызываются через executor)
 from .auto_sl import check_and_fix_sl, check_breakeven_sl
-from .trailing_sl import trailing_sl
+from .auto_tp import auto_take_profit, apply_auto_tp
+from .trailing_sl import trailing_sl, trailing_sl_x10, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
 from .overbought import check_overbought, rotate_watchlist
-from .correlation import check_correlation
+from .correlation import check_correlation, tighten_correlation_sl
+from .funding_rotation import check_funding_rotation, execute_rotation
 from .dca import check_dca
 from .reporting import should_send_summary, send_summary, check_profit_triggers
-from .auto_entry import auto_entry_scan
-from .auto_short import check_auto_short
-from .sl_reentry import check_sl_reentry
+from .auto_entry import auto_entry_scan, record_sl_hit
+from .auto_short import check_auto_short, check_junk_dca
+from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .margin_alerts import check_margin_utilization
+from .funding_entry import check_funding_signals, execute_funding_entry
+from .bb_scalp import check_scalp_signals, execute_scalp
+from .mean_revert import check_mean_revert, execute_mean_revert
 from .partial_tp import check_partial_tp
+from .metrics import record_alert, record_auto_entry, ensure_today
 from .risk_manager import check as risk_check, is_circuit_breaker_active
 
 # ── Константы ──
@@ -125,7 +134,7 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
     """
     from .ws_client import (
         is_full_enabled, is_private_connected, is_private_stale,
-        get_all_positions,
+        get_all_positions, get_executions,
     )
 
     if is_full_enabled() and is_private_connected() and not is_private_stale(120):
@@ -330,7 +339,7 @@ async def async_main_loop():
     # RPC — запускаем в отдельном потоке (как в main.py)
     rpc_thread = None
     try:
-        from .rpc import start_rpc_server
+        from .rpc import start_rpc_server, rpc_state
         rpc_bind = cfg.rpc.bind
         rpc_port = cfg.rpc.port
         rpc_thread = threading.Thread(
@@ -476,27 +485,6 @@ async def async_main_loop():
                 except Exception as e:
                     log_event(f'⚠️ ab_status log: {e}')
 
-            # ── Торговый дневник: обновление каждые 10 циклов ──
-            if cycle % 10 == 0:
-                try:
-                    from .journal.adapter import load_from_sqlite
-                    journal = load_from_sqlite()
-                    if 'profile' in journal:
-                        from .state_db import adb as _adb
-                        import json as _json
-                        await _adb.set_kv('journal_snapshot', _json.dumps(journal, default=str))
-
-                        # ── Self-learning: adaptive parameters from journal ──
-                        try:
-                            from .journal.self_learn import apply_journal_insights
-                            adjustments = await apply_journal_insights(journal, cfg)
-                            if adjustments:
-                                log_event(f'🧠 Self-learn adjustments: {_json.dumps(adjustments, default=str)[:200]}')
-                        except Exception as _se:
-                            log_event(f'⚠️ self-learn: {_se}')
-                except Exception as e:
-                    log_event(f'⚠️ journal update: {e}')
-
             elapsed = time.monotonic() - t0
             if cycle % 10 == 0:
                 pos_count = len(new_positions) if new_positions else 0
@@ -553,16 +541,12 @@ def run():
         global SHUTDOWN
         SHUTDOWN = True
         log_event('SIGTERM received, shutting down...')
-        # Wake up the event loop immediately
-        loop.call_soon_threadsafe(loop.stop)
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             loop.add_signal_handler(sig, _shutdown)
-        except (NotImplementedError, RuntimeError) as e:
-            # Fallback: use traditional signal handler
-            signal.signal(sig, lambda s, f: _shutdown())
-            log_event(f'Signal handler fallback for {sig.name}: {e}')
+        except NotImplementedError:
+            pass
 
     try:
         loop.run_until_complete(async_main_loop())
