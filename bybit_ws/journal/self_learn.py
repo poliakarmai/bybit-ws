@@ -1,16 +1,30 @@
 """
-Self-learning module — applies journal insights to adapt strategy parameters.
+Self-learning module v2 — applies journal insights + persistent logging.
 
-Uses trading journal profile (win_rate, bias flags, symbol stats)
-to auto-tune Bollinger Grid parameters. Conservative adjustments only.
+Logs every adjustment to ~/.local/share/bybit-ws/self_learn.jsonl
+for audit and manual review.
 """
-
+import json
 import logging
+import os
+from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Adjustments are capped at ±20% of default
 MAX_ADJUSTMENT = 0.20
+LEARN_LOG = Path.home() / ".local" / "share" / "bybit-ws" / "self_learn.jsonl"
+
+
+def _log_adjustment(entry: dict):
+    """Append adjustment to persistent log."""
+    entry["ts"] = datetime.now().isoformat()
+    try:
+        LEARN_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(LEARN_LOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        logger.warning(f"self_learn log: {e}")
 
 
 async def apply_journal_insights(journal: dict, cfg) -> dict:
@@ -32,8 +46,15 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     avg_hold_hours = profile.get("avg_hold_hours", 24)
     total_pnl = profile.get("total_pnl", 0)
 
+    log_base = {
+        "event": "self_learn",
+        "win_rate": round(win_rate, 3),
+        "total_trades": total_trades,
+        "avg_hold_hours": round(avg_hold_hours, 1),
+        "total_pnl": round(total_pnl, 2),
+    }
+
     # ── Adaptive min_score ──
-    # Low win rate → raise entry threshold
     min_score = getattr(cfg.strategy, "min_score", 15)
     if win_rate < 0.40 and total_trades > 30:
         new_score = min(int(min_score * 1.3), 35)
@@ -47,9 +68,7 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
                                     "reason": f"win_rate={win_rate:.2f} < 0.45"}
 
     # ── Adaptive TP/SL ratio ──
-    tp_pct = getattr(cfg.strategy, "tp_pct", 15)
     sl_pct = getattr(cfg.strategy, "sl_pct", 5)
-    # If holding too short (< 2h avg), widen SL to avoid noise exits
     if avg_hold_hours < 2 and total_trades > 30:
         new_sl = min(sl_pct * 1.2, 10)
         if new_sl > sl_pct:
@@ -68,5 +87,14 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     if total_pnl < -100 and total_trades > 50:
         applied["pnl_guard"] = {"warning": True,
                                 "reason": f"Total PnL={total_pnl:.0f} < -$100"}
+
+    # ── Persistent log ──
+    if applied:
+        log_base["adjustments"] = applied
+        _log_adjustment(log_base)
+        logger.info(
+            f"Self-learn: {len(applied)} adjustments "
+            f"(win_rate={win_rate:.2f}, trades={total_trades})"
+        )
 
     return applied
