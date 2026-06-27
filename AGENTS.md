@@ -275,3 +275,53 @@ PERM_SKIP с time-decay 24ч.
 11. BB pre-fetch: кеш 5мин в начале тяжёлого цикла
 12. Prometheus /metrics: Bearer auth
 13. CI/CD: GitHub Actions smoke + GSC на push/PR
+
+## Технические характеристики
+
+| Метрика | Значение |
+|---------|----------|
+| RAM | ~35 MB |
+| Main cycle | 30 seconds |
+| Heavy cycle | 67-77 seconds |
+| Entry Judge timeout | 5 seconds |
+| LLM Circuit Breaker cooldown | 1 hour |
+| БД | SQLite WAL (synchronous=NORMAL, busy_timeout=5000) |
+| Деплой | Atomic (symlink swap, zero-downtime) |
+| Мониторинг | Prometheus /metrics, Heartbeat 12ч, Telegram/ntfy |
+| Тесты | 45 smoke + 5 module + 3 ML |
+
+## Требования
+
+| Компонент | Минимум | Рекомендуется |
+|-----------|---------|---------------|
+| OS | Ubuntu 20.04 / Debian 11 | Ubuntu 22.04 |
+| RAM | 512 MB | 1 GB |
+| CPU | 1 core | 2 cores |
+| Storage | 1 GB | 5 GB |
+| Python | 3.9+ | 3.11+ |
+| Bybit | API ключи (read+write+trade) | Subaccount для изоляции |
+
+## Зависимости
+
+```
+aiohttp, aiosqlite          — async HTTP + SQLite
+numpy, pandas               — вычисления
+scikit-learn                — ML (Random Forest)
+torch (optional)            — LSTM regime detection
+dspy-ai (optional)          — LLM optimization
+websocket-client (optional) — WS-потоки
+```
+
+## Что включено
+
+| Компонент | Описание |
+|-----------|----------|
+| 25+ модулей | Asyncio, type hints, документированы |
+| Feature flags | 10+ переключателей стратегий |
+| Session params | NY/Asia/Weekend адаптация |
+| Риск-менеджмент | Multi-layer: 7 фильтров, circuit breaker, black swan |
+| ML Stack | LSTM + RF + DSPy + post-trade cluster analysis |
+| Self-learning | JSONL-журнал, адаптивные пороги |
+| Тесты | 53 теста (smoke + module + ML) |
+| CI/CD | GitHub Actions |
+| Документация | AGENTS.md, roadmap, troubleshooting |
