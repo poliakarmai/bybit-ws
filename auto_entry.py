@@ -580,6 +580,26 @@ def auto_entry_scan(positions):
             except Exception:
                 pass  # API может отвалиться — лучше войти без проверки чем пропустить сигнал
 
+            # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
+            try:
+                from .entry_judge import should_enter as judge_should_enter
+                # SL ещё не установлен на этапе входа — используем BB lower как ориентир
+                _est_sl = bb2.get('lower', 0) * 0.95 if bb2.get('lower', 0) > 0 else None
+                can_enter, judge_reason = judge_should_enter(
+                    symbol=sym, side='Buy', score=s['score'],
+                    bb_pos=s['bb_pos'], entry_price=price,
+                    sl_price=_est_sl,
+                    funding_rate=s.get('funding', 0.0),
+                    bb_lower=bb2.get('lower', 0), bb_upper=bb2.get('upper', 0),
+                    mtf_confluence=s.get('mtf', {}).get('confluence', 0) if 'mtf' in s else 0,
+                    regime=regime_name,
+                )
+                if not can_enter:
+                    log_event(f'🧑‍⚖️ ENTRY JUDGE BLOCK {sym}: {judge_reason}')
+                    continue
+            except Exception as e:
+                log_event(f'⚠️ entry_judge {sym}: {e}')
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}

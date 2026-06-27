@@ -476,6 +476,25 @@ def check_auto_short(positions):
             except Exception:
                 pass
 
+            # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
+            try:
+                from .entry_judge import should_enter as judge_should_enter
+                _est_sl = price * 1.03 if price > 0 else None  # SL на 3% выше для SHORT
+                _limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
+                can_enter, judge_reason = judge_should_enter(
+                    symbol=sym, side='Sell', score=short_score,
+                    bb_pos=bb_pct, entry_price=_limit_price,
+                    sl_price=_est_sl,
+                    funding_rate=short_sc.get('funding', 0.0) if short_sc else 0.0,
+                    bb_lower=bb.get('lower', 0), bb_upper=bb.get('upper', 0),
+                    mtf_confluence=mtf_conf.get('confluence', 0) if isinstance(mtf_conf, dict) else 0,
+                )
+                if not can_enter:
+                    log_event(f'🧑‍⚖️ ENTRY JUDGE BLOCK SHORT {sym}: {judge_reason}')
+                    continue
+            except Exception as e:
+                log_event(f'⚠️ entry_judge short {sym}: {e}')
+
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
             order = None
