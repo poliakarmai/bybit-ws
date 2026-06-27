@@ -262,3 +262,138 @@ def suggest_qty(margin: float, price: float, leverage: float = 10,
     usdt_qty = margin * leverage
     qty = math.floor(usdt_qty / price / lot_step) * lot_step
     return max(qty, lot_step)
+
+
+# ═══════════════════════════════════════════════════
+# Kelly fractional sizing (Фаза 7)
+# ═══════════════════════════════════════════════════
+
+KELLY_SYMBOL_STATS: dict[str, dict] = {}  # {symbol: {win_rate, avg_rr, trades}}
+KELLY_FRACTION = 0.25  # Fractional Kelly: use 25% of full Kelly
+KELLY_MIN_TRADES = 10  # Minimum trades before using Kelly stats
+KELLY_DEFAULT_RISK = 0.20  # Fallback: 20% of deposit risk (LONG 3x)
+
+
+def update_kelly_stats(symbol: str, win_rate: float, avg_rr: float,
+                       trades: int):
+    """Update per-symbol Kelly statistics from backtest/journal."""
+    KELLY_SYMBOL_STATS[symbol] = {
+        'win_rate': win_rate,
+        'avg_rr': avg_rr,
+        'trades': trades,
+    }
+
+
+def load_kelly_stats_from_backtest():
+    """Load per-symbol stats from the backtesting module."""
+    try:
+        from .backtest import load_trade_history, win_rate, avg_rr_ratio
+        trades = load_trade_history()
+        by_symbol = {}
+        for t in trades:
+            sym = t['symbol']
+            if sym not in by_symbol:
+                by_symbol[sym] = []
+            by_symbol[sym].append(t)
+
+        for sym, sym_trades in by_symbol.items():
+            if len(sym_trades) >= KELLY_MIN_TRADES:
+                wr = win_rate(sym_trades)
+                rr = avg_rr_ratio(sym_trades)
+                update_kelly_stats(sym, wr, rr, len(sym_trades))
+
+        loaded = len(KELLY_SYMBOL_STATS)
+        if loaded > 0:
+            log_event(f'📊 Kelly: loaded stats for {loaded} symbols')
+    except Exception as e:
+        log_event(f'⚠️ Kelly stats load error: {e}')
+
+
+def kelly_fraction(win_rate: float, avg_rr: float) -> float:
+    """Calculate Kelly fraction: f* = (p×b - q)/b.
+
+    Args:
+        win_rate: Win probability (0..1)
+        avg_rr: Average win / average loss ratio
+
+    Returns:
+        Kelly fraction (negative = don't bet, 0..1 = fraction of bankroll)
+    """
+    if avg_rr <= 0 or win_rate <= 0:
+        return 0.0
+
+    p = win_rate
+    b = avg_rr
+    q = 1.0 - p
+
+    f_star = (p * b - q) / b
+    return f_star
+
+
+def kelly_margin(symbol: str, deposit: float | None = None,
+                 base_risk: float | None = None) -> dict:
+    """Calculate position margin using Kelly criterion.
+
+    Args:
+        symbol: Trading symbol (e.g. 'LINKUSDT')
+        deposit: Current deposit in USDT (auto-fetch if None)
+        base_risk: Base risk fraction (default: KELLY_DEFAULT_RISK)
+
+    Returns:
+        {'margin': float, 'risk_pct': float, 'kelly_f': float,
+         'method': 'kelly' | 'fallback', ...}
+    """
+    if deposit is None:
+        deposit = get_deposit()
+    if base_risk is None:
+        base_risk = KELLY_DEFAULT_RISK
+
+    stats = KELLY_SYMBOL_STATS.get(symbol)
+
+    if not stats or stats['trades'] < KELLY_MIN_TRADES:
+        # Fallback: use base risk
+        margin = round(deposit * base_risk, 1)
+        return {
+            'margin': max(margin, _p('min_margin', _FB_MIN_MARGIN)),
+            'risk_pct': base_risk,
+            'kelly_f': None,
+            'method': 'fallback',
+            'reason': f'<{KELLY_MIN_TRADES} trades for {symbol}',
+        }
+
+    wr = stats['win_rate']
+    rr = stats['avg_rr']
+    f_star = kelly_fraction(wr, rr)
+    f = f_star * KELLY_FRACTION  # Fractional Kelly: 25%
+
+    if f <= 0:
+        # Kelly says don't bet
+        return {
+            'margin': 0,
+            'risk_pct': 0,
+            'kelly_f': round(f_star, 4),
+            'method': 'kelly_block',
+            'reason': f'Kelly f*={f_star:.4f} ≤ 0 for {symbol} '
+                      f'(WR={wr:.1%}, R:R={rr:.2f})',
+        }
+
+    # Cap Kelly risk to reasonable bounds
+    max_risk = base_risk * 2.0  # Don't exceed 2x base risk even with good stats
+    min_risk = base_risk * 0.5  # At least half of base risk if Kelly is positive
+    risk_pct = max(min_risk, min(f, max_risk))
+
+    margin = round(deposit * risk_pct, 1)
+    margin = max(margin, _p('min_margin', _FB_MIN_MARGIN))
+
+    return {
+        'margin': margin,
+        'risk_pct': round(risk_pct, 4),
+        'kelly_f': round(f_star, 4),
+        'kelly_fractional': round(f, 4),
+        'method': 'kelly',
+        'stats': {
+            'win_rate': round(wr, 3),
+            'avg_rr': round(rr, 2),
+            'trades': stats['trades'],
+        },
+    }
