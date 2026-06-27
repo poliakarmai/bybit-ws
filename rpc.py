@@ -472,6 +472,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             return _error(self, 'Unauthorized', 'Invalid or missing Bearer token', 401)
 
         # Алиасы (короткие пути)
+        if path == "/metrics":
+            return self._handle_metrics_prometheus()
         if path == "/health":
             return self._handle_health()
         if path == "/positions":
@@ -1583,6 +1585,50 @@ def update_health(alive=True, cycle_count=0, cycle_duration=0.0):
     rpc_state["cycle_count"] = cycle_count
     rpc_state["last_cycle"] = time.time()
     rpc_state["cycle_duration"] = cycle_duration
+
+    def _handle_metrics_prometheus(self):
+        """Prometheus /metrics endpoint."""
+        from . import DATA_DIR
+        import time as _time
+        lines = []
+        try:
+            from .rpc import rpc_state
+            cycle = rpc_state.get('cycle_count', 0)
+            latency = rpc_state.get('cycle_duration', 0)
+            paused = 1 if rpc_state.get('paused') else 0
+            lines.append(f'bybit_ws_cycle_count {cycle}')
+            lines.append(f'bybit_ws_cycle_latency_seconds {latency:.3f}')
+            lines.append(f'bybit_ws_paused {paused}')
+        except Exception:
+            pass
+        try:
+            metrics_path = str(DATA_DIR / 'metrics.json')
+            if os.path.exists(metrics_path):
+                with open(metrics_path) as f:
+                    m = json.loads(f.read())
+                lines.append(f'bybit_ws_daily_pnl {m.get("daily_pnl", 0):.2f}')
+                lines.append(f'bybit_ws_win_rate {m.get("win_rate", 0):.3f}')
+                lines.append(f'bybit_ws_tp_count {m.get("tp_count", 0)}')
+                lines.append(f'bybit_ws_sl_count {m.get("sl_count", 0)}')
+                lines.append(f'bybit_ws_total_trades {m.get("total_trades", 0)}')
+        except Exception:
+            pass
+        try:
+            from .api import fetch_positions
+            pos = fetch_positions()
+            lines.append(f'bybit_ws_positions_total {len(pos)}')
+            pnl = sum(float(p.get('upnl', 0) or 0) for p in pos.values() if isinstance(p, dict))
+            lines.append(f'bybit_ws_unrealized_pnl {pnl:.2f}')
+        except Exception:
+            pass
+        lines.append('')
+        self._text_reply('\n'.join(lines), content_type='text/plain; version=0.0.4')
+
+    def _text_reply(self, text, content_type='application/json'):
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.end_headers()
+        self.wfile.write(text.encode())
 
     def _handle_emergency_close(self):
         """Emergency close: MARKET close ALL positions. Use: POST /emergency_close"""

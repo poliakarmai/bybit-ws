@@ -184,6 +184,17 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
     t0 = time.time()
     log_event(f'⚡ heavy cycle #{cycle_count} start')
 
+    # ── BB pre-fetch: batch-загрузка для всех отслеживаемых символов ──
+    try:
+        from .bb_prefetch import prefetch_bb_for_all
+        tracked = list(positions.keys()) if positions else []
+        if tracked:
+            n = prefetch_bb_for_all(tracked)
+            if n > 0:
+                log_event(f'📊 BB prefetch: {n}/{len(tracked)} symbols')
+    except Exception as e:
+        log_event(f'⚠️ bb_prefetch: {e}')
+
     # Параллельный запуск CPU-bound проверок
     tasks = []
 

@@ -24,6 +24,12 @@ SPLIT_HIGH_VOL = (0.40, 0.60)
 SPLIT_NORMAL = (0.25, 0.75)
 SPLIT_LOW_VOL = (0.15, 0.85)
 
+# ── ATR-based TP levels (28.06) ──
+ATR_TP_ENABLED = os.environ.get('BYBIT_ATR_TP_ENABLED', '1') == '1'
+# Множители ATR для TP уровней (LONG: entry + k×ATR, SHORT: entry - k×ATR)
+ATR_TP_LEVELS = [1.0, 2.0, 3.0]  # TP1, TP2, TP3
+ATR_TP_SPLITS = [0.40, 0.35, 0.25]  # % объёма на каждый уровень
+
 # PERM_SKIP time-decay: 24 часа
 PERM_SKIP_TTL = 86400
 
