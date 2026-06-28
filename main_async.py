@@ -237,6 +237,20 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
             add_alert('STOP', msg)
             send_critical_alert(msg)  # Push: 🚨 на телефон
 
+        # ── Авто-очистка pump_state для закрытых позиций ──
+        try:
+            import sqlite3
+            db_path = str(DATA_DIR / 'state.db')
+            db = sqlite3.connect(db_path)
+            pump_syms = [r[0] for r in db.execute("SELECT symbol FROM pump_state").fetchall()]
+            orphaned = [s for s in pump_syms if s not in (positions or {})]
+            for sym in orphaned:
+                db.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
+                db.commit()
+                log_event(f'🧹 pump_state clean: {sym} (позиция закрыта)')
+        except Exception:
+            pass
+
     # DCA
     if not rpc_state.get("paused"):
         dca_msgs = await run_in_thread(check_dca)
@@ -479,11 +493,30 @@ async def async_main_loop():
                     from .ab_test import is_ab_enabled, get_status as _ab_status
                     if is_ab_enabled():
                         ab = _ab_status()
-                        if ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
+                        if ab and ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
                             log_event(f'🧪 A/B вердикт: {ab["significance"]["verdict"]} '
                                       f'(p_boot={ab["significance"].get("p_value_bootstrap")})')
                 except Exception as e:
                     log_event(f'⚠️ ab_status log: {e}')
+
+            # ── Self-learning + Post-trade анализ (раз в сутки) ──
+            if cycle % 2880 == 1:
+                try:
+                    from .journal import analyzer as _journal_analyzer
+                    from .journal.self_learn import apply_journal_insights as _apply_insights
+                    from .post_trade import analyze_clusters as _cluster_analysis
+                    journal = _journal_analyzer.analyze()
+                    if journal:
+                        adjustments = await _apply_insights(journal, cfg)
+                        if adjustments:
+                            log_event(f'🧠 Self-learn: {len(adjustments)} adjustments applied')
+                    clusters = _cluster_analysis()
+                    if clusters:
+                        blocked = clusters.get('blocked', [])
+                        if blocked:
+                            log_event(f'🚫 Post-trade блок: {len(blocked)} кластеров')
+                except Exception as e:
+                    log_event(f'⚠️ self_learn error: {e}')
 
             elapsed = time.monotonic() - t0
             if cycle % 10 == 0:

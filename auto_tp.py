@@ -107,7 +107,13 @@ def auto_take_profit(positions, orders, skip_syms=None):
     """Поставить ATR-адаптивные TP на BB-уровни."""
     skip_syms = skip_syms or set()
     existing_tp = {}
-    for o in orders.values():
+    if isinstance(orders, dict):
+        order_iter = orders.values()
+    elif isinstance(orders, list):
+        order_iter = orders
+    else:
+        order_iter = []
+    for o in order_iter:
         if o.get('kind') == 'TP' and o.get('status') in ('New', 'PartiallyFilled', 'Untriggered'):
             sym = o['symbol']
             if sym not in existing_tp:
