@@ -40,8 +40,8 @@
 |--------|-----------|--------|
 | BlackSwan multi-tier (BTC -3%/-5%/-8%) | 🔴 | ✅ |
 | Canary mode для self-learning (10% входов + auto-rollback) | 🔴 | ✅ |
-| Paper Trading — обкатка ML-моделей без риска | 🔴 | ⬜ |
-| Structured Logging (structlog → JSON) | 🟡 | ⬜ |
+| Paper Trading — обкатка ML-моделей без риска | 🔴 | ✅ |
+| Structured Logging (structlog → JSON) | 🟡 | ✅ |
 | SQLite бэкапы (cron каждые 6ч, уже настроен) | 🟢 | ✅ |
 | Global Kill-Switch (API :8766 + Telegram-бот) | 🟢 | ✅ (уже есть) |
 | PR #52823 (macOS symlink fix) | 🟡 | 🟡 ждёт форк |

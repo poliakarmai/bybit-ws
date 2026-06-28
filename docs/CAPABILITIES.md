@@ -144,6 +144,8 @@ high_vol: max 5 позиций (приоритет над сессионным).
 | `BYBIT_REGIME_AUTO` | 0 | После валидации LSTM |
 | `BYBIT_AB_ENABLED` | 0 | При тесте PPO vs DQN |
 | `BYBIT_WS_FULL_ENABLED` | 0 | При миграции на WS |
+| `BYBIT_PAPER_ENABLED` | 0 | Paper Trading (без риска) |
+| `STRUCTURED_LOGGING` | 0 | JSON-логи в events.jsonl |
 
 ## 14. Аварийные эндпоинты
 

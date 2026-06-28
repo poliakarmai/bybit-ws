@@ -167,6 +167,7 @@ _DEFAULT_LOGGING = {
     'format': 'json',            # 'json' or 'text'
     'trades_max_size_mb': 100,   # ротация trades.jsonl при 100 МБ
     'trades_archive': True,       # архивировать старые в .gz
+    'structured': False,          # JSON-логи в events.jsonl (STRUCTURED_LOGGING=1)
 }
 
 _DEFAULT_ALERTS = {

@@ -7,6 +7,29 @@
 
 ---
 
+---
+
+## [7.2] — 2026-06-28
+
+### Added
+- **Paper Trading:** `paper_trading.py` — интеграция PaperExchange в main loop
+  - Feature flag: `BYBIT_PAPER_ENABLED=1`
+  - RPC: `/paper/balance`, `/paper/positions`, `/paper/summary`
+  - Mark-цена обновляется из WS-кеша, PnL в реальном времени
+  - Отдельная БД `paper_state.db` (не пересекается с реальными позициями)
+- **Structured Logging:** `structured_log.py` — JSON-логи в `events.jsonl`
+  - Feature flag: `STRUCTURED_LOGGING=1`
+  - log_info/warn/error/critical + log_cycle
+  - Ротация при 50 MB, совместимость с Grafana Loki
+- **RPC paper endpoints:** 3 новых эндпоинта для paper-торговли
+
+### Changed
+- main_async.py: paper-блок (mark-цены + сводка каждые 10 циклов)
+- rpc.py: +3 paper handlers
+- config.py: `logging.structured` field
+- CAPABILITIES.md: +BYBIT_PAPER_ENABLED, +STRUCTURED_LOGGING flags
+- ROADMAP.md: Фаза 7.2 закрыта (все ✅)
+
 ## [7.1] — 2026-06-28
 
 ### Added

@@ -594,6 +594,13 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_logs(body)
         elif path == "/reset-token":
             self._handle_reset_token(body)
+        # ── Paper Trading ──
+        elif path == "/paper/balance":
+            self._handle_paper_balance()
+        elif path == "/paper/positions":
+            self._handle_paper_positions()
+        elif path == "/paper/summary":
+            self._handle_paper_summary()
         else:
             self.send_response(404)
             self.end_headers()
@@ -1684,4 +1691,53 @@ def update_health(alive=True, cycle_count=0, cycle_duration=0.0):
         from .rpc import rpc_state
         rpc_state["paused"] = True
         self._handle_emergency_close()
+
+    # ── Paper Trading handlers ──
+
+    def _handle_paper_balance(self):
+        """GET /paper/balance — баланс paper-счёта."""
+        try:
+            from bybit_ws.paper_trading import paper_get_balance, is_paper_enabled
+            if not is_paper_enabled():
+                self._json_reply({"enabled": False, "message": "Paper trading disabled (BYBIT_PAPER_ENABLED=0)"})
+                return
+            balance = paper_get_balance()
+            self._json_reply({"enabled": True, "balance": balance, "currency": "USDT"})
+        except Exception as e:
+            self._json_reply({"status": "error", "message": str(e)})
+
+    def _handle_paper_positions(self):
+        """GET /paper/positions — открытые paper-позиции."""
+        try:
+            from bybit_ws.paper_trading import is_paper_enabled, get_paper_exchange
+            if not is_paper_enabled():
+                self._json_reply({"enabled": False, "positions": []})
+                return
+            px = get_paper_exchange()
+            positions = px.fetch_positions() if px else {}
+            pos_list = []
+            for sym, p in positions.items():
+                pos_list.append({
+                    "symbol": sym,
+                    "side": p.get("side"),
+                    "size": p.get("size"),
+                    "entry": p.get("entry"),
+                    "mark": p.get("mark"),
+                    "upnl": p.get("upnl", 0),
+                    "leverage": p.get("leverage", 3),
+                    "stop_loss": p.get("stopLoss"),
+                    "liq_price": p.get("liqPrice"),
+                })
+            self._json_reply({"enabled": True, "positions": pos_list, "count": len(pos_list)})
+        except Exception as e:
+            self._json_reply({"status": "error", "message": str(e)})
+
+    def _handle_paper_summary(self):
+        """GET /paper/summary — сводка paper-торговли."""
+        try:
+            from bybit_ws.paper_trading import paper_get_summary
+            summary = paper_get_summary()
+            self._json_reply(summary)
+        except Exception as e:
+            self._json_reply({"status": "error", "message": str(e)})
 

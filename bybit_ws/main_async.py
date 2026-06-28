@@ -405,7 +405,38 @@ async def async_main_loop():
             except Exception as e:
                 log_event(f'⚠️ reporting error: {e}')
 
-            # ── A/B-тест: логирование статуса (каждые 10 циклов) ──
+            # ── Paper Trading: симуляция входов + обновление mark-цен ──
+            try:
+                from .paper_trading import (
+                    is_paper_enabled, paper_update_mark_prices,
+                    paper_get_summary,
+                )
+                if is_paper_enabled() and cycle % 2 == 0:
+                    # Обновляем mark-цены из WS-кеша (каждые 2 цикла = 60с)
+                    mark_prices = {}
+                    for sym in (new_positions or {}):
+                        try:
+                            from .ws_client import get_bb as _ws_bb
+                            bb = _ws_bb(sym, 'D')
+                            if bb:
+                                mark_prices[sym] = bb.get('close', bb.get('middle', 0))
+                        except Exception:
+                            pass
+                    if mark_prices:
+                        paper_update_mark_prices(mark_prices)
+                if is_paper_enabled() and cycle % 10 == 0:
+                    summary = paper_get_summary()
+                    bal = summary["balance"]
+                    pos_n = summary["positions"]
+                    pnl = summary["total_pnl"]
+                    trades_n = summary["trades"]
+                    log_event(
+                        f'📝 Paper: ${bal:.0f} balance, '
+                        f'{pos_n} pos, PnL ${pnl:.2f}, '
+                        f'{trades_n} trades'
+                    )
+            except Exception as e:
+                log_event(f'⚠️ paper trading error: {e}')
             if cycle % 10 == 0:
                 try:
                     from .ab_test import is_ab_enabled, get_status as _ab_status
