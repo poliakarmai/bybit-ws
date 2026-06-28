@@ -329,6 +329,12 @@ async def async_main_loop():
     print(f"[{datetime.now():%H:%M:%S}] 🚀 Async main loop: cycle={CYCLE_SECONDS}s heavy={HEAVY_CYCLE}"
           + (' WS_FULL=ON' if _WS_FULL_ENABLED else ''))
 
+    # ── Инициализация метрик за сегодня ──
+    try:
+        ensure_today()
+    except Exception as e:
+        log_event(f'⚠️ ensure_today error: {e}')
+
     # ── Фаза 5.2: Проверить Optuna feature flag ──
     if os.environ.get('BYBIT_OPTUNA_ENABLED', '0') == '1':
         try:
@@ -518,7 +524,30 @@ async def async_main_loop():
                     from .journal import analyzer as _journal_analyzer
                     from .journal.self_learn import apply_journal_insights as _apply_insights
                     from .post_trade import analyze_clusters as _cluster_analysis
-                    journal = _journal_analyzer.analyze()
+
+                    # Загружаем trades из файла
+                    import json as _json
+                    trades = []
+                    trades_file = DATA_DIR / 'trades.jsonl'
+                    if trades_file.exists():
+                        with open(trades_file) as _f:
+                            for _line in _f:
+                                _line = _line.strip()
+                                if _line:
+                                    try:
+                                        _d = _json.loads(_line)
+                                        trades.append(_journal_analyzer.Trade(
+                                            symbol=_d.get('symbol', ''),
+                                            side=_d.get('side', 'buy'),
+                                            quantity=float(_d.get('qty', 0)),
+                                            price=float(_d.get('price', 0)),
+                                            fee=float(_d.get('fee', 0)),
+                                            timestamp=float(_d.get('ts', 0)),
+                                        ))
+                                    except Exception:
+                                        pass
+
+                    journal = _journal_analyzer.analyze(trades) if trades else None
                     if journal:
                         adjustments = await _apply_insights(journal, cfg)
                         if adjustments:
