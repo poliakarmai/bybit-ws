@@ -27,7 +27,7 @@ python3 test_smoke.py || {
 # ── 3. Копируем в staging-директорию ──
 echo "📦 Копирование в staging..."
 rm -rf "$STAGING_DIR"
-cp -r "$REPO/bybit_ws" "$STAGING_DIR"
+cp -rL "$REPO/bybit_ws" "$STAGING_DIR" 2>/dev/null || cp -r "$REPO/bybit_ws" "$STAGING_DIR"
 # Копируем корневые скрипты
 for f in sl_reentry.py entry_judge.py; do
     [ -f "$REPO/$f" ] && cp "$REPO/$f" "$STAGING_DIR/"
