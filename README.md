@@ -2,7 +2,7 @@
 
 **Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
-[![Version](https://img.shields.io/badge/version-7.1.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-53%2F53-brightgreen)](./test_smoke.py) [![Phase 7.1](https://img.shields.io/badge/phase_7.1-✓-green)](./AGENTS.md)
+[![Version](https://img.shields.io/badge/version-7.2.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py) [![Phase 7.2](https://img.shields.io/badge/phase_7.2-✓-green)](./AGENTS.md)
 
 ---
 
