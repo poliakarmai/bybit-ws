@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Карта проекта, команды, правила.  
-> Обновлено: 2026-06-28 (13 коммитов: операционка + стратегии + observability)
+> Обновлено: 2026-06-28 (17 коммитов: v7.2 — фаза 7.2 завершена, BlackSwan multi-tier, Canary, Paper, StructLog, GSC clean)
 
 ## Что это
 
@@ -13,7 +13,7 @@ Systemd-сервис `bybit-ws-async`, ~35 MB RAM, SQLite — SSOT.
 ```
 ЦИКЛ (30с)
   ├─ Снапшот позиций (REST, 20с таймаут)
-  ├─ Black Swan check (PnL 2× limit ИЛИ BTC -8%/час)
+  ├─ Black Swan check (3-tier: -3%/15min→50%, -5%/30min→80%, -8%/1h→100%)
   ├─ Лёгкие проверки (каждый цикл):
   │   ├─ SL check + fix (ATR-adaptive, capped -50%/+50%)
   │   ├─ Trailing SL
@@ -63,14 +63,16 @@ bybit-ws/
 ├── entry_judge.py        ← Cross-model judge (fail-closed + кэш + circuit breaker)
 ├── correlation.py        ← Корреляции + max_corr_with_open
 ├── position_sizing.py    ← Динамическая маржа
-├── risk_manager.py       ← Risk + black swan (-8%) + emergency_close_all
+├── risk_manager.py       ← Risk + BlackSwan multi-tier (3 уровня) + emergency_close
 ├── session_params.py     ← NY/Asia/Weekend адаптивные параметры (28.06)
 ├── bb_prefetch.py        ← BB batch-префетчер (28.06)
 ├── post_trade.py         ← Кластерный анализ win rate (28.06)
+├── paper_trading.py 🆕   ← Paper Trading (PaperExchange + RPC, v7.2)
+├── structured_log.py 🆕  ← JSON-логи в events.jsonl (v7.2)
 ├── push_notifier.py      ← Push (ntfy + Telegram)
 ├── journal/              ← Журнал + самообучение
 │   ├── analyzer.py       ← Анализатор сделок (FIFO, bias)
-│   └── self_learn.py     ← Self-learning с JSONL-логом
+│   └── self_learn.py     ← Self-learning + Canary mode v3
 ├── .github/workflows/    ← CI/CD (28.06)
 │   └── test.yml          ← Smoke-тесты + GSC на push/PR
 ├── scripts/
@@ -210,12 +212,15 @@ PERM_SKIP с time-decay 24ч.
 | >6ч, PnL < 0%, нет частичного TP | MARKET close |
 | >48ч абсолют | MARKET close всегда |
 
-## Black Swan / Emergency Close
+## Black Swan — Multi-Tier Emergency Close (v7.1)
 
-| Триггер | Порог |
-|---------|-------|
-| PnL | >2× max_daily_loss |
-| BTC crash | -8% за час |
+| Tier | Триггер | Действие |
+|------|---------|---------|
+| 1 ⚠️ | BTC -3% за 15 мин | Закрыть 50% позиций (худшие по PnL) |
+| 2 🔥 | BTC -5% за 30 мин | Закрыть 80% позиций |
+| 3 🚨 | BTC -8% за час ИЛИ PnL >2× daily_loss | Закрыть 100% (kill switch) |
+
+Сортировка по unrealized PnL: самые убыточные закрываются первыми.
 
 ## Session Params (28.06)
 
@@ -234,7 +239,39 @@ PERM_SKIP с time-decay 24ч.
 | Max дневной убыток | -$50 |
 | Max маржа | $300 |
 | Circuit breaker | 80% от max_daily_loss |
-| Black swan close | 2× daily loss или BTC -8%/час |
+| Black swan close | 2× daily loss или BTC -8%/час (Tier 3) |
+
+## Canary Mode (v7.1)
+
+Self-learning с защитой от переобучения:
+- 10% входов используют новые параметры (canary group)
+- 48ч окно оценки: сравнение WR canary vs baseline
+- Падение WR >10% → авто-rollback
+- WR canary ≥ baseline → promote на все входы
+- Состояние: `canary_state.json` в `~/.local/share/bybit-ws/`
+
+## Paper Trading (v7.2)
+
+`BYBIT_PAPER_ENABLED=1` — симуляция всех сделок без риска:
+- PaperExchange: отдельная БД `paper_state.db`
+- Mark-цены из WS-кеша, PnL в реальном времени
+- RPC: `/paper/balance`, `/paper/positions`, `/paper/summary`
+
+## Structured Logging (v7.2)
+
+`STRUCTURED_LOGGING=1` — JSON-логи в `events.jsonl`:
+- `log_info/warn/error/critical` + `log_cycle`
+- Ротация 50 MB, совместимость с Grafana Loki
+
+## GSC Security Audit (v7.2)
+
+| Уровень | Находок |
+|---------|---------|
+| 🔴 CRITICAL | 3 (DSPy mock — ложные) |
+| 🟠 HIGH | 32 (generic patterns) |
+| 🟡 MEDIUM | 21 |
+| ⚪ LOW | 428 |
+| **Вердикт** | ✅ Чистый — ноль секретов, ноль инъекций, ноль shell=True |
 
 ## Feature Flags
 
@@ -249,6 +286,8 @@ PERM_SKIP с time-decay 24ч.
 | `BYBIT_AB_ENABLED` | 0 | A/B-тест |
 | `BYBIT_REGIME_AUTO` | 0 | Авто LONG/SHORT |
 | `BYBIT_OPTUNA_ENABLED` | 0 | Optuna |
+| `BYBIT_PAPER_ENABLED` | 0 | Paper Trading (без риска) |
+| `STRUCTURED_LOGGING` | 0 | JSON-логи в events.jsonl |
 
 ## Известные не-баги
 

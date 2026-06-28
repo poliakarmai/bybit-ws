@@ -1,6 +1,6 @@
 # bybit-ws API Reference
 
-> REST API трейдинг-монитора bybit-ws. v7.1 (28.06.2026).
+> REST API трейдинг-монитора bybit-ws. v7.2 (28.06.2026).
 
 ## Аутентификация
 
@@ -241,3 +241,26 @@ Access-Control-Allow-Headers: Authorization, Content-Type, Idempotency-Key
 | Дата | Изменение |
 |------|----------|
 | 28.06.2026 v7.1 | REST (не JSON-RPC), унификация путей, типы string, rate limits, Idempotency-Key, WebSocket API, OpenAPI, CORS, /cancel_order, /order, /balance, /summary, webhook |
+| 28.06.2026 v7.2 | Paper Trading: /paper/balance, /paper/positions, /paper/summary |
+
+## Paper Trading API (v7.2)
+
+`BYBIT_PAPER_ENABLED=1` для активации.
+
+### GET /paper/balance
+Возвращает баланс paper-счёта.
+```json
+{"enabled": true, "balance": 10000.0, "currency": "USDT"}
+```
+
+### GET /paper/positions
+Возвращает открытые paper-позиции.
+```json
+{"enabled": true, "positions": [{"symbol": "BTCUSDT", "side": "Buy", "size": 0.01, "entry": 85000, "mark": 85500, "upnl": 5.0, "leverage": 3}], "count": 1}
+```
+
+### GET /paper/summary
+Сводка paper-торговли: баланс, кол-во позиций, total_pnl, total_fees, upnl.
+```json
+{"enabled": true, "balance": 10150.0, "positions": 2, "total_pnl": 120.0, "total_fees": 30.0, "trades": 15, "upnl": 15.0}
+```

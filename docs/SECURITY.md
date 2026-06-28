@@ -1,7 +1,7 @@
 # SECURITY.md — bybit-ws
 
 > Полная документация по безопасности трейдинг-монитора bybit-ws.
-> **Версия:** 1.0 | **Дата:** 2026-06-18 | **Актуально для:** bybit-ws v4.0+
+> **Версия:** 1.1 | **Дата:** 2026-06-28 | **Актуально для:** bybit-ws v7.2
 
 ---
 
@@ -554,7 +554,27 @@ sudo apt install libpam-google-authenticator
 
 ---
 
-## 9. Ссылки
+## 9. GSC Security Audit (2026-06-28)
+
+Проект прошёл трёхуровневый аудит Git Security Checker (GSC v0.6).
+
+| Уровень | Находок | Вердикт |
+|---------|---------|---------|
+| 🔴 CRITICAL | 3 | Ложные срабатывания (DSPy mock-код) |
+| 🟠 HIGH | 32 | Generic patterns, zero real threats |
+| 🟡 MEDIUM | 21 | Code style (print vs logging) |
+| ⚪ LOW | 428 | Generic smells, TODOs |
+| **Итого** | **484** | ✅ Проект чистый |
+
+**Ключевые результаты:**
+- `GS001` (hardcoded secrets): **0** — ни одного API-ключа в коде
+- `GS002` (world-readable sensitive): **0**
+- `GS004` (shell=True subprocess): **0**
+- `GS005` (SQL injection): **0** (в production-коде)
+- `pickle.load()` unsafe: **0**
+- `yaml.load()` без SafeLoader: **0**
+
+## 10. Ссылки
 
 - [Bybit API Management](https://www.bybit.com/app/user/api-management) — управление API-ключами
 - [Bybit v5 API Docs](https://bybit-exchange.github.io/docs/v5/) — документация API
