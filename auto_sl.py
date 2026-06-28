@@ -210,9 +210,12 @@ def check_and_fix_sl():
 
             # Проверка что SL на правильной стороне
             if side == 'Buy' and sl_price >= mark:
-                continue
+                # ATR/BB SL выше рынка → позиция в минусе → аварийный SL
+                sl_price = round(mark * 0.95, 4)
+                sl_desc = f'аварийный SL (mark×0.95, ATR SL был бы выше рынка)'
             if side == 'Sell' and sl_price <= mark:
-                continue
+                sl_price = round(mark * 1.05, 4)
+                sl_desc = f'аварийный SL (mark×1.05, ATR SL был бы ниже рынка)'
         else:
             # ── Fallback: BB-based SL ──
             if side == 'Buy':
