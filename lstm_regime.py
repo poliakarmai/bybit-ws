@@ -43,6 +43,9 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+    torch = None
+    nn = None
+    optim = None
 
 DATA_DIR = Path.home() / '.local' / 'share' / 'bybit-ws'
 MODEL_DIR = DATA_DIR / 'models'
@@ -294,24 +297,25 @@ def _label_regime(closes, highs, lows, start_idx, lookahead=LOOKAHEAD):
 
 # ── Модель ───────────────────────────────────────────────────
 
-class LSTMModel(nn.Module):
-    def __init__(self, input_size=N_FEATURES, hidden_size=64, num_layers=2, num_classes=N_CLASSES, dropout=0.3):
-        super().__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
-                            batch_first=True, dropout=dropout if num_layers > 1 else 0)
-        self.fc1 = nn.Linear(hidden_size, 32)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(32, num_classes)
+if HAS_TORCH:
+    class LSTMModel(nn.Module):
+        def __init__(self, input_size=N_FEATURES, hidden_size=64, num_layers=2, num_classes=N_CLASSES, dropout=0.3):
+            super().__init__()
+            self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
+                                batch_first=True, dropout=dropout if num_layers > 1 else 0)
+            self.fc1 = nn.Linear(hidden_size, 32)
+            self.relu = nn.ReLU()
+            self.dropout = nn.Dropout(dropout)
+            self.fc2 = nn.Linear(32, num_classes)
 
-    def forward(self, x):
-        # x: (batch, seq_len, input_size)
-        lstm_out, (hn, cn) = self.lstm(x)
-        last_out = lstm_out[:, -1, :]  # последний временной шаг
-        out = self.relu(self.fc1(last_out))
-        out = self.dropout(out)
-        out = self.fc2(out)
-        return out
+        def forward(self, x):
+            # x: (batch, seq_len, input_size)
+            lstm_out, (hn, cn) = self.lstm(x)
+            last_out = lstm_out[:, -1, :]  # последний временной шаг
+            out = self.relu(self.fc1(last_out))
+            out = self.dropout(out)
+            out = self.fc2(out)
+            return out
 
 
 # ── Данные ───────────────────────────────────────────────────
