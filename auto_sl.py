@@ -139,7 +139,13 @@ def check_and_fix_sl():
             if side == 'Sell' and sl_val < entry:
                 log_event(f'🔒 {sym}: SL ${sl_val:.4f} < entry ${entry:.4f} — ручная фиксация')
                 continue
-            continue
+            # Проверка: не слишком ли близко SL (меньше 2% от входа)
+            sl_dist_pct = abs(sl_val - entry) / entry
+            if sl_dist_pct < 0.02:
+                # SL ближе 2% — переставим дальше
+                pass  # продолжаем ниже (не делаем continue)
+            else:
+                continue  # SL на нормальном расстоянии — не трогаем
 
         mark = p['mark']
         side = p['side']
