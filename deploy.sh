@@ -17,14 +17,21 @@ if ! git diff --quiet 2>/dev/null; then
     [ "${1:-}" = "--force" ] || exit 1
 fi
 
-# ── 2. Smoke-тесты ──
+# ── 2. Логическая целостность (импорты vs вызовы) ──
+echo "🧠 Logic integrity tests..."
+python3 test_logic_integrity.py || {
+    echo "❌ Logic integrity failed — деплой отменён"
+    exit 1
+}
+
+# ── 3. Smoke-тесты ──
 echo "🧪 Smoke-тесты..."
 python3 test_smoke.py || {
     echo "❌ Smoke-тесты провалились — деплой отменён"
     exit 1
 }
 
-# ── 3. Копируем в staging-директорию ──
+# ── 4. Копируем в staging-директорию ──
 echo "📦 Копирование в staging..."
 rm -rf "$STAGING_DIR"
 cp -rL "$REPO/bybit_ws" "$STAGING_DIR" 2>/dev/null || cp -r "$REPO/bybit_ws" "$STAGING_DIR"
@@ -34,7 +41,7 @@ for f in sl_reentry.py entry_judge.py; do
 done
 echo "   Staging: $STAGING_DIR"
 
-# ── 4. Атомарный swap (symlink) ──
+# ── 5. Атомарный swap (symlink) ──
 echo "🔄 Атомарный swap..."
 # Создаём новый symlink во временной директории
 OLD_LINK=$(readlink -f "$LIVE_DIR" 2>/dev/null || echo "$LIVE_DIR")
@@ -46,7 +53,7 @@ mv "$LIVE_DIR.new" "$LIVE_DIR" 2>/dev/null || {
 }
 echo "   Symlink: $LIVE_DIR → $STAGING_DIR"
 
-# ── 5. Рестарт ──
+# ── 6. Рестарт ──
 echo "🔄 Рестарт сервиса..."
 echo "🔄 Остановка через SIGTERM (graceful shutdown)..."
 systemctl --user stop bybit-ws-async
