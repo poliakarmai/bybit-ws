@@ -296,6 +296,15 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
     except Exception as e:
         log_event(f'⚠️ auto_entry error: {e}')
 
+    # ── Auto-TP: ATR-based тейк-профиты ──
+    try:
+        tp_msgs, tp_err = await run_in_thread(auto_take_profit, positions or {}, {})
+        if tp_msgs:
+            for msg in tp_msgs:
+                add_alert('TP', msg)
+    except Exception as e:
+        log_event(f'⚠️ auto_tp error: {e}')
+
     elapsed = time.time() - t0
     log_event(f'⚡ heavy cycle #{cycle_count} done in {elapsed:.2f}s')
 
