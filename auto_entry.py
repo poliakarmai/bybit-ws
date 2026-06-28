@@ -458,8 +458,13 @@ def auto_entry_scan(positions):
         if not bb:
             continue
         result = full_score_coin(sym, bb, ticker_line)
-        # Per-symbol min_score: Optuna → режим → глобальный
+        # Per-symbol min_score: Canary → Optuna → режим → глобальный
         sym_min_score = _optuna_min_scores.get(sym, min_score)
+        try:
+            from bybit_ws.journal.self_learn import get_canary_param
+            sym_min_score = get_canary_param('min_score', sym_min_score)
+        except Exception:
+            pass
         if result and result['score'] >= sym_min_score:
             scored.append(result)
 

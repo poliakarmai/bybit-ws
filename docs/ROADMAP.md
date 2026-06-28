@@ -38,6 +38,8 @@
 
 | Задача | Приоритет | Статус |
 |--------|-----------|--------|
+| BlackSwan multi-tier (BTC -3%/-5%/-8%) | 🔴 | ✅ |
+| Canary mode для self-learning (10% входов + auto-rollback) | 🔴 | ✅ |
 | Paper Trading — обкатка ML-моделей без риска | 🔴 | ⬜ |
 | Structured Logging (structlog → JSON) | 🟡 | ⬜ |
 | SQLite бэкапы (cron каждые 6ч, уже настроен) | 🟢 | ✅ |

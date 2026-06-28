@@ -351,20 +351,40 @@ async def async_main_loop():
             # ── Black Swan check (каждый цикл) ──
             if new_positions:
                 try:
-                    from .risk_manager import check_black_swan, emergency_close_all
-                    bs_active, bs_reason = check_black_swan(new_positions)
-                    if bs_active:
+                    from .risk_manager import (
+                        check_black_swan, emergency_close_all,
+                        emergency_close_partial,
+                    )
+                    bs_tier, bs_reason, bs_drop = check_black_swan(new_positions)
+                    if bs_tier >= 3:
                         log_event(f'🚨 {bs_reason}')
                         result = emergency_close_all(bs_reason, new_positions)
                         closed_count = result['closed']
                         failed_count = result['failed']
                         log_event(
-                            f'🚨 EMERGENCY CLOSE: {closed_count} closed, '
+                            f'🚨 TIER 3 KILL SWITCH: {closed_count} closed, '
                             f'{failed_count} failed'
                         )
-                        add_alert('STOP', f'🚨 BLACK SWAN: {bs_reason}')
-                        # Скипаем тяжёлый цикл — не входим после экстренного закрытия
+                        add_alert('STOP', f'🚨 BLACK SWAN TIER 3: {bs_reason}')
                         continue
+                    elif bs_tier == 2:
+                        log_event(f'🔥 {bs_reason}')
+                        result = emergency_close_partial(bs_reason, new_positions, 0.8)
+                        closed_count = result['closed']
+                        log_event(
+                            f'🔥 TIER 2: {closed_count} closed (80%), '
+                            f'{result.get("failed", 0)} errors'
+                        )
+                        add_alert('STOP', f'🔥 BLACK SWAN TIER 2: {bs_reason}')
+                    elif bs_tier == 1:
+                        log_event(f'⚠️ {bs_reason}')
+                        result = emergency_close_partial(bs_reason, new_positions, 0.5)
+                        closed_count = result['closed']
+                        log_event(
+                            f'⚠️ TIER 1: {closed_count} closed (50%), '
+                            f'{result.get("failed", 0)} errors'
+                        )
+                        add_alert('STOP', f'⚠️ BLACK SWAN TIER 1: {bs_reason}')
                 except Exception as e:
                     log_event(f'⚠️ black swan check error: {e}')
 

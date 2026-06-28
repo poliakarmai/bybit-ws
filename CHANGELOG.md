@@ -7,6 +7,53 @@
 
 ---
 
+## [7.1] — 2026-06-28
+
+### Added
+- **BlackSwan multi-tier:** 3 уровня защиты: Tier 1 (BTC -3%/15min → close 50%), Tier 2 (BTC -5%/30min → close 80%), Tier 3 (BTC -8%/1h или PnL 2x → close 100%). Сортировка по PnL: худшие позиции закрываются первыми.
+- **Canary mode для self-learning:** 10% входов используют новые параметры, 48ч окно оценки, авто-rollback при падении WR >10%, promote при WR >= baseline. Состояние в `canary_state.json`.
+- **Volume Confirmation filter:** проверка объёма (vol vs SMA) перед входом, fail-open.
+- **BB batch-префетчер:** параллельная загрузка BB для вотчлиста, кеш 5 мин.
+- **Session Params:** адаптация BB/SL/TP/max_pos под NY/Asia/Weekend.
+- **Post-trade кластерный анализ:** блокировка кластеров с WR <40%.
+
+### Changed
+- `check_black_swan()`: возвращает `(tier, reason, btc_drop)` вместо `(bool, reason)`
+- `emergency_close_all()`: делегирует в `_emergency_close_pct()` с close_pct=1.0
+- `apply_journal_insights()`: параметры идут в canary, а не применяются глобально
+- `auto_entry.py`: canary-проверка min_score перед режимной/глобальной
+
+### Fixed
+- auto_tp: orders.values() list/dict fix
+- ab_status: NoneType check
+- Self-learning в main loop (2880 циклов)
+- pump_state авто-очистка
+- gridsignal-bot: ALTER TABLE crash
+- DSPy → DeepSeek миграция
+- pip-audit: per-package fix_versions
+
+---
+
+## [7.0] — 2026-06-27
+
+### Added
+- **Graceful shutdown:** `while not SHUTDOWN` + SIGTERM/SIGINT обработка
+- **Heavy cycle оптимизация:** 77s → 29.73s (asyncio.gather, 62% ускорение)
+- **Monte Carlo бэктестинг:** 10K симуляций, Sharpe/Sortino/Calmar ratios
+- **Kelly sizing:** f* = (p×b−q)/b, fractional 25%, per-symbol stats
+- **Grafana dashboard:** 8 панелей (позиции, PnL, циклы, аптайм)
+- **Entry Judge (LLM gate):** Nemotron → DeepSeek, 5s таймаут, fail-closed + CB
+- **ATR-based TP (3 уровня):** 1.0×/2.0×/3.0× ATR (40/35/25% объёма)
+- **ATR-adaptive SL v2:** 4 режима волатильности, k=1.3–2.5, capped ±50%
+- **7 фильтров входа:** MTF + Orderbook + Volume + Entry Judge + Correlation + Post-trade + Risk
+
+### Changed
+- main_async.py: асинхронный главный цикл (30с)
+- Конфиг: feature flags (BYBIT_ATR_TP_ENABLED, BYBIT_DSPY_ENABLED, etc.)
+- RPC: /kill_switch, /emergency_close, /circuit_breaker эндпоинты
+
+---
+
 ## [4.1] — 2026-06-18
 
 ### Added

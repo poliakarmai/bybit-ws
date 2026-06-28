@@ -2,7 +2,7 @@
 
 **Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
 
-[![Version](https://img.shields.io/badge/version-6.0.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-54%2F54-brightgreen)](./test_smoke.py) [![Phase 6](https://img.shields.io/badge/phase_6-✓-green)](./AGENTS.md)
+[![Version](https://img.shields.io/badge/version-7.1.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-53%2F53-brightgreen)](./test_smoke.py) [![Phase 7.1](https://img.shields.io/badge/phase_7.1-✓-green)](./AGENTS.md)
 
 ---
 
@@ -163,6 +163,8 @@
 | Каскадная защита | Market-close если цена в 2× ближе к ликвидации чем к SL |
 | Бан-лист | config-driven, постоянный |
 | JUNK защита | max_loss −15% маржи, max_hold 48ч, без SL |
+| **BlackSwan multi-tier** 🆕 | Tier 1: BTC -3%/15min → 50% | Tier 2: BTC -5%/30min → 80% | Tier 3: BTC -8%/1h → 100% |
+| **Canary mode** 🆕 | 10% входов с новыми self-learned параметрами, авто-rollback при падении WR |
 
 ---
 

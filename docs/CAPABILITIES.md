@@ -82,9 +82,9 @@ PERM_SKIP: time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 
 | Триггер | Действие |
 |---------|---------|
-| BTC -3%/15min | Закрыть 50% позиций |
+| BTC -3%/15min | Закрыть 50% позиций (худшие по PnL) |
 | BTC -5%/30min | Закрыть 80% позиций |
-| BTC -8%/1h | Закрыть 100% + пауза (текущий BS) |
+| BTC -8%/1h | Закрыть 100% + пауза (kill switch) |
 | PnL > 2× max_daily_loss | Emergency close all |
 
 Опережающий индикатор: BTC ATR(14)/price > порога → повышенная готовность.
@@ -96,15 +96,12 @@ PERM_SKIP: time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 - journal/self_learn.py — адаптация min_score (±30%), SL/TP (±20%)
 - post_trade.py — кластерный анализ, блок <40% WR
 
-**Валидация изменений:**
-- Canary-режим: новые параметры → только 10% входов
-- Auto-rollback: если WR падает >10% за 48ч → откат
-- Все изменения логируются в self_learn.jsonl с причиной
-
-**Метрики эффективности:**
-- WR до/после (rolling 7 дней)
-- Avg PnL до/после
-- Кол-во сделок до/после
+**Canary-режим (v7.1):**
+- Новые параметры → только 10% входов (canary group)
+- 48ч окно оценки: WR canary vs baseline
+- Падение WR >10% → авто-rollback
+- WR canary >= baseline → promote на все входы
+- Состояние: `canary_state.json`, лог: `self_learn.jsonl`
 
 ## 10. Session Params
 

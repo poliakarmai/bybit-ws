@@ -375,22 +375,30 @@ def is_circuit_breaker_active() -> bool:
 
 
 # ── Black Swan / Emergency Close ───────────────────────────────────────────
-BLACK_SWAN_PNL_PCT = 2.0          # 2x daily loss limit → black swan
-BLACK_SWAN_PRICE_DROP = 0.08      # 8% drop in BTC за 1 час → black swan (was 15%)
+# Multi-tier защита: каждый уровень — разный % закрытия позиций
+# Tier 1 (жёлтый): BTC -3% за 15 мин → закрыть 50% позиций
+# Tier 2 (оранжевый): BTC -5% за 30 мин → закрыть 80% позиций
+# Tier 3 (красный): BTC -8% за час или PnL 2x → закрыть 100% (kill switch)
+BLACK_SWAN_TIER_1 = 0.03           # -3% / 15min → close 50%
+BLACK_SWAN_TIER_2 = 0.05           # -5% / 30min → close 80%
+BLACK_SWAN_TIER_3 = 0.08           # -8% / 1h → close 100%
+BLACK_SWAN_PNL_PCT = 2.0           # 2x daily loss limit → tier 3
 _emergency_close_active = False
 
 
-def check_black_swan(positions: dict) -> Tuple[bool, str]:
-    """Проверить условия black swan — экстремальные события.
+def check_black_swan(positions: dict) -> Tuple[int, str, float]:
+    """Проверить условия black swan — многоуровневая защита.
 
-    Триггеры:
-    1. PnL > 2x от max_daily_loss
-    2. BTC упал >15% за последний час
+    Триггеры (3 уровня):
+    1. BTC -3% за 15 мин → tier 1 (close 50%)
+    2. BTC -5% за 30 мин → tier 2 (close 80%)
+    3. BTC -8% за час ИЛИ PnL 2x daily_loss → tier 3 (close 100%)
 
     Returns:
-        (black_swan: bool, reason: str)
+        (tier: int, reason: str, btc_drop: float)
+        tier=0 означает «нет угрозы»
     """
-    # Триггер 1: PnL
+    # Триггер 3 (самый жёсткий): PnL > 2x daily_loss
     daily = get_daily_pnl()
     try:
         max_loss = float(_get_config().risk.get('max_daily_loss', 50))
@@ -399,52 +407,122 @@ def check_black_swan(positions: dict) -> Tuple[bool, str]:
 
     if daily['total_pnl'] <= -max_loss * BLACK_SWAN_PNL_PCT:
         pnl_limit = max_loss * BLACK_SWAN_PNL_PCT
-        return True, (
+        return 3, (
             f'BLACK SWAN: PnL ${daily["total_pnl"]:.2f} > '
             f'{BLACK_SWAN_PNL_PCT}x loss limit (${pnl_limit:.0f})'
-        )
+        ), 0.0
 
-    # Триггер 2: BTC crash >15% за час
+    # BTC crash check — пробуем несколько таймфреймов
     try:
         from .correlation import fetch_klines
-        btc = fetch_klines('BTCUSDT', interval='15', limit=4)  # 4 × 15min = 1 hour
-        if btc and len(btc) >= 2:
-            drop = (btc[0] - btc[-1]) / btc[0]
-            if drop > BLACK_SWAN_PRICE_DROP:
-                return True, (
-                    f'BLACK SWAN: BTC упал на {drop*100:.1f}% за час '
-                    f'(> {BLACK_SWAN_PRICE_DROP*100:.0f}%)'
-                )
+
+        # Tier 1: 15-минутный срез (1 свеча = 15 мин)
+        btc_15 = fetch_klines('BTCUSDT', interval='15', limit=2)
+        if btc_15 and len(btc_15) >= 2:
+            drop_15 = (btc_15[0] - btc_15[-1]) / btc_15[0]
+            if drop_15 > BLACK_SWAN_TIER_1:
+                # Проверяем не Tier 2 ли это
+                btc_30 = fetch_klines('BTCUSDT', interval='15', limit=3)
+                if btc_30 and len(btc_30) >= 2:
+                    drop_30 = (btc_30[0] - btc_30[-1]) / btc_30[0]
+                    if drop_30 > BLACK_SWAN_TIER_2:
+                        # Проверяем не Tier 3 ли это
+                        btc_1h = fetch_klines('BTCUSDT', interval='15', limit=5)
+                        if btc_1h and len(btc_1h) >= 2:
+                            drop_1h = (btc_1h[0] - btc_1h[-1]) / btc_1h[0]
+                            if drop_1h > BLACK_SWAN_TIER_3:
+                                return 3, (
+                                    f'BLACK SWAN TIER 3: BTC -{drop_1h*100:.1f}% за час '
+                                    f'(> {BLACK_SWAN_TIER_3*100:.0f}%)'
+                                ), drop_1h
+                        return 2, (
+                            f'BLACK SWAN TIER 2: BTC -{drop_30*100:.1f}% за 30 мин '
+                            f'(> {BLACK_SWAN_TIER_2*100:.0f}%)'
+                        ), drop_30
+                return 1, (
+                    f'BLACK SWAN TIER 1: BTC -{drop_15*100:.1f}% за 15 мин '
+                    f'(> {BLACK_SWAN_TIER_1*100:.0f}%)'
+                ), drop_15
+
+        # Tier 3: 1-часовой срез (4 свечи по 15 мин)
+        btc_1h = fetch_klines('BTCUSDT', interval='15', limit=5)
+        if btc_1h and len(btc_1h) >= 2:
+            drop_1h = (btc_1h[0] - btc_1h[-1]) / btc_1h[0]
+            if drop_1h > BLACK_SWAN_TIER_3:
+                return 3, (
+                    f'BLACK SWAN TIER 3: BTC -{drop_1h*100:.1f}% за час '
+                    f'(> {BLACK_SWAN_TIER_3*100:.0f}%)'
+                ), drop_1h
     except Exception:
         pass
 
-    return False, ''
+    return 0, '', 0.0
 
 
 def emergency_close_all(reason: str, positions: dict) -> dict:
-    """Закрыть ВСЕ позиции по рынку.
+    """Закрыть ВСЕ позиции по рынку (tier 3 — kill switch).
 
-    Вызывается при black swan — не ждёт, не обсуждает.
+    Вызывается при black swan tier 3 — не ждёт, не обсуждает.
     Использует MARKET ордера с reduceOnly=True.
 
     Returns:
         {'closed': int, 'failed': int, 'errors': [...]}
     """
+    return _emergency_close_pct(reason, positions, 1.0)
+
+
+def emergency_close_partial(reason: str, positions: dict, close_pct: float) -> dict:
+    """Закрыть % позиций (tier 1/2 — частичная защита).
+
+    Args:
+        reason: причина закрытия
+        positions: словарь позиций {symbol: {size, side, ...}}
+        close_pct: доля позиций для закрытия (0.0–1.0)
+
+    Returns:
+        {'closed': int, 'failed': int, 'errors': [...], 'close_pct': float}
+    """
+    result = _emergency_close_pct(reason, positions, close_pct)
+    result['close_pct'] = close_pct
+    return result
+
+
+def _emergency_close_pct(reason: str, positions: dict, close_pct: float) -> dict:
+    """Внутренняя функция — закрыть долю close_pct позиций по рынку.
+
+    Сортирует позиции по PnL (худшие первые), закрывает нужный %.
+    """
     global _emergency_close_active
-    _emergency_close_active = True
+    if close_pct >= 1.0:
+        _emergency_close_active = True
 
     from .api import bybit
     result = {'closed': 0, 'failed': 0, 'errors': []}
 
-    _log.critical(f'🚨 EMERGENCY CLOSE: {reason}')
+    tier_label = {1.0: '🚨 TIER 3', 0.8: '🔥 TIER 2', 0.5: '⚠️ TIER 1'}.get(close_pct, '🚨')
+    _log.critical(f'{tier_label} EMERGENCY CLOSE ({close_pct*100:.0f}%): {reason}')
 
+    # Сортируем позиции по unrealized PnL — худшие закрываем первыми
+    pos_items = []
     for sym, p in positions.items():
         if not isinstance(p, dict):
             continue
         size = float(p.get('size', 0))
         if size <= 0:
             continue
+        upnl = float(p.get('unrealisedPnl', 0))
+        pos_items.append((sym, p, upnl))
 
+    # Сортируем: самые убыточные первыми
+    pos_items.sort(key=lambda x: x[2])
+
+    # Сколько позиций закрыть (по количеству, пропорционально close_pct)
+    total_pos = len(pos_items)
+    to_close = max(1, int(total_pos * close_pct + 0.5))
+    tier_label_short = {1.0: 'TIER3', 0.8: 'TIER2', 0.5: 'TIER1'}.get(close_pct, str(close_pct))
+
+    for sym, p, upnl in pos_items[:to_close]:
+        size = float(p.get('size', 0))
         side = 'Sell' if p.get('side') == 'Buy' else 'Buy'
         idx = p.get('positionIdx', 0)
         qty = str(size)
@@ -462,17 +540,24 @@ def emergency_close_all(reason: str, positions: dict) -> dict:
             })
             if order and order.get('retCode') == 0:
                 result['closed'] += 1
-                _log.critical(f'🚨 EMERGENCY CLOSE {sym}: {qty} @ MARKET')
+                _log.critical(f'{tier_label_short} CLOSE {sym}: {qty} @ MARKET (PnL ${upnl:.2f})')
             else:
                 result['failed'] += 1
                 err = order.get('retMsg', '?') if order else 'no response'
                 result['errors'].append(f'{sym}: {err}')
-                _log.error(f'🚨 EMERGENCY CLOSE {sym} FAILED: {err}')
+                _log.error(f'{tier_label_short} CLOSE {sym} FAILED: {err}')
         except Exception as e:
             result['failed'] += 1
             result['errors'].append(f'{sym}: {e}')
-            _log.error(f'🚨 EMERGENCY CLOSE {sym} EXCEPTION: {e}')
+            _log.error(f'{tier_label_short} CLOSE {sym} EXCEPTION: {e}')
 
+    closed_n = result["closed"]
+    failed_n = result["failed"]
+    pct_target = close_pct * 100
+    _log.critical(
+        f'{tier_label_short} DONE: {closed_n}/{total_pos} closed, '
+        f'{failed_n} failed (target {pct_target:.0f}%)'
+    )
     return result
 
 
