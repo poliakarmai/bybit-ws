@@ -269,6 +269,7 @@ def _enrich_positions_with_bb(positions: list[dict]) -> list[dict]:
 
 # Rate limiting: per-IP token bucket
 _rate_limit_store = defaultdict(lambda: {"tokens": 60, "last": time.time()})
+_idem_cache = {}  # Idempotency-Key → {ts, response}
 
 API_VERSION = "v1"
 
@@ -426,13 +427,26 @@ class RPCHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # тихий режим
 
-    def _check_auth(self) -> bool:
-        """Проверить Bearer-токен (обязателен всегда)."""
+    _OLD_TOKENS = {}  # {old_token: expires_at}
+
+    def _check_auth(self, require_emergency: bool = False) -> bool:
+        """Проверить Bearer-токен. Если require_emergency=True — также X-Emergency-Auth."""
         token = _get_auth_token()
         if not token:
             return False
         auth = self.headers.get('Authorization', '')
-        return auth == f'Bearer {token}'
+        provided = auth.replace('Bearer ', '', 1) if auth.startswith('Bearer ') else ''
+        if provided == token:
+            pass  # ok
+        elif provided and provided in _OLD_TOKENS and time.time() < _OLD_TOKENS[provided]:
+            pass  # grace period
+        else:
+            return False
+        if require_emergency:
+            emergency = os.environ.get('EMERGENCY_TOKEN', '')
+            if emergency and self.headers.get('X-Emergency-Auth', '') != emergency:
+                return False
+        return True
 
     def _check_ip_rate(self) -> bool:
         """Проверить rate limit для IP клиента."""
@@ -563,8 +577,12 @@ class RPCHandler(BaseHTTPRequestHandler):
         elif path == "/move_sl":
             self._handle_move_sl(body)
         elif path == "/emergency_close":
+            if not self._check_auth(require_emergency=True):
+                return _error(self, 'Unauthorized', 'Bearer + X-Emergency-Auth required', 401)
             self._handle_emergency_close()
         elif path == "/kill_switch":
+            if not self._check_auth(require_emergency=True):
+                return _error(self, 'Unauthorized', 'Bearer + X-Emergency-Auth required', 401)
             self._handle_kill_switch()
         elif path == "/reload-config":
             self._handle_reload_config()
@@ -1211,6 +1229,13 @@ class RPCHandler(BaseHTTPRequestHandler):
                       "sl": 0.50, "tp": 0.55, "confirm": true}
         Если confirm: true — исполнение. Если false — только превью.
         """
+        # ── Идемпотентность ──
+        idem_key = self.headers.get('Idempotency-Key', '')
+        if idem_key:
+            cached = _idem_cache.get(idem_key)
+            if cached:
+                if time.time() - cached['ts'] < 3600:
+                    return _json_response(self, cached['response'], 200)
         # ── Валидация ──
         symbol = body.get('symbol', '').strip().upper()
         if not symbol or not symbol.endswith('USDT'):
@@ -1413,6 +1438,10 @@ class RPCHandler(BaseHTTPRequestHandler):
         direction = '📈 LONG' if side == 'Buy' else '📉 SHORT'
         add_alert('ENTRY', f'{direction} {symbol}: вход {qty} шт. по рынку, SL={_round_price(sl) if sl else "нет"}, TP={_round_price(tp) if tp else "нет"}')
 
+        # ── Кэшировать для идемпотентности ──
+        if idem_key:
+            _idem_cache[idem_key] = {'ts': time.time(), 'response': result}
+
         return _json_response(self, result, 200)
 
     def _handle_close(self, body: dict):
@@ -1558,13 +1587,17 @@ class RPCHandler(BaseHTTPRequestHandler):
         Требует действующий токен для авторизации.
         """
         import uuid
+        old_token = _get_auth_token()
         new_token = str(uuid.uuid4())
         try:
             from .state_db import db
             db.set_kv('rpc_auth_token', new_token)
+            # Grace period: old token работает ещё 5 минут
+            if old_token:
+                __class__._OLD_TOKENS[old_token] = time.time() + 300
             _json_response(self, {
                 'status': 'ok',
-                'message': 'Token reset successful. Update your Authorization header.',
+                'message': 'Token reset. Old token valid for 5 more minutes.',
                 'new_token': new_token,
             })
         except Exception as e:

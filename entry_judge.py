@@ -98,11 +98,20 @@ Check:
         # ── LLM Circuit Breaker: 3 падения → отключение на 1ч ──
         now = time.time()
         if now < _llm_disabled_until:
+            remaining = int(_llm_disabled_until - now)
+            # Fallback: если Judge отключен >1ч, переключаемся в fail-open с повышенным min_score
+            if remaining > 3600:
+                return {
+                    "verdict": "pass",
+                    "blocking_issues": [f"Judge fallback: LLM disabled >{remaining}s, fail-open mode"],
+                    "confidence": 0.3,
+                    "notes": "fallback_fail_open",
+                }
             return {
                 "verdict": "revise",
                 "blocking_issues": [
                     f"LLM circuit open — Entry Judge disabled for "
-                    f"{int(_llm_disabled_until - now)}s"
+                    f"{remaining}s"
                 ],
                 "confidence": 0.0,
                 "notes": "circuit_breaker",
