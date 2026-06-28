@@ -298,10 +298,9 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
 
     # ── Auto-TP: ATR-based тейк-профиты ──
     try:
-        tp_msgs, tp_err = await run_in_thread(auto_take_profit, positions or {}, {})
-        if tp_msgs:
-            for msg in tp_msgs:
-                add_alert('TP', msg)
+        tp_actions, tp_err = await run_in_thread(auto_take_profit, positions or {}, {})
+        if tp_actions:
+            await run_in_thread(apply_auto_tp, tp_actions)
     except Exception as e:
         log_event(f'⚠️ auto_tp error: {e}')
 
@@ -443,14 +442,14 @@ async def async_main_loop():
                     add_alert('SL', a)
 
                 # Трейлинг (жёсткий: BB + >15%)
-                trail_msgs, _ = await run_in_thread(trailing_sl, new_positions)
-                for a in (trail_msgs or []):
-                    add_alert('SL', a)
+                trail_actions, _ = await run_in_thread(trailing_sl, new_positions)
+                if trail_actions:
+                    await run_in_thread(apply_trailing_sl, trail_actions)
 
                 # Простой трейлинг (каждые +5% прибыли, без BB-условий)
-                simple_trail_msgs, _ = await run_in_thread(simple_trailing_sl, new_positions)
-                for a in (simple_trail_msgs or []):
-                    add_alert('SL', a)
+                simple_trail_actions, _ = await run_in_thread(simple_trailing_sl, new_positions)
+                if simple_trail_actions:
+                    await run_in_thread(apply_trailing_sl, simple_trail_actions)
 
                 # Безубыток (каждые 4 цикла)
                 if cycle % 4 == 0:
