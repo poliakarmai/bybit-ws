@@ -46,7 +46,7 @@ from .state_db import adb
 # Синхронные модули (вызываются через executor)
 from .auto_sl import check_and_fix_sl, check_breakeven_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
-from .trailing_sl import trailing_sl, trailing_sl_x10, apply_trailing_sl
+from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
 from .overbought import check_overbought, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl
@@ -433,9 +433,14 @@ async def async_main_loop():
                 for a in (sl_msgs or []):
                     add_alert('SL', a)
 
-                # Трейлинг
+                # Трейлинг (жёсткий: BB + >15%)
                 trail_msgs, _ = await run_in_thread(trailing_sl, new_positions)
                 for a in (trail_msgs or []):
+                    add_alert('SL', a)
+
+                # Простой трейлинг (каждые +5% прибыли, без BB-условий)
+                simple_trail_msgs, _ = await run_in_thread(simple_trailing_sl, new_positions)
+                for a in (simple_trail_msgs or []):
                     add_alert('SL', a)
 
                 # Безубыток (каждые 4 цикла)

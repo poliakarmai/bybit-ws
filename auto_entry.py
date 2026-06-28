@@ -640,6 +640,17 @@ def auto_entry_scan(positions):
                 except Exception:
                     pass
 
+            # ── Symbol concentration check (28.06.2026) ──
+            # Не более MAX_RISK_PER_SYMBOL_PCT от депозита на один тикер
+            try:
+                from .risk_manager import check_symbol_concentration
+                conc_ok, conc_reason, conc_pct = check_symbol_concentration(sym, margin, positions)
+                if not conc_ok:
+                    log_event(f'⚠️ CONC BLOCK {sym}: {conc_reason}')
+                    continue
+            except Exception:
+                pass
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}

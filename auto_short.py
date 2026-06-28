@@ -515,6 +515,16 @@ def check_auto_short(positions):
             except Exception as e:
                 log_event(f'⚠️ entry_judge short {sym}: {e}')
 
+            # ── Symbol concentration check (28.06.2026) ──
+            try:
+                from .risk_manager import check_symbol_concentration
+                conc_ok, conc_reason, conc_pct = check_symbol_concentration(sym, short_margin, positions)
+                if not conc_ok:
+                    log_event(f'⚠️ CONC BLOCK SHORT {sym}: {conc_reason}')
+                    continue
+            except Exception:
+                pass
+
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
             order = None

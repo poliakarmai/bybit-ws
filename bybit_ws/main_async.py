@@ -46,7 +46,7 @@ from .state_db import adb
 # Синхронные модули (вызываются через executor)
 from .auto_sl import check_and_fix_sl, check_breakeven_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
-from .trailing_sl import trailing_sl, trailing_sl_x10, apply_trailing_sl
+from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
 from .overbought import check_overbought, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl
@@ -172,10 +172,132 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
 
 
 # ═══════════════════════════════════════════════════════════
-# Тяжёлый цикл — оптимизированная версия (Фаза 7: <30с)
+# Тяжёлый цикл (sync → async wrapper)
 # ═══════════════════════════════════════════════════════════
 
-from .heavy_cycle_opt import heavy_cycle_async
+async def heavy_cycle_async(cfg, positions, cycle_count):
+    """Async-обёртка над синхронным тяжёлым циклом."""
+    HEAVY_CYCLE = cfg.monitor.heavy_cycle
+    if cycle_count % HEAVY_CYCLE != 0:
+        return
+
+    t0 = time.time()
+    log_event(f'⚡ heavy cycle #{cycle_count} start')
+
+    # Параллельный запуск CPU-bound проверок
+    tasks = []
+
+    # Режим рынка
+    from .regime import check_regime
+    try:
+        tasks.append(run_in_thread(check_regime))
+    except TypeError:
+        tasks.append(run_in_thread(check_regime, force=True))  # fallback
+
+    # ── Фаза 5.4: авто-переключение LONG/SHORT по режиму (BYBIT_REGIME_AUTO=1) ──
+    regime_auto = os.environ.get('BYBIT_REGIME_AUTO', '0') == '1'
+    if regime_auto:
+        try:
+            from .lstm_regime import get_current_regime_strategy
+            reg_strat = get_current_regime_strategy()
+            from . import __init__ as _pkg
+            _pkg.REGIME_LONG_ENABLED = reg_strat['LONG_ENABLED']
+            _pkg.REGIME_SHORT_ENABLED = reg_strat['SHORT_ENABLED']
+            if cycle_count % 10 == 0:  # логируем раз в 10 тяжёлых циклов
+                long_icon = 'OK' if reg_strat['LONG_ENABLED'] else 'OFF'
+                short_icon = 'OK' if reg_strat['SHORT_ENABLED'] else 'OFF'
+                log_event(
+                    f'REGIME_AUTO: regime={reg_strat["regime"]} conf={reg_strat["confidence"]}% '
+                    f'LONG={long_icon} SHORT={short_icon}'
+                )
+        except Exception as e:
+            log_event(f'REGIME_AUTO error: {e}')
+
+    # Авто-шорты (если не на паузе)
+    from .rpc import rpc_state
+    if not rpc_state.get("paused"):
+        tasks.append(run_in_thread(check_auto_short, positions or {}))
+
+    # Корреляции
+    tasks.append(run_in_thread(check_correlation, positions))
+
+    # Пампы, перекупленность — последовательно (не CPU-heavy)
+    if positions:
+        overbought_msgs, _ = await run_in_thread(check_overbought, positions)
+        for msg in (overbought_msgs or []):
+            add_alert('INFO', msg)
+
+        pump_msgs, _ = await run_in_thread(check_pumps, positions)
+        for msg in (pump_msgs or []):
+            add_alert('STOP', msg)
+            send_critical_alert(msg)  # Push: 🚨 на телефон
+
+        weekly_msgs, _ = await run_in_thread(check_weekly_pumps)
+        for msg in (weekly_msgs or []):
+            add_alert('STOP', msg)
+            send_critical_alert(msg)  # Push: 🚨 на телефон
+
+        # ── Авто-очистка pump_state для закрытых позиций ──
+        try:
+            import sqlite3
+            db_path = str(DATA_DIR / 'state.db')
+            db = sqlite3.connect(db_path)
+            pump_syms = [r[0] for r in db.execute("SELECT symbol FROM pump_state").fetchall()]
+            orphaned = [s for s in pump_syms if s not in (positions or {})]
+            for sym in orphaned:
+                db.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
+                db.commit()
+                log_event(f'🧹 pump_state clean: {sym} (позиция закрыта)')
+        except Exception:
+            pass
+
+    # DCA
+    if not rpc_state.get("paused"):
+        dca_msgs = await run_in_thread(check_dca)
+        for msg in (dca_msgs[0] or []):
+            add_alert('ENTRY', msg)
+            send_high_alert(msg, level='ENTRY')  # Push: ⚡ на телефон
+
+    # Partial TP (каждые 4 цикла)
+    if cycle_count % 4 == 0:
+        ptp_msgs = await run_in_thread(check_partial_tp)
+        for msg in (ptp_msgs[0] or []):
+            add_alert('TP', msg)
+            send_high_alert(msg, level='TP')  # Push: ⚡ на телефон
+
+    # Ждём параллельные задачи
+    if tasks:
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+        for i, item in enumerate(raw_results):
+            if isinstance(item, Exception):
+                log_event(f'⚠️ heavy task {i} failed: {item}')
+                continue
+            result, err = item if isinstance(item, tuple) else (item, None)
+            if err:
+                log_event(f'⏱️ heavy task {i}: timeout — {err}')
+
+    # ── Авто-вход (после всех проверок) ──
+    try:
+        # ── Risk Manager: проверка перед авто-входом ──
+        entries = await run_in_thread(auto_entry_scan, positions or {})
+        for entry in (entries[0] or []):
+            # Извлекаем символ из строки входа для проверки риска
+            import re
+            sym_match = re.search(r'\b([A-Z]+USDT)\b', entry)
+            if sym_match:
+                sym = sym_match.group(1)
+                side = 'Sell' if 'SHORT' in entry else 'Buy'
+                entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
+                if not entry_allowed:
+                    log_event(f'🛑 Risk blocked auto-entry {sym}: {risk_reason}')
+                    continue
+            add_alert('ENTRY', entry)
+            send_telegram_alert(entry)
+    except Exception as e:
+        log_event(f'⚠️ auto_entry error: {e}')
+
+    elapsed = time.time() - t0
+    log_event(f'⚡ heavy cycle #{cycle_count} done in {elapsed:.2f}s')
 
 
 # ═══════════════════════════════════════════════════════════
@@ -311,9 +433,14 @@ async def async_main_loop():
                 for a in (sl_msgs or []):
                     add_alert('SL', a)
 
-                # Трейлинг
+                # Трейлинг (жёсткий: BB + >15%)
                 trail_msgs, _ = await run_in_thread(trailing_sl, new_positions)
                 for a in (trail_msgs or []):
+                    add_alert('SL', a)
+
+                # Простой трейлинг (каждые +5% прибыли, без BB-условий)
+                simple_trail_msgs, _ = await run_in_thread(simple_trailing_sl, new_positions)
+                for a in (simple_trail_msgs or []):
                     add_alert('SL', a)
 
                 # Безубыток (каждые 4 цикла)
@@ -348,48 +475,8 @@ async def async_main_loop():
                 _rpc['circuit_breaker'] = False
                 _rpc['circuit_breaker_reason'] = ''
 
-            # ── Black Swan check (каждый цикл) ──
-            if new_positions:
-                try:
-                    from .risk_manager import (
-                        check_black_swan, emergency_close_all,
-                        emergency_close_partial,
-                    )
-                    bs_tier, bs_reason, bs_drop = check_black_swan(new_positions)
-                    if bs_tier >= 3:
-                        log_event(f'🚨 {bs_reason}')
-                        result = emergency_close_all(bs_reason, new_positions)
-                        closed_count = result['closed']
-                        failed_count = result['failed']
-                        log_event(
-                            f'🚨 TIER 3 KILL SWITCH: {closed_count} closed, '
-                            f'{failed_count} failed'
-                        )
-                        add_alert('STOP', f'🚨 BLACK SWAN TIER 3: {bs_reason}')
-                        continue
-                    elif bs_tier == 2:
-                        log_event(f'🔥 {bs_reason}')
-                        result = emergency_close_partial(bs_reason, new_positions, 0.8)
-                        closed_count = result['closed']
-                        log_event(
-                            f'🔥 TIER 2: {closed_count} closed (80%), '
-                            f'{result.get("failed", 0)} errors'
-                        )
-                        add_alert('STOP', f'🔥 BLACK SWAN TIER 2: {bs_reason}')
-                    elif bs_tier == 1:
-                        log_event(f'⚠️ {bs_reason}')
-                        result = emergency_close_partial(bs_reason, new_positions, 0.5)
-                        closed_count = result['closed']
-                        log_event(
-                            f'⚠️ TIER 1: {closed_count} closed (50%), '
-                            f'{result.get("failed", 0)} errors'
-                        )
-                        add_alert('STOP', f'⚠️ BLACK SWAN TIER 1: {bs_reason}')
-                except Exception as e:
-                    log_event(f'⚠️ black swan check error: {e}')
-
             # ── Тяжёлый цикл ──
-            await heavy_cycle_async(cfg, new_positions, new_orders, cycle)
+            await heavy_cycle_async(cfg, new_positions, cycle)
 
             # ── SL re-entry ──
             if new_positions:
@@ -405,48 +492,36 @@ async def async_main_loop():
             except Exception as e:
                 log_event(f'⚠️ reporting error: {e}')
 
-            # ── Paper Trading: симуляция входов + обновление mark-цен ──
-            try:
-                from .paper_trading import (
-                    is_paper_enabled, paper_update_mark_prices,
-                    paper_get_summary,
-                )
-                if is_paper_enabled() and cycle % 2 == 0:
-                    # Обновляем mark-цены из WS-кеша (каждые 2 цикла = 60с)
-                    mark_prices = {}
-                    for sym in (new_positions or {}):
-                        try:
-                            from .ws_client import get_bb as _ws_bb
-                            bb = _ws_bb(sym, 'D')
-                            if bb:
-                                mark_prices[sym] = bb.get('close', bb.get('middle', 0))
-                        except Exception:
-                            pass
-                    if mark_prices:
-                        paper_update_mark_prices(mark_prices)
-                if is_paper_enabled() and cycle % 10 == 0:
-                    summary = paper_get_summary()
-                    bal = summary["balance"]
-                    pos_n = summary["positions"]
-                    pnl = summary["total_pnl"]
-                    trades_n = summary["trades"]
-                    log_event(
-                        f'📝 Paper: ${bal:.0f} balance, '
-                        f'{pos_n} pos, PnL ${pnl:.2f}, '
-                        f'{trades_n} trades'
-                    )
-            except Exception as e:
-                log_event(f'⚠️ paper trading error: {e}')
+            # ── A/B-тест: логирование статуса (каждые 10 циклов) ──
             if cycle % 10 == 0:
                 try:
                     from .ab_test import is_ab_enabled, get_status as _ab_status
                     if is_ab_enabled():
                         ab = _ab_status()
-                        if ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
+                        if ab and ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
                             log_event(f'🧪 A/B вердикт: {ab["significance"]["verdict"]} '
                                       f'(p_boot={ab["significance"].get("p_value_bootstrap")})')
                 except Exception as e:
                     log_event(f'⚠️ ab_status log: {e}')
+
+            # ── Self-learning + Post-trade анализ (раз в сутки) ──
+            if cycle % 2880 == 1:
+                try:
+                    from .journal import analyzer as _journal_analyzer
+                    from .journal.self_learn import apply_journal_insights as _apply_insights
+                    from .post_trade import analyze_clusters as _cluster_analysis
+                    journal = _journal_analyzer.analyze()
+                    if journal:
+                        adjustments = await _apply_insights(journal, cfg)
+                        if adjustments:
+                            log_event(f'🧠 Self-learn: {len(adjustments)} adjustments applied')
+                    clusters = _cluster_analysis()
+                    if clusters:
+                        blocked = clusters.get('blocked', [])
+                        if blocked:
+                            log_event(f'🚫 Post-trade блок: {len(blocked)} кластеров')
+                except Exception as e:
+                    log_event(f'⚠️ self_learn error: {e}')
 
             elapsed = time.monotonic() - t0
             if cycle % 10 == 0:
@@ -482,21 +557,6 @@ async def async_main_loop():
             sleep_time = max(0.1, cycle_sec - elapsed)
 
             await asyncio.sleep(sleep_time)
-
-            # ── Heartbeat (каждые 12 часов) ──
-            if cycle % 1440 == 0:  # 1440 циклов × 30с = 12 часов
-                try:
-                    pnl = sum(
-                        float(p.get('upnl', 0) or 0)
-                        for p in (new_positions or {}).values()
-                        if isinstance(p, dict)
-                    )
-                    send_telegram_alert(
-                        f'💓 Heartbeat | Uptime: {cycle*30//3600}h | '
-                        f'{len(new_positions or {})} pos | PnL: ${pnl:+.2f}'
-                    )
-                except Exception:
-                    pass
 
         except asyncio.CancelledError:
             break

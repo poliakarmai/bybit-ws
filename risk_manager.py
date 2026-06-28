@@ -88,11 +88,57 @@ CIRCUIT_BREAKER_PCT = 0.80         # 80% от дневного лимита → 
 DEFAULT_MAX_POSITIONS = 12          # базовый лимит позиций
 HIGH_VOLATILITY_MAX_POSITIONS = 5   # лимит при высокой волатильности
 VOLATILITY_WINDOW_DAYS = 7         # окно для расчёта волатильности
+MAX_RISK_PER_SYMBOL_PCT = 0.05     # 5% от депозита на один символ (28.06.2026)
 
 # ── Внутреннее состояние ─────────────────────────────────────────────────
 _circuit_breaker_active = False
 _circuit_breaker_ts = 0.0
 _circuit_breaker_reason = ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Symbol Concentration Check (28.06.2026)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def check_symbol_concentration(symbol: str, new_margin: float, positions: dict) -> tuple:
+    """Проверить, не превышает ли риск на один символ MAX_RISK_PER_SYMBOL_PCT от депозита.
+    
+    Args:
+        symbol: тикер
+        new_margin: маржа новой позиции в USDT
+        positions: текущие позиции {symbol: {..., margin, ...}}
+    
+    Returns:
+        (allowed: bool, reason: str, total_margin_pct: float)
+    """
+    wallet = _get_wallet_balance()
+    if not wallet:
+        return True, '', 0.0  # нет данных — разрешаем
+    
+    try:
+        total_equity = float(wallet.get('equity', 0))
+    except (TypeError, ValueError):
+        return True, '', 0.0
+    
+    if total_equity <= 0:
+        return True, '', 0.0
+    
+    # Суммируем маржу по всем позициям этого символа
+    existing_margin = 0.0
+    for sym, p in positions.items():
+        if sym == symbol:
+            existing_margin += float(p.get('margin', 0) or 0)
+    
+    total_margin = existing_margin + new_margin
+    risk_pct = total_margin / total_equity
+    
+    if risk_pct > MAX_RISK_PER_SYMBOL_PCT:
+        return False, (
+            f'Концентрация {symbol}: ${total_margin:.1f} / ${total_equity:.0f} = '
+            f'{risk_pct:.1%} > {MAX_RISK_PER_SYMBOL_PCT:.0%} лимита'
+        ), risk_pct
+    
+    return True, '', risk_pct
 
 
 def _load_risk_state() -> dict:

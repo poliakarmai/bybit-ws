@@ -81,6 +81,57 @@ def apply_trailing_sl(actions):
         place_stop_loss(sym, idx, side, size, price)
 
 
+# ── Simple Trailing SL (28.06.2026) ──
+# Подтягивает SL за ценой без жёстких условий.
+# Каждые +5% прибыли → SL = безубыток + половина прибыли.
+
+def simple_trailing_sl(positions):
+    """Простой трейлинг: каждые +5% прибыли подтягиваем SL.
+    LONG: pnl > 5% → SL = entry + 0.5 * (mark - entry)
+    SHORT: pnl > 5% → SL = entry - 0.5 * (entry - mark)
+    Не требует BB-проверки.
+    """
+    actions = []
+    for sym, p in positions.items():
+        if is_manual_position(sym):
+            continue
+        entry, mark, side, size, idx = (
+            p['entry'], p['mark'], p['side'], p['size'], p['positionIdx']
+        )
+        current_sl = p.get('stopLoss')
+        if size <= 0:
+            continue
+
+        if side == 'Buy':
+            pnl_pct = (mark - entry) / entry * 100
+            if pnl_pct < 5:
+                continue
+            # SL = вход + 50% прибыли
+            sl_target = round(entry + 0.5 * (mark - entry), 4)
+            if current_sl is not None and float(current_sl or 0) >= sl_target:
+                continue  # уже лучше
+            if sl_target > entry and sl_target < mark:
+                actions.append((sym, idx, side, size, sl_target))
+                log_event(
+                    f'📈 Trail SL {sym}: entry=${entry:.4f} mark=${mark:.4f} '
+                    f'pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
+                )
+        elif side == 'Sell':
+            pnl_pct = (entry - mark) / entry * 100
+            if pnl_pct < 5:
+                continue
+            sl_target = round(entry - 0.5 * (entry - mark), 4)
+            if current_sl is not None and float(current_sl or 0) <= sl_target:
+                continue
+            if sl_target < entry and sl_target > mark:
+                actions.append((sym, idx, side, size, sl_target))
+                log_event(
+                    f'📉 Trail SL {sym}: entry=${entry:.4f} mark=${mark:.4f} '
+                    f'pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
+                )
+    return actions
+
+
 # ── Phase 3: x10 Trailing SL (агрессивный) ──
 
 def trailing_sl_x10(positions):

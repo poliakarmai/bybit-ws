@@ -196,6 +196,18 @@ def check_and_fix_sl():
                     sl_price = max_sl
                     sl_desc += f' (capped +50%)'
 
+            # ── SL floor: не ближе 2% от входа (чтоб не выбивало шумом) ──
+            if side == 'Buy':
+                min_sl_2pct = round(entry * 0.98, 4)
+                if sl_price > min_sl_2pct:
+                    sl_price = min_sl_2pct
+                    sl_desc += ' (min -2%)'
+            else:
+                max_sl_2pct = round(entry * 1.02, 4)
+                if sl_price < max_sl_2pct:
+                    sl_price = max_sl_2pct
+                    sl_desc += ' (min +2%)'
+
             # Проверка что SL на правильной стороне
             if side == 'Buy' and sl_price >= mark:
                 continue
