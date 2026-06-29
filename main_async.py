@@ -50,7 +50,7 @@ from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, apply
 from .pump_detect import check_pumps, check_weekly_pumps
 from .overbought import check_overbought, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl
-from .funding_rotation import check_funding_rotation, execute_rotation
+from .funding_rotation import check_funding_rotation
 from .dca import check_dca
 from .reporting import should_send_summary, send_summary, check_profit_triggers
 from .auto_entry import auto_entry_scan, record_sl_hit
@@ -265,6 +265,14 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     log_event(f'⚠️ funding execute error: {e}')
         except Exception as e:
             log_event(f'⚠️ funding_entry error: {e}')
+
+        # ── Funding Rotation (информационные алерты) ──
+        try:
+            rotations = await run_in_thread(check_funding_rotation, positions)
+            for r in (rotations or []):
+                add_alert('INFO', '🔄 Funding Rotation: ' + str(r.get('from', '?')) + ' → ' + str(r.get('to', '?')) + ' (' + str(r.get('reason', '')) + ')')
+        except Exception as e:
+            log_event(f'⚠️ funding_rotation error: {e}')
 
         # ── Mean Reversion Extreme x10 ──
         try:
