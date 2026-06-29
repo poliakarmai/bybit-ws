@@ -72,6 +72,87 @@ SHUTDOWN = False
 # ═══════════════════════════════════════════════════════════
 # Async helpers
 # ═══════════════════════════════════════════════════════════
+def _clean_pump_state(data_dir, positions):
+    """Sync helper: sqlite3 + pumps.json cleanup."""
+    import sqlite3
+    from .alerts import log_event
+    db_path = str(data_dir / 'state.db')
+    db = sqlite3.connect(db_path)
+    try:
+        pump_syms = [r[0] for r in db.execute("SELECT symbol FROM pump_state").fetchall()]
+        orphaned = [s for s in pump_syms if s not in (positions or {})]
+        for sym in orphaned:
+            db.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
+            db.commit()
+            log_event(f'🧹 pump_state clean: {sym} (позиция закрыта)')
+    finally:
+        db.close()
+    
+    import json as _json
+    pump_file = data_dir / 'pumps.json'
+    if pump_file.exists():
+        pumps = _json.loads(pump_file.read_text())
+        stale = [s for s in pumps if s not in (positions or {})]
+        if stale:
+            for s in stale:
+                del pumps[s]
+            pump_file.write_text(_json.dumps(pumps, indent=2))
+            log_event(f'🧹 pumps.json clean: {len(stale)} orphaned entries removed')
+
+
+def _import_bybit_trades(data_dir):
+    """Sync helper: import closed trades from Bybit API + dedup."""
+    import json as _json
+    from .api import bybit
+    from .alerts import log_event
+    trades_file = data_dir / 'trades.jsonl'
+    existing_keys = set()
+    if trades_file.exists():
+        with open(trades_file) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line:
+                    try:
+                        _d = _json.loads(_line)
+                        existing_keys.add((_d.get('symbol',''), _d.get('ts',0), _d.get('side','')))
+                    except Exception:
+                        pass
+    hist = bybit('GET', '/v5/position/closed-pnl?category=linear&limit=100')
+    imported = 0
+    if hist and hist.get('retCode') == 0:
+        with open(trades_file, 'a') as _f:
+            for item in hist['result'].get('list', []):
+                sym = item.get('symbol', '')
+                side = 'sell' if item.get('side') == 'Sell' else 'buy'
+                qty = float(item.get('qty', 0))
+                price = float(item.get('avgExitPrice', item.get('avgEntryPrice', 0)))
+                ts_val = int(item.get('updatedTime', 0)) / 1000
+                key = (sym, ts_val, side)
+                if key not in existing_keys and qty > 0:
+                    _f.write(_json.dumps({
+                        'symbol': sym, 'side': side, 'qty': qty,
+                        'price': price, 'ts': ts_val, 'fee': 0, 'source': 'bybit_history',
+                    }) + '\n')
+                    imported += 1
+                    existing_keys.add(key)
+    log_event(f'📥 Импорт истории Bybit: {imported} новых трейдов (всего {len(existing_keys)})')
+    return imported
+
+
+def _load_trades_for_journal(data_dir):
+    """Sync helper: load trades.jsonl for journal + self-learning."""
+    import json as _json
+    trades_file = data_dir / 'trades.jsonl'
+    trades = []
+    if trades_file.exists():
+        with open(trades_file) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line:
+                    trades.append(_json.loads(_line))
+    return trades
+
+
 
 async def run_in_thread(fn, *args, timeout=25):
     """Выполнить синхронную функцию в потоке с таймаутом."""
@@ -241,27 +322,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
         # ── Авто-очистка pump_state для закрытых позиций ──
         try:
-            import sqlite3
-            db_path = str(DATA_DIR / 'state.db')
-            db = sqlite3.connect(db_path)
-            pump_syms = [r[0] for r in db.execute("SELECT symbol FROM pump_state").fetchall()]
-            orphaned = [s for s in pump_syms if s not in (positions or {})]
-            for sym in orphaned:
-                db.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
-                db.commit()
-                log_event(f'🧹 pump_state clean: {sym} (позиция закрыта)')
-            
-            # Также чистим pumps.json (legacy)
-            import json as _json
-            pump_file = DATA_DIR / 'pumps.json'
-            if pump_file.exists():
-                pumps = _json.loads(pump_file.read_text())
-                stale = [s for s in pumps if s not in (positions or {})]
-                if stale:
-                    for s in stale:
-                        del pumps[s]
-                    pump_file.write_text(_json.dumps(pumps, indent=2))
-                    log_event(f'🧹 pumps.json clean: {len(stale)} orphaned entries removed')
+            await run_in_thread(_clean_pump_state, DATA_DIR, positions)
         except Exception:
             pass
 
@@ -650,7 +711,7 @@ async def async_main_loop():
                     from .ab_test import is_ab_enabled, get_status as _ab_status
                     if is_ab_enabled():
                         ab = _ab_status()
-                        if ab and ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
+                        if isinstance(ab, dict) and ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
                             log_event(f'🧪 A/B вердикт: {ab["significance"]["verdict"]} '
                                       f'(p_boot={ab["significance"].get("p_value_bootstrap")})')
                 except Exception as e:
@@ -663,27 +724,22 @@ async def async_main_loop():
                     from .journal.self_learn import apply_journal_insights as _apply_insights
                     from .post_trade import analyze_clusters as _cluster_analysis
 
-                    # Загружаем trades из файла
-                    import json as _json
+                    # Загружаем trades из файла (в потоке)
+                    trades_data = await run_in_thread(_load_trades_for_journal, DATA_DIR)
                     trades = []
-                    trades_file = DATA_DIR / 'trades.jsonl'
-                    if trades_file.exists():
-                        with open(trades_file) as _f:
-                            for _line in _f:
-                                _line = _line.strip()
-                                if _line:
-                                    try:
-                                        _d = _json.loads(_line)
-                                        trades.append(_journal_analyzer.Trade(
-                                            symbol=_d.get('symbol', ''),
-                                            side=_d.get('side', 'buy'),
-                                            quantity=float(_d.get('qty', 0)),
-                                            price=float(_d.get('price', 0)),
-                                            fee=float(_d.get('fee', 0)),
-                                            timestamp=float(_d.get('ts', 0)),
-                                        ))
-                                    except Exception:
-                                        pass
+                    raw_trades = trades_data[0] if isinstance(trades_data, tuple) else (trades_data or [])
+                    for _d in raw_trades:
+                        try:
+                            trades.append(_journal_analyzer.Trade(
+                                symbol=_d.get('symbol', ''),
+                                side=_d.get('side', 'buy'),
+                                quantity=float(_d.get('qty', 0)),
+                                price=float(_d.get('price', 0)),
+                                fee=float(_d.get('fee', 0)),
+                                timestamp=float(_d.get('ts', 0)),
+                            ))
+                        except Exception:
+                            pass
 
                     journal = _journal_analyzer.analyze(trades) if trades else None
                     if journal:
