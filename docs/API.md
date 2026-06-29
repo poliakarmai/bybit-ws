@@ -1,6 +1,6 @@
 # bybit-ws API Reference
 
-> REST API трейдинг-монитора bybit-ws. v7.2 (28.06.2026).
+> REST API трейдинг-монитора bybit-ws. Фаза 7 (29.06.2026).
 
 ## Аутентификация
 
@@ -241,9 +241,9 @@ Access-Control-Allow-Headers: Authorization, Content-Type, Idempotency-Key
 | Дата | Изменение |
 |------|----------|
 | 28.06.2026 v7.1 | REST (не JSON-RPC), унификация путей, типы string, rate limits, Idempotency-Key, WebSocket API, OpenAPI, CORS, /cancel_order, /order, /balance, /summary, webhook |
-| 28.06.2026 v7.2 | Paper Trading: /paper/balance, /paper/positions, /paper/summary |
+| 29.06.2026 Фаза 7 | Paper Trading: /paper/balance, /paper/positions, /paper/summary |
 
-## Paper Trading API (v7.2)
+## Paper Trading API (Фаза 7)
 
 `BYBIT_PAPER_ENABLED=1` для активации.
 

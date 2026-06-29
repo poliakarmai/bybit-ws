@@ -9,7 +9,7 @@
 
 ---
 
-## [7.2] — 2026-06-28
+## [7.0] — 2026-06-28 (Фаза 7 завершена 29.06)
 
 ### Added
 - **Paper Trading:** `paper_trading.py` — интеграция PaperExchange в main loop
@@ -28,7 +28,7 @@
 - rpc.py: +3 paper handlers
 - config.py: `logging.structured` field
 - CAPABILITIES.md: +BYBIT_PAPER_ENABLED, +STRUCTURED_LOGGING flags
-- ROADMAP.md: Фаза 7.2 закрыта (все ✅)
+- ROADMAP.md: Фаза 7 закрыта (все ✅)
 
 ## [7.1] — 2026-06-28
 

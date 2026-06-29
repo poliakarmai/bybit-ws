@@ -67,8 +67,8 @@ bybit-ws/
 ├── session_params.py     ← NY/Asia/Weekend адаптивные параметры (28.06)
 ├── bb_prefetch.py        ← BB batch-префетчер (28.06)
 ├── post_trade.py         ← Кластерный анализ win rate (28.06)
-├── paper_trading.py 🆕   ← Paper Trading (PaperExchange + RPC, v7.2)
-├── structured_log.py 🆕  ← JSON-логи в events.jsonl (v7.2)
+├── paper_trading.py 🆕   ← Paper Trading (PaperExchange + RPC, Фаза 7)
+├── structured_log.py 🆕  ← JSON-логи в events.jsonl (Фаза 7)
 ├── push_notifier.py      ← Push (ntfy + Telegram)
 ├── journal/              ← Журнал + самообучение
 │   ├── analyzer.py       ← Анализатор сделок (FIFO, bias)
@@ -253,20 +253,20 @@ Self-learning с защитой от переобучения:
 - WR canary ≥ baseline → promote на все входы
 - Состояние: `canary_state.json` в `~/.local/share/bybit-ws/`
 
-## Paper Trading (v7.2)
+## Paper Trading (Фаза 7)
 
 `BYBIT_PAPER_ENABLED=1` — симуляция всех сделок без риска:
 - PaperExchange: отдельная БД `paper_state.db`
 - Mark-цены из WS-кеша, PnL в реальном времени
 - RPC: `/paper/balance`, `/paper/positions`, `/paper/summary`
 
-## Structured Logging (v7.2)
+## Structured Logging (Фаза 7)
 
 `STRUCTURED_LOGGING=1` — JSON-логи в `events.jsonl`:
 - `log_info/warn/error/critical` + `log_cycle`
 - Ротация 50 MB, совместимость с Grafana Loki
 
-## GSC Security Audit (v7.2)
+## GSC Security Audit (Фаза 7)
 
 | Уровень | Находок |
 |---------|---------|
