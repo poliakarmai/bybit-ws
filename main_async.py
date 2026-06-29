@@ -489,11 +489,13 @@ async def async_main_loop():
     # Стартовая проверка SL
     if old_positions:
         sl_alerts, _ = await run_in_thread(check_and_fix_sl)
-        for a in (sl_alerts or []):
-            add_alert('SL', a)
+        if isinstance(sl_alerts, list):
+            for a in sl_alerts:
+                add_alert('SL', a)
         be_alerts, _ = await run_in_thread(check_breakeven_sl)
-        for a in (be_alerts or []):
-            add_alert('SL', a)
+        if isinstance(be_alerts, list):
+            for a in be_alerts:
+                add_alert('SL', a)
 
     # RPC — запускаем в отдельном потоке (как в main.py)
     rpc_thread = None
@@ -575,8 +577,9 @@ async def async_main_loop():
             if new_positions:
                 # SL
                 sl_msgs, _ = await run_in_thread(check_and_fix_sl)
-                for a in (sl_msgs or []):
-                    add_alert('SL', a)
+                if isinstance(sl_msgs, list):
+                    for a in sl_msgs:
+                        add_alert('SL', a)
 
                 # Трейлинг (жёсткий: BB + >15%)
                 trail_actions, _ = await run_in_thread(trailing_sl, new_positions)
@@ -591,14 +594,16 @@ async def async_main_loop():
                 # Безубыток (каждые 4 цикла)
                 if cycle % 4 == 0:
                     be_msgs, _ = await run_in_thread(check_breakeven_sl)
-                    for a in (be_msgs or []):
-                        add_alert('SL', a)
+                    if isinstance(be_msgs, list):
+                        for a in be_msgs:
+                            add_alert('SL', a)
 
                 # Маржа
                 margin_msgs, _ = await run_in_thread(check_margin_utilization, new_positions)
-                for msg in (margin_msgs or []):
-                    add_alert('STOP', msg)
-                    send_telegram_alert(msg, level='STOP')
+                if isinstance(margin_msgs, list):
+                    for msg in margin_msgs:
+                        add_alert('STOP', msg)
+                        send_telegram_alert(msg, level='STOP')
 
             # ── Risk Manager: circuit breaker check (каждый цикл) ──
             risk_result, risk_err = await run_in_thread(
@@ -626,8 +631,9 @@ async def async_main_loop():
             # ── SL re-entry ──
             if new_positions:
                 reentry_msgs, _ = await run_in_thread(check_sl_reentry, new_positions)
-                for msg in (reentry_msgs or []):
-                    add_alert('ENTRY', msg)
+                if isinstance(reentry_msgs, list):
+                    for msg in reentry_msgs:
+                        add_alert('ENTRY', msg)
 
             # ── Отчётность ──
             try:

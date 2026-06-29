@@ -93,6 +93,24 @@ def main():
     for s in safe:
         print(f"  🟢 L{s['line']}: {s['targets']} = run_in_thread({s['func']}) → {s['returns']}")
     
+    # ── Доп. проверка: isinstance guard для for-циклов после run_in_thread ──
+    guard_issues = []
+    source = main_path.read_text().split('\n')
+    for s in safe:
+        line_no = s['line']
+        # Проверить следующие 2 строки на наличие isinstance guard
+        for offset in range(1, 4):
+            check_line = source[line_no + offset - 1] if line_no + offset <= len(source) else ''
+            if 'for ' in check_line and s['targets'].split(',')[0].strip() in check_line:
+                if 'or []' in check_line and 'isinstance' not in source[line_no - 1:line_no + 5].__repr__():
+                    guard_issues.append(f"  🔴 L{line_no}+{offset}: '{check_line.strip()[:80]}' — нет isinstance guard! Замени (xxx or []) на isinstance(xxx, list)")
+                break
+    
+    if guard_issues:
+        print(f"\n=== GUARD ISSUES (for-цикл без isinstance после run_in_thread) ===")
+        for gi in guard_issues:
+            print(gi)
+    
     print(f"\n=== BUGS (функция возвращает tuple — двойная распаковка!) ===")
     if issues:
         for i in issues:
@@ -100,7 +118,7 @@ def main():
     else:
         print("  ✅ Нет проблем!")
     
-    return len(issues)
+    return len(issues) + len(guard_issues)
 
 
 if __name__ == '__main__':
