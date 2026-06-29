@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Карта проекта, команды, правила.  
-> Обновлено: 2026-06-29 (v7.3 — ATR-based TP, POSITION_IDX auto-detect, dead code audit, deploy simplification, GSC clean)
+> Обновлено: 2026-06-29 (Фаза 7 завершена — ATR-based TP, POSITION_IDX auto-detect, dead code audit, deploy simplification, GSC clean)
 
 ## Что это
 

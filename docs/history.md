@@ -74,7 +74,7 @@ Walk-forward валидация ML.
 - Топик: bybit-alerts-335c1721
 - Без дублирования Telegram-алертов (telegram_fallback=False)
 
-## 2026-06-29 — v7.3: ATR-TP, SL 2% floor, Dead Code Audit, Deploy Simplify
+## 2026-06-29 — Фаза 7 завершена: ATR-TP, SL 2% floor, Dead Code Audit, Deploy Simplify
 
 ### ATR-based TP (auto_tp.py)
 - `_get_atr_value(sym)` — расчёт ATR(14) через REST API
