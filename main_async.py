@@ -443,7 +443,8 @@ async def async_main_loop():
                             existing_keys.add((_d.get('symbol',''), _d.get('ts',0), _d.get('side','')))
                         except Exception:
                             pass
-        hist = bybit('GET', '/v5/position/closed-pnl?category=linear&limit=100')
+        hist_result = await run_in_thread(bybit, 'GET', '/v5/position/closed-pnl?category=linear&limit=100')
+        hist = hist_result[0] if isinstance(hist_result, tuple) else hist_result
         imported = 0
         if hist and hist.get('retCode') == 0:
             with open(trades_file, 'a') as _f:
@@ -516,8 +517,8 @@ async def async_main_loop():
     # WebSocket push-сервер для real-time дашборда (:8767)
     try:
         from .rpc import start_ws_server
-        ws_push_thread = start_ws_server(port=8767, bind='127.0.0.1')
-        log_event('📡 WebSocket push server on 127.0.0.1:8767 (real-time dashboard)')
+        ws_push_thread = start_ws_server(port=8768, bind='127.0.0.1')
+        log_event('📡 WebSocket push server on 127.0.0.1:8768 (real-time dashboard)')
     except Exception as e:
         log_event(f'⚠️ WS push server start error: {e}')
 
