@@ -109,6 +109,8 @@ def _save_dedup():
 
 def _push_key(msg: str, priority: str) -> str:
     """Создать ключ дедупликации: SHA256 первых 120 символов + приоритет."""
+    if not isinstance(msg, str):
+        msg = str(msg)
     normalized = msg.strip()[:120]
     h = hashlib.sha256(f"{priority}:{normalized}".encode()).hexdigest()[:16]
     return h

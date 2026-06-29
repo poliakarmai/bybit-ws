@@ -17,6 +17,7 @@ import os
 import signal
 import sys
 import time
+import traceback
 import threading
 from datetime import datetime
 from functools import partial
@@ -72,8 +73,6 @@ SHUTDOWN = False
 # Async helpers
 # ═══════════════════════════════════════════════════════════
 
-_TIMEOUT_SENTINEL = object()  # sentinel for timeout detection
-
 async def run_in_thread(fn, *args, timeout=25):
     """Выполнить синхронную функцию в потоке с таймаутом."""
     try:
@@ -86,7 +85,7 @@ async def run_in_thread(fn, *args, timeout=25):
     except asyncio.TimeoutError:
         fn_name = fn.__name__ if hasattr(fn, '__name__') else 'unknown'
         log_event(f'⚠️ TIMEOUT {fn_name} after {timeout}s — result discarded')
-        return _TIMEOUT_SENTINEL, fn_name
+        return [], fn_name
     except Exception as e:
         return [], str(e)
 
@@ -270,7 +269,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 except Exception as e:
                     log_event(f'⚠️ funding execute error: {e}')
         except Exception as e:
-            log_event(f'⚠️ funding_entry error: {e}')
+            log_event(f'⚠️ funding_entry error: {e}\n' + traceback.format_exc())
 
         # ── Funding Rotation (информационные алерты) ──
         try:
@@ -278,7 +277,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             for r in (rotations or []):
                 add_alert('INFO', '🔄 Funding Rotation: ' + str(r.get('from', '?')) + ' → ' + str(r.get('to', '?')) + ' (' + str(r.get('reason', '')) + ')')
         except Exception as e:
-            log_event(f'⚠️ funding_rotation error: {e}')
+            log_event(f'⚠️ funding_rotation error: {e}\n' + traceback.format_exc())
 
         # ── Mean Reversion Extreme x10 ──
         try:
@@ -299,7 +298,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 except Exception as e:
                     log_event(f'⚠️ mean_revert execute error: {e}')
         except Exception as e:
-            log_event(f'⚠️ mean_revert error: {e}')
+            log_event(f'⚠️ mean_revert error: {e}\n' + traceback.format_exc())
 
         # ── BB Scalping M5/M15 x10 ──
         try:
@@ -320,7 +319,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 except Exception as e:
                     log_event(f'⚠️ scalp execute error: {e}')
         except Exception as e:
-            log_event(f'⚠️ bb_scalp error: {e}')
+            log_event(f'⚠️ bb_scalp error: {e}\n' + traceback.format_exc())
 
     # DCA
     if not rpc_state.get("paused"):

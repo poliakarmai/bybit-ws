@@ -58,6 +58,8 @@ def judge_entry(
     if not JUDGE_ENABLED:
         return {"verdict": "pass", "blocking_issues": [], "confidence": 1.0, "notes": "judge disabled"}
 
+    global _llm_failures, _llm_disabled_until
+
     if symbol in JUDGE_BLACKLIST:
         return {"verdict": "pass", "blocking_issues": [], "confidence": 1.0, "notes": "blacklisted"}
 

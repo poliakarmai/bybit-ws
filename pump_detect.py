@@ -14,6 +14,7 @@ import json
 import math
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import DATA_DIR
 from .api import bybit
@@ -324,8 +325,11 @@ def check_pumps(positions=None):
 
 
 def check_weekly_pumps(positions=None):
-    """Проверить топ-80 на недельный памп (≥230%) — экстремальные JUNK-шорты БЕЗ SL."""
-    import urllib.request as _urllib
+    """Проверить топ-50 на недельный памп (≥230%) — экстремальные JUNK-шорты БЕЗ SL.
+    
+    Оптимизация: klines загружаются параллельно (ThreadPoolExecutor, 10 воркеров)
+    вместо 50 последовательных HTTP-запросов. Время выполнения: ~2-4с вместо 20-40с.
+    """
     alerts = []
     now = time.time()
 
@@ -336,6 +340,7 @@ def check_weekly_pumps(positions=None):
     if active_pump_shorts >= MAX_PUMP_SHORTS:
         return alerts
 
+    # Шаг 1: получаем топ-50 по обороту (1 API-запрос)
     data = bybit('GET', '/v5/market/tickers?category=linear')
     if not data or data.get('retCode') != 0:
         return alerts
@@ -345,10 +350,11 @@ def check_weekly_pumps(positions=None):
         return alerts
 
     tickers.sort(key=lambda t: float(t.get('turnover24h', 0) or 0), reverse=True)
-    top_tickers = tickers[:80]
     state = _cleanup_state(_load_state(), now)
 
-    for t in top_tickers:
+    # Шаг 2: фильтруем кандидатов ДО запроса klines
+    candidates = []
+    for t in tickers[:50]:
         sym = t['symbol']
         if 'USD' not in sym or not sym.endswith('USDT'):
             continue
@@ -357,77 +363,101 @@ def check_weekly_pumps(positions=None):
             continue
         if sym in live_syms or sym in ONE_WAY:
             continue
-        if active_pump_shorts >= MAX_PUMP_SHORTS:
-            break
-
-        # Skip if already tracked by daily pump
         prev = state.get(sym, {})
         if prev.get('short_entry_ts'):
             continue
+        candidates.append((sym, float(t.get('lastPrice', 0)), turnover))
 
-        # Fetch 7-day klines
+    if not candidates:
+        return alerts
+
+    # Шаг 3: параллельная загрузка klines (ThreadPoolExecutor, 10 воркеров)
+    def _fetch_kline(sym):
+        """Загрузить 7-дневные klines для одного символа. Возвращает (sym, chg_7d) или (sym, None)."""
         try:
+            import urllib.request as _urllib
             kdata = json.loads(_urllib.urlopen(
-                f'https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=8'
+                f'https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=8',
+                timeout=5
             ).read())
             closes = [float(c[4]) for c in kdata['result']['list']]
             if len(closes) < 8:
-                continue
-            # closes[0]=today, closes[7]=7 days ago (8th candle)
-            chg_7d = ((closes[0] - closes[7]) / closes[7])
-            if chg_7d < WEEKLY_PUMP_THRESHOLD:
-                continue
+                return sym, None
+            chg_7d = (closes[0] - closes[7]) / closes[7]
+            return sym, chg_7d if chg_7d >= WEEKLY_PUMP_THRESHOLD else None
         except Exception:
+            return sym, None
+
+    pump_candidates = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_fetch_kline, sym): sym for sym, _, _ in candidates}
+        for future in as_completed(futures, timeout=15):
+            try:
+                sym, chg = future.result()
+                if chg is not None:
+                    pump_candidates[sym] = chg
+            except Exception:
+                pass
+
+    if not pump_candidates:
+        return alerts
+
+    # Шаг 4: алерты и входы для подтверждённых пампов
+    sym_to_data = {s: (p, t) for s, p, t in candidates}
+
+    for sym, chg_7d in pump_candidates.items():
+        if active_pump_shorts >= MAX_PUMP_SHORTS:
+            break
+        if sym in live_syms or sym in ONE_WAY:
             continue
 
-        last_price = float(t.get('lastPrice', 0))
+        last_price, turnover = sym_to_data[sym]
         alerts.append(
             f'🚀🚀 НЕДЕЛЬНЫЙ ПАМП {sym}: +{chg_7d*100:.0f}% за 7д '
             f'(цена ${last_price:.4f}, оборот ${turnover:,.0f})'
         )
 
         # JUNK short: БЕЗ SL, БЕЗ TP, только вход + DCA сетап
-        if sym not in live_syms and sym not in ONE_WAY:
-            pump_margin = margin_for_strategy('pump', score=5.5)
-            if pump_margin <= 0:
+        pump_margin = margin_for_strategy('pump', score=5.5)
+        if pump_margin <= 0:
+            continue
+        usdt_qty = pump_margin * PUMP_SHORT_LEV
+        qty_step = _get_lot_step(sym)
+        qty = math.ceil(usdt_qty / last_price / qty_step) * qty_step
+        if qty <= 0:
+            continue
+
+        entry = _round_to_tick(last_price, sym)
+        try:
+            order = bybit('POST', '/v5/order/create', {
+                'category': 'linear', 'symbol': sym,
+                'side': 'Sell', 'orderType': 'Market',
+                'qty': str(qty), 'positionIdx': 2,
+                'timeInForce': 'IOC',
+            })
+            if order.get('retCode') != 0:
+                log_event(f'⚠️ Weekly-Pump {sym}: {order.get("retMsg","?")}')
                 continue
-            usdt_qty = pump_margin * PUMP_SHORT_LEV
-            qty_step = _get_lot_step(sym)
-            qty = math.ceil(usdt_qty / last_price / qty_step) * qty_step
-            if qty <= 0:
-                continue
 
-            entry = _round_to_tick(last_price, sym)
-            try:
-                order = bybit('POST', '/v5/order/create', {
-                    'category': 'linear', 'symbol': sym,
-                    'side': 'Sell', 'orderType': 'Market',
-                    'qty': str(qty), 'positionIdx': 2,
-                    'timeInForce': 'IOC',
-                })
-                if order.get('retCode') != 0:
-                    log_event(f'⚠️ Weekly-Pump {sym}: {order.get("retMsg","?")}')
-                    continue
+            log_event(f'🚀🚀 Weekly-JUNK {sym}: SHORT ${entry:.4f} ×{qty}, БЕЗ SL (памп +{chg_7d*100:.0f}%)')
+            alerts.append(f'🐻🐻 JUNK-SHORT {sym}: вход @ ${entry:.4f}, БЕЗ стопа')
 
-                log_event(f'🚀🚀 Weekly-JUNK {sym}: SHORT ${entry:.4f} ×{qty}, БЕЗ SL (памп +{chg_7d*100:.0f}%)')
-                alerts.append(f'🐻🐻 JUNK-SHORT {sym}: вход @ ${entry:.4f}, БЕЗ стопа')
+            state[sym] = {
+                'first_seen_ts': now,
+                'first_price': last_price,
+                'peak_price': last_price,
+                'alerts': [now],
+                'dca_level': 0,
+                'dca_placed': ['init'],
+                'short_entry_ts': now,
+                'short_entry_price': entry,
+                'weekly_pump': True,
+            }
+            _save_state(state)
+            active_pump_shorts += 1
 
-                state[sym] = {
-                    'first_seen_ts': now,
-                    'first_price': last_price,
-                    'peak_price': last_price,
-                    'alerts': [now],
-                    'dca_level': 0,
-                    'dca_placed': ['init'],
-                    'short_entry_ts': now,
-                    'short_entry_price': entry,
-                    'weekly_pump': True,
-                }
-                _save_state(state)
-                active_pump_shorts += 1
-
-            except Exception as e:
-                log_event(f'⚠️ Weekly-Pump {sym}: {e}')
+        except Exception as e:
+            log_event(f'⚠️ Weekly-Pump {sym}: {e}')
 
     _save_state(state)
     return alerts

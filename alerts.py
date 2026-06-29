@@ -93,6 +93,14 @@ def _rotate_if_needed(log_path: str):
 
 
 def add_alert(level, msg):
+    # Защита: если передан список/None — фильтруем
+    if msg is None or (isinstance(msg, (list, tuple)) and len(msg) == 0):
+        return
+    if isinstance(msg, (list, tuple)):
+        msg = ' '.join(str(m) for m in msg if m)
+        if not msg:
+            return
+    msg = str(msg)
     ts = datetime.now().strftime('%H:%M:%S')
     entry = f'[{ts}] [{level}] {msg}'
     ALERTS.append(entry)
@@ -166,6 +174,8 @@ def _is_duplicate(msg, level="INFO"):
 
 def send_telegram_alert(msg, level="INFO"):
     """Отправить алерт в Telegram с дедупликацией."""
+    if not isinstance(msg, str):
+        msg = str(msg)
     # Проверить, разрешены ли Telegram-алерты в конфиге
     try:
         from .config import Config
