@@ -175,7 +175,7 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
 # Тяжёлый цикл (sync → async wrapper)
 # ═══════════════════════════════════════════════════════════
 
-async def heavy_cycle_async(cfg, positions, cycle_count):
+async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     """Async-обёртка над синхронным тяжёлым циклом."""
     HEAVY_CYCLE = cfg.monitor.heavy_cycle
     if cycle_count % HEAVY_CYCLE != 0:
@@ -298,7 +298,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count):
 
     # ── Auto-TP: ATR-based тейк-профиты ──
     try:
-        tp_actions, tp_err = await run_in_thread(auto_take_profit, positions or {}, {})
+        tp_actions, tp_err = await run_in_thread(auto_take_profit, positions or {}, orders or {})
         if tp_actions:
             await run_in_thread(apply_auto_tp, tp_actions)
     except Exception as e:
@@ -529,7 +529,7 @@ async def async_main_loop():
                 _rpc['circuit_breaker_reason'] = ''
 
             # ── Тяжёлый цикл ──
-            await heavy_cycle_async(cfg, new_positions, cycle)
+            await heavy_cycle_async(cfg, new_positions, cycle, new_orders)
 
             # ── SL re-entry ──
             if new_positions:

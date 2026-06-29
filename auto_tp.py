@@ -103,8 +103,27 @@ def _get_atr_split(sym: str) -> tuple:
     return SPLIT_NORMAL
 
 
+def _get_atr_value(sym: str) -> float:
+    """ATR(14) для символа — сырое значение, не процент."""
+    try:
+        from .api import bybit
+        kline = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=15')
+        if kline and kline.get('retCode') == 0:
+            candles = kline['result']['list']
+            if len(candles) >= 14:
+                ranges = []
+                for c in candles[:14]:
+                    high = float(c[2])
+                    low = float(c[3])
+                    ranges.append(high - low)
+                return sum(ranges) / len(ranges)
+    except Exception:
+        pass
+    return 0.0
+
+
 def auto_take_profit(positions, orders, skip_syms=None):
-    """Поставить ATR-адаптивные TP на BB-уровни."""
+    """Поставить TP: BB-уровни + ATR-based fallback (entry ± k×ATR)."""
     skip_syms = skip_syms or set()
     existing_tp = {}
     if isinstance(orders, dict):
@@ -121,6 +140,8 @@ def auto_take_profit(positions, orders, skip_syms=None):
             existing_tp[sym].append((float(o.get('qty', 0)), float(o.get('price', 0))))
 
     actions = []
+    bb_covered = set()  # символы получившие TP через BB
+
     for sym, p in positions.items():
         if is_manual_position(sym):
             continue
@@ -145,54 +166,84 @@ def auto_take_profit(positions, orders, skip_syms=None):
             continue
 
         bb = get_bb_data(sym, 'D')
-        if not bb:
-            continue
-
-        middle, upper, lower, cur = bb['middle'], bb['upper'], bb.get('lower', 0), bb['cur']
         rounding = 0 if pos_size >= 10 else 1
 
-        # ATR-adaptive split
-        near_pct, far_pct = _get_atr_split(sym)
+        # ── BB-based TP (существующая логика) ──
+        bb_used = False
+        if bb:
+            middle, upper, lower, cur = bb['middle'], bb['upper'], bb.get('lower', 0), bb['cur']
+            near_pct, far_pct = _get_atr_split(sym)
 
-        if side == 'Buy':
-            need_mid = round(pos_size * near_pct, rounding)
-            need_far = round(pos_size * far_pct, rounding)
-            if need_mid < 0.5:
-                need_far = round(pos_size, rounding)
-                need_mid = 0
+            if side == 'Buy':
+                need_mid = round(pos_size * near_pct, rounding)
+                need_far = round(pos_size * far_pct, rounding)
+                if need_mid < 0.5:
+                    need_far = round(pos_size, rounding)
+                    need_mid = 0
 
-            existing = existing_tp.get(sym, [])
-            has_mid = sum(q for q, pr in existing if abs(pr - middle) / middle < 0.02) if middle > 0 else 0
-            has_far = sum(q for q, pr in existing if abs(pr - upper) / upper < 0.02) if upper > 0 else 0
+                existing = existing_tp.get(sym, [])
+                has_mid = sum(q for q, pr in existing if abs(pr - middle) / middle < 0.02) if middle > 0 else 0
+                has_far = sum(q for q, pr in existing if abs(pr - upper) / upper < 0.02) if upper > 0 else 0
 
-            if need_mid > 0 and middle > cur and has_mid < need_mid * 0.9:
-                gap = round(need_mid - has_mid, rounding)
-                if gap > 0:
-                    actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
-            if upper > cur and has_far < need_far * 0.9:
-                gap = round(need_far - has_far, rounding)
-                if gap > 0:
-                    actions.append((sym, p['positionIdx'], side, gap, upper, pos_size))
+                if need_mid > 0 and middle > cur and has_mid < need_mid * 0.9:
+                    gap = round(need_mid - has_mid, rounding)
+                    if gap > 0:
+                        actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
+                        bb_used = True
+                if upper > cur and has_far < need_far * 0.9:
+                    gap = round(need_far - has_far, rounding)
+                    if gap > 0:
+                        actions.append((sym, p['positionIdx'], side, gap, upper, pos_size))
+                        bb_used = True
 
-        elif side == 'Sell':
-            need_mid = round(pos_size * near_pct, rounding)
-            need_far = round(pos_size * far_pct, rounding)
-            if need_mid < 0.5:
-                need_far = round(pos_size, rounding)
-                need_mid = 0
+            elif side == 'Sell':
+                need_mid = round(pos_size * near_pct, rounding)
+                need_far = round(pos_size * far_pct, rounding)
+                if need_mid < 0.5:
+                    need_far = round(pos_size, rounding)
+                    need_mid = 0
 
-            existing = existing_tp.get(sym, [])
-            has_mid = sum(q for q, pr in existing if abs(pr - middle) / middle < 0.02) if middle > 0 else 0
-            has_lo = sum(q for q, pr in existing if abs(pr - lower) / lower < 0.02) if lower > 0 else 0
+                existing = existing_tp.get(sym, [])
+                has_mid = sum(q for q, pr in existing if abs(pr - middle) / middle < 0.02) if middle > 0 else 0
+                has_lo = sum(q for q, pr in existing if abs(pr - lower) / lower < 0.02) if lower > 0 else 0
 
-            if need_mid > 0 and middle < cur and has_mid < need_mid * 0.9:
-                gap = round(need_mid - has_mid, rounding)
-                if gap > 0:
-                    actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
-            if lower > 0 and lower < cur and has_lo < need_far * 0.9:
-                gap = round(need_far - has_lo, rounding)
-                if gap > 0:
-                    actions.append((sym, p['positionIdx'], side, gap, lower, pos_size))
+                if need_mid > 0 and middle < cur and has_mid < need_mid * 0.9:
+                    gap = round(need_mid - has_mid, rounding)
+                    if gap > 0:
+                        actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
+                        bb_used = True
+                if lower > 0 and lower < cur and has_lo < need_far * 0.9:
+                    gap = round(need_far - has_lo, rounding)
+                    if gap > 0:
+                        actions.append((sym, p['positionIdx'], side, gap, lower, pos_size))
+                        bb_used = True
+
+        # ── ATR-based TP fallback (entry ± k×ATR) ──
+        # Срабатывает когда BB не смог поставить TP (цена выше middle BB для LONG и т.д.)
+        if ATR_TP_ENABLED and not bb_used and sym not in TP_PERM_SKIP:
+            atr = _get_atr_value(sym)
+            if atr > 0:
+                entry = p['entry']
+                existing_qty = sum(q for q, _ in existing_tp.get(sym, []))
+                uncovered = pos_size - existing_qty
+                if uncovered >= 0.5:
+                    for k, split in zip(ATR_TP_LEVELS, ATR_TP_SPLITS):
+                        qty = round(uncovered * split, rounding)
+                        if qty < 0.5:
+                            continue
+                        if side == 'Buy':
+                            tp_price = entry + k * atr
+                        else:
+                            tp_price = entry - k * atr
+                        # Precision rounding
+                        if tp_price >= 100:
+                            tp_price = round(tp_price, 1)
+                        elif tp_price >= 1:
+                            tp_price = round(tp_price, 3)
+                        else:
+                            tp_price = round(tp_price, 5)
+                        actions.append((sym, p['positionIdx'], side, qty, tp_price, pos_size))
+                        bb_covered.add(sym)  # отмечаем что ATR отработал
 
     return actions
 
