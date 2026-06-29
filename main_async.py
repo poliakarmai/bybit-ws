@@ -251,6 +251,36 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         except Exception:
             pass
 
+        # ── Funding Rate Momentum x10 ──
+        try:
+            fund_alerts, fund_entries = await run_in_thread(check_funding_signals, positions)
+            for msg in (fund_alerts or []):
+                add_alert('ENTRY', msg)
+            for entry_info in (fund_entries or []):
+                try:
+                    ok = await run_in_thread(execute_funding_entry, entry_info)
+                    if ok:
+                        log_event(f'💰 Funding Entry: {entry_info}')
+                except Exception as e:
+                    log_event(f'⚠️ funding execute error: {e}')
+        except Exception as e:
+            log_event(f'⚠️ funding_entry error: {e}')
+
+        # ── Mean Reversion Extreme x10 ──
+        try:
+            mean_alerts, mean_entries = await run_in_thread(check_mean_revert, positions)
+            for msg in (mean_alerts or []):
+                add_alert('ENTRY', msg)
+            for entry_info in (mean_entries or []):
+                try:
+                    ok = await run_in_thread(execute_mean_revert, entry_info)
+                    if ok:
+                        log_event(f'📊 Mean Revert Entry: {entry_info}')
+                except Exception as e:
+                    log_event(f'⚠️ mean_revert execute error: {e}')
+        except Exception as e:
+            log_event(f'⚠️ mean_revert error: {e}')
+
     # DCA
     if not rpc_state.get("paused"):
         dca_msgs = await run_in_thread(check_dca)
