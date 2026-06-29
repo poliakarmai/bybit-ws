@@ -223,18 +223,21 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     # Пампы, перекупленность — последовательно (не CPU-heavy)
     if positions:
         overbought_msgs, _ = await run_in_thread(check_overbought, positions)
-        for msg in (overbought_msgs or []):
-            add_alert('INFO', msg)
+        if isinstance(overbought_msgs, list):
+            for msg in overbought_msgs:
+                add_alert('INFO', msg)
 
         pump_msgs, _ = await run_in_thread(check_pumps, positions)
-        for msg in (pump_msgs or []):
-            add_alert('STOP', msg)
-            send_critical_alert(msg)  # Push: 🚨 на телефон
+        if isinstance(pump_msgs, list):
+            for msg in pump_msgs:
+                add_alert('STOP', msg)
+                send_critical_alert(msg)  # Push: 🚨 на телефон
 
         weekly_msgs, _ = await run_in_thread(check_weekly_pumps)
-        for msg in (weekly_msgs or []):
-            add_alert('STOP', msg)
-            send_critical_alert(msg)  # Push: 🚨 на телефон
+        if isinstance(weekly_msgs, list):
+            for msg in weekly_msgs:
+                add_alert('STOP', msg)
+                send_critical_alert(msg)  # Push: 🚨 на телефон
 
         # ── Авто-очистка pump_state для закрытых позиций ──
         try:
