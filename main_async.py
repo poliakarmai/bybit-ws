@@ -252,7 +252,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
         # ── Funding Rate Momentum x10 ──
         try:
-            fund_alerts, fund_entries = await run_in_thread(check_funding_signals, positions)
+            result = await run_in_thread(check_funding_signals, positions)
+            fund_alerts, fund_entries = result[0] if isinstance(result[0], tuple) else (result[0] or [], [])
             for msg in (fund_alerts or []):
                 add_alert('ENTRY', msg)
             for entry_info in (fund_entries or []):
@@ -263,7 +264,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     if not entry_allowed:
                         log_event(f'🛑 Risk blocked funding {sym}: {risk_reason}')
                         continue
-                    ok = await run_in_thread(execute_funding_entry, entry_info)
+                    exec_result = await run_in_thread(execute_funding_entry, entry_info)
+                    ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                     if ok:
                         log_event(f'💰 Funding Entry: {entry_info}')
                 except Exception as e:
@@ -273,7 +275,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
         # ── Funding Rotation (информационные алерты) ──
         try:
-            rotations = await run_in_thread(check_funding_rotation, positions)
+            rot_result = await run_in_thread(check_funding_rotation, positions)
+            rotations = rot_result[0] if isinstance(rot_result[0], list) else (rot_result[0] or [])
             for r in (rotations or []):
                 add_alert('INFO', '🔄 Funding Rotation: ' + str(r.get('from', '?')) + ' → ' + str(r.get('to', '?')) + ' (' + str(r.get('reason', '')) + ')')
         except Exception as e:
@@ -281,7 +284,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
         # ── Mean Reversion Extreme x10 ──
         try:
-            mean_alerts, mean_entries = await run_in_thread(check_mean_revert, positions)
+            mr_result = await run_in_thread(check_mean_revert, positions)
+            mean_alerts, mean_entries = mr_result[0] if isinstance(mr_result[0], tuple) else (mr_result[0] or [], [])
             for msg in (mean_alerts or []):
                 add_alert('ENTRY', msg)
             for entry_info in (mean_entries or []):
@@ -292,7 +296,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     if not entry_allowed:
                         log_event(f'🛑 Risk blocked mean_revert {sym}: {risk_reason}')
                         continue
-                    ok = await run_in_thread(execute_mean_revert, entry_info)
+                    exec_result = await run_in_thread(execute_mean_revert, entry_info)
+                    ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                     if ok:
                         log_event(f'📊 Mean Revert Entry: {entry_info}')
                 except Exception as e:
@@ -302,7 +307,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
         # ── BB Scalping M5/M15 x10 ──
         try:
-            scalp_alerts, scalp_entries = await run_in_thread(check_scalp_signals, positions, 0)
+            sc_result = await run_in_thread(check_scalp_signals, positions, 0)
+            scalp_alerts, scalp_entries = sc_result[0] if isinstance(sc_result[0], tuple) else (sc_result[0] or [], [])
             for msg in (scalp_alerts or []):
                 add_alert('ENTRY', msg)
             for entry_info in (scalp_entries or []):
@@ -313,7 +319,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     if not entry_allowed:
                         log_event(f'🛑 Risk blocked scalp {sym}: {risk_reason}')
                         continue
-                    ok = await run_in_thread(execute_scalp, entry_info)
+                    exec_result = await run_in_thread(execute_scalp, entry_info)
+                    ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                     if ok:
                         log_event(f'⚡ Scalp Entry: {entry_info}')
                 except Exception as e:
