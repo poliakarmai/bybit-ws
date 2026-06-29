@@ -73,3 +73,25 @@ Walk-forward валидация ML.
 - Подключено в main_async.py: CRITICAL (STOP/pump) + HIGH (ENTRY/TP)
 - Топик: bybit-alerts-335c1721
 - Без дублирования Telegram-алертов (telegram_fallback=False)
+
+## 2026-06-29 — v7.3: ATR-TP, SL 2% floor, Dead Code Audit, Deploy Simplify
+
+### ATR-based TP (auto_tp.py)
+- `_get_atr_value(sym)` — расчёт ATR(14) через REST API
+- TP = entry ± k × ATR, 3 уровня: 1.0× (40%), 2.0× (35%), 3.0× (25%)
+- Feature flag: `BYBIT_ATR_TP_ENABLED=1`
+
+### SL 2% Floor (auto_sl.py)
+- SL не ближе 2% от входа — защита от выбивания шумом
+- Аварийный SL при ATR/BB SL выше рынка: mark × 0.95
+
+### Dead Code Audit
+- Удалён `execute_rotation` (мёртвый импорт)
+- `for idx in (0,1)` заменён на `POSITION_IDX` авто-определение
+- GSC GS008 детектор мёртвого кода
+
+### Deploy Simplification
+- Убрано `.local/lib` staging, явное указание пакетов
+- `deploy.sh` упрощён: копирование → тесты → рестарт
+- bb_scalp + funding_rotation активированы
+- risk_check gate для mean_revert и funding_entry

@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Карта проекта, команды, правила.  
-> Обновлено: 2026-06-28 (17 коммитов: v7.2 — фаза 7.2 завершена, BlackSwan multi-tier, Canary, Paper, StructLog, GSC clean)
+> Обновлено: 2026-06-29 (v7.3 — ATR-based TP, POSITION_IDX auto-detect, dead code audit, deploy simplification, GSC clean)
 
 ## Что это
 
@@ -182,7 +182,7 @@ curl -H "Authorization: Bearer TOKEN" http://127.0.0.1:8766/metrics
 5. **Кэш вердиктов**: 300с TTL
 6. **Таймаут**: 5 секунд
 
-## Auto-SL v2 — ATR-adaptive
+## Auto-SL v2 — ATR-adaptive + 2% Floor (29.06)
 
 SL = entry ± k × ATR(14), capped at -50%/+50%:
 
@@ -193,9 +193,12 @@ SL = entry ± k × ATR(14), capped at -50%/+50%:
 | normal | 1-3% | 1.5 |
 | low_vol | <1% | 1.3 |
 
-## Auto-TP v3 — ATR-based levels (28.06)
+**SL 2% Floor:** SL не ближе 2% от входа — защита от выбивания шумом.
+**Аварийный SL:** при ATR/BB SL выше рынка → mark × 0.95.
 
-`BYBIT_ATR_TP_ENABLED=1` — TP = entry ± k × ATR(14):
+## Auto-TP v3 — ATR-based levels (29.06)
+
+`BYBIT_ATR_TP_ENABLED=1` — `_get_atr_value(sym)` → TP = entry ± k × ATR(14):
 
 | Уровень | k | % объёма |
 |---------|---|---------|
