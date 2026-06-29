@@ -191,34 +191,32 @@ def execute_funding_entry(entry_info):
     except Exception as e:
         log_event(f'⚠️ funding_entry: {e}')
 
-    for idx in (0, 1):
-        try:
-            order = bybit('POST', '/v5/order/create', {
-                'category': 'linear', 'symbol': sym, 'side': side,
-                'orderType': 'Market', 'qty': str(entry_info['qty']),
-                'positionIdx': idx, 'timeInForce': 'IOC',
-            })
-            if order.get('retCode') == 0:
-                log_event(f'💰 FUNDING {sym} {entry_info["direction"]}: market x{FUNDING_LEVERAGE} '
-                          f'funding={entry_info.get("funding_rate", 0)*100:.2f}%')
-                ts_body = {
-                    'category': 'linear', 'symbol': sym, 'positionIdx': idx,
-                    'stopLoss': str(entry_info['sl']),
-                    'takeProfit': str(entry_info['tp']),
-                    'slTriggerBy': 'MarkPrice', 'tpTriggerBy': 'MarkPrice',
-                    'tpslMode': 'Full',
-                }
-                ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
-                if ts_resp.get('retCode') != 0:
-                    ret_msg = ts_resp.get('retMsg', '?')
-                    log_event(f'⚠️ FUNDING {sym}: SL/TP не выставился — {ret_msg}')
-                return True
-            elif order.get('retCode') == 10001:
-                continue
-            else:
-                log_event(f'⚠️ FUNDING {sym}: {order.get("retMsg", "?")}')
-                return False
-        except Exception as e:
-            log_event(f'⚠️ FUNDING {sym}: исключение — {e}')
+    from . import POSITION_IDX
+    idx = POSITION_IDX.get(side, 0)
+    try:
+        order = bybit('POST', '/v5/order/create', {
+            'category': 'linear', 'symbol': sym, 'side': side,
+            'orderType': 'Market', 'qty': str(entry_info['qty']),
+            'positionIdx': idx, 'timeInForce': 'IOC',
+        })
+        if order.get('retCode') == 0:
+            log_event(f'💰 FUNDING {sym} {entry_info["direction"]}: market x{FUNDING_LEVERAGE} '
+                      f'funding={entry_info.get("funding_rate", 0)*100:.2f}%')
+            ts_body = {
+                'category': 'linear', 'symbol': sym, 'positionIdx': idx,
+                'stopLoss': str(entry_info['sl']),
+                'takeProfit': str(entry_info['tp']),
+                'slTriggerBy': 'MarkPrice', 'tpTriggerBy': 'MarkPrice',
+                'tpslMode': 'Full',
+            }
+            ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
+            if ts_resp.get('retCode') != 0:
+                ret_msg = ts_resp.get('retMsg', '?')
+                log_event(f'⚠️ FUNDING {sym}: SL/TP не выставился — {ret_msg}')
+            return True
+        else:
+            log_event(f'⚠️ FUNDING {sym}: {order.get("retMsg", "?")}')
             return False
-    return False
+    except Exception as e:
+        log_event(f'⚠️ FUNDING {sym}: исключение — {e}')
+        return False

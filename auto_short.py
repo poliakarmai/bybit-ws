@@ -833,18 +833,15 @@ def _close_junk_position(sym, pos):
     size = float(pos.get('size', 0))
     if size <= 0:
         return
-    for idx in (0, 1):
-        try:
-            order = bybit('POST', '/v5/order/create', {
-                'category': 'linear', 'symbol': sym, 'side': 'Buy',
-                'orderType': 'Market', 'qty': str(size),
-                'positionIdx': idx, 'timeInForce': 'IOC',
-                'reduceOnly': True,
-            })
-            if order.get('retCode') == 0:
-                return
-            if order.get('retCode') == 10001:
-                continue
-        except Exception as e:
-            log_event(f'⚠️ auto_short close_short({sym}): {e}')
-            continue
+    idx = int(pos.get('positionIdx', 0))
+    try:
+        order = bybit('POST', '/v5/order/create', {
+            'category': 'linear', 'symbol': sym, 'side': 'Buy',
+            'orderType': 'Market', 'qty': str(size),
+            'positionIdx': idx, 'timeInForce': 'IOC',
+            'reduceOnly': True,
+        })
+        if order.get('retCode') == 0:
+            return
+    except Exception as e:
+        log_event(f'⚠️ auto_short close_short({sym}): {e}')

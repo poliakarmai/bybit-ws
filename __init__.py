@@ -147,4 +147,27 @@ def safe_op(fn, *args, default=None, desc='', **kwargs):
                 f.write(f'[{ts}] ⚠️ EXCEPTION {name}{ctx}: {e}\n')
         except Exception:
             pass
-        return default
+
+# ── Position mode detection (hedge vs one-way) ──
+
+# Позиции используют разные idx в зависимости от режима счёта:
+#   Hedge mode:  LONG=idx 0, SHORT=idx 1
+#   One-way:     всё на idx 0
+# Определяется при старте по существующим позициям (есть idx=1 → hedge).
+POSITION_IDX = {'Buy': 0, 'Sell': 0}  # default: one-way
+
+def _detect_position_mode():
+    """Определить режим позиций по существующим ордерам на счету."""
+    global POSITION_IDX
+    try:
+        from .api import bybit
+        resp = bybit('GET', '/v5/position/list?category=linear&settleCoin=USDT')
+        if resp.get('retCode') == 0:
+            for p in resp['result']['list']:
+                if float(p.get('size', 0)) > 0 and int(p.get('positionIdx', 0)) == 1:
+                    POSITION_IDX = {'Buy': 0, 'Sell': 1}  # hedge mode
+                    break
+    except Exception:
+        pass  # fallback к one-way (безопасный дефолт)
+
+_detect_position_mode()

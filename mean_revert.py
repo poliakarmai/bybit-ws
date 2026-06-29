@@ -161,37 +161,35 @@ def execute_mean_revert(entry_info):
     except Exception as e:
         log_event(f'⚠️ mean_revert: {e}')
 
-    for idx in (0, 1):
-        try:
-            order = bybit('POST', '/v5/order/create', {
-                'category': 'linear', 'symbol': sym, 'side': side,
-                'orderType': 'Limit', 'qty': str(entry_info['qty']),
-                'price': str(entry_info['entry']),
-                'positionIdx': idx, 'timeInForce': 'GTC',
-            })
-            if order.get('retCode') == 0:
-                log_event(f'🔄 MEAN-REVERT {sym}: лимитка ${entry_info["entry"]:.4f} x{MEAN_LEVERAGE} idx={idx}')
-                # Выставить SL/TP сразу после входа
-                try:
-                    ts_body = {
-                        'category': 'linear', 'symbol': sym, 'positionIdx': idx,
-                        'stopLoss': str(entry_info['sl']),
-                        'takeProfit': str(entry_info['tp']),
-                        'slTriggerBy': 'MarkPrice', 'tpTriggerBy': 'MarkPrice',
-                        'tpslMode': 'Full',
-                    }
-                    ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
-                    if ts_resp.get('retCode') != 0:
-                        log_event(f'⚠️ MEAN-REVERT {sym}: SL/TP не выставился — {ts_resp.get("retMsg", "?")}')
-                except Exception as e:
-                    log_event(f'⚠️ MEAN-REVERT {sym}: SL/TP error — {e}')
-                return True
-            elif order.get('retCode') == 10001:
-                continue
-            else:
-                log_event(f'⚠️ MEAN-REVERT {sym}: {order.get("retMsg", "?")}')
-                return False
-        except Exception as e:
-            log_event(f'⚠️ MEAN-REVERT {sym}: исключение — {e}')
+    from . import POSITION_IDX
+    idx = POSITION_IDX.get(side, 0)
+    try:
+        order = bybit('POST', '/v5/order/create', {
+            'category': 'linear', 'symbol': sym, 'side': side,
+            'orderType': 'Limit', 'qty': str(entry_info['qty']),
+            'price': str(entry_info['entry']),
+            'positionIdx': idx, 'timeInForce': 'GTC',
+        })
+        if order.get('retCode') == 0:
+            log_event(f'🔄 MEAN-REVERT {sym}: лимитка ${entry_info["entry"]:.4f} x{MEAN_LEVERAGE} idx={idx}')
+            # Выставить SL/TP сразу после входа
+            try:
+                ts_body = {
+                    'category': 'linear', 'symbol': sym, 'positionIdx': idx,
+                    'stopLoss': str(entry_info['sl']),
+                    'takeProfit': str(entry_info['tp']),
+                    'slTriggerBy': 'MarkPrice', 'tpTriggerBy': 'MarkPrice',
+                    'tpslMode': 'Full',
+                }
+                ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
+                if ts_resp.get('retCode') != 0:
+                    log_event(f'⚠️ MEAN-REVERT {sym}: SL/TP не выставился — {ts_resp.get("retMsg", "?")}')
+            except Exception as e:
+                log_event(f'⚠️ MEAN-REVERT {sym}: SL/TP error — {e}')
+            return True
+        else:
+            log_event(f'⚠️ MEAN-REVERT {sym}: {order.get("retMsg", "?")}')
             return False
-    return False
+    except Exception as e:
+        log_event(f'⚠️ MEAN-REVERT {sym}: исключение — {e}')
+        return False
