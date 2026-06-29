@@ -301,6 +301,27 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         except Exception as e:
             log_event(f'⚠️ mean_revert error: {e}')
 
+        # ── BB Scalping M5/M15 x10 ──
+        try:
+            scalp_alerts, scalp_entries = await run_in_thread(check_scalp_signals, positions, 0)
+            for msg in (scalp_alerts or []):
+                add_alert('ENTRY', msg)
+            for entry_info in (scalp_entries or []):
+                try:
+                    sym = entry_info['symbol']
+                    side = entry_info['side']
+                    entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
+                    if not entry_allowed:
+                        log_event(f'🛑 Risk blocked scalp {sym}: {risk_reason}')
+                        continue
+                    ok = await run_in_thread(execute_scalp, entry_info)
+                    if ok:
+                        log_event(f'⚡ Scalp Entry: {entry_info}')
+                except Exception as e:
+                    log_event(f'⚠️ scalp execute error: {e}')
+        except Exception as e:
+            log_event(f'⚠️ bb_scalp error: {e}')
+
     # DCA
     if not rpc_state.get("paused"):
         dca_msgs = await run_in_thread(check_dca)
