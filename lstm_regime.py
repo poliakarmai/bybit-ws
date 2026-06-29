@@ -61,7 +61,7 @@ if not _HMAC_RAW:
     if os.getenv('BYBIT_WS_PRODUCTION') == '1':
         sys.exit('FATAL: BYBIT_HMAC_SECRET not set in production')
     else:
-        print('WARNING: using fallback HMAC key (dev mode). Set BYBIT_HMAC_SECRET for production.', flush=True)
+        print('WARNING: using fallback HMAC key (dev mode). Set BYBIT_HMAC_SECRET for production.', file=sys.stderr, flush=True)
         _HMAC_RAW = _FALLBACK_KEY
 HMAC_SECRET: bytes = _HMAC_RAW.encode()
 

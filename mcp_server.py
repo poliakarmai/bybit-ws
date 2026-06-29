@@ -82,14 +82,30 @@ def _rpc_post(endpoint: str, body: dict) -> dict:
 
 
 def _scanner(mode: str = "long", interval: str = "D", limit: int = 10) -> list:
-    """Run gridSignal scanner."""
+    """Run gridSignal scanner. Extracts JSON from potentially noisy stdout."""
     try:
         scanner = os.path.expanduser("~/.local/bin/gridsignal_scanner.py")
         r = subprocess.run(
             ["python3", scanner, "--mode", mode, "--tf", interval, "--limit", str(limit)],
             capture_output=True, text=True, timeout=90,
         )
-        return json.loads(r.stdout) if r.stdout else []
+        stdout = r.stdout
+        if not stdout:
+            return []
+        # Strip diagnostic lines (WARNING, ⚠️) — extract only JSON
+        # JSON starts with '[' or '{'
+        for marker in ('[', '{'):
+            idx = stdout.find(marker)
+            if idx >= 0:
+                try:
+                    return json.loads(stdout[idx:])
+                except json.JSONDecodeError:
+                    pass
+        # Last resort: try raw
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError:
+            return [{"error": "JSON parse failed", "stdout_preview": stdout[:200]}]
     except Exception as e:
         return [{"error": str(e)}]
 

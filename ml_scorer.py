@@ -30,7 +30,7 @@ if not _HMAC_RAW:
     if os.getenv('BYBIT_WS_PRODUCTION') == '1':
         sys.exit('FATAL: BYBIT_HMAC_SECRET not set in production')
     else:
-        print('WARNING: using fallback HMAC key (dev mode). Set BYBIT_HMAC_SECRET for production.', flush=True)
+        print('WARNING: using fallback HMAC key (dev mode). Set BYBIT_HMAC_SECRET for production.', file=sys.stderr, flush=True)
         _HMAC_RAW = _FALLBACK_KEY
 HMAC_SECRET: bytes = _HMAC_RAW.encode()  # type: ignore[assignment]
 
@@ -217,7 +217,7 @@ def predict(signal_data: dict) -> Optional[float]:
 
     try:
         if not _verify_file(MODEL_PATH):
-            print(f'⚠️ HMAC mismatch for {MODEL_PATH} — model may be tampered', flush=True)
+            print(f'⚠️ HMAC mismatch for {MODEL_PATH} — model may be tampered', file=sys.stderr, flush=True)
             return None
         model = joblib.load(MODEL_PATH)
 
