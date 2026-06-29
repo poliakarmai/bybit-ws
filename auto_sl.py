@@ -139,10 +139,12 @@ def check_and_fix_sl():
             if side == 'Sell' and sl_val < entry:
                 log_event(f'🔒 {sym}: SL ${sl_val:.4f} < entry ${entry:.4f} — ручная фиксация')
                 continue
-            # Проверка: не слишком ли близко SL (меньше 2% от входа)
+            # Проверка: не слишком ли близко SL
+            # LONG: <2% от входа → переставим дальше
+            # SHORT: <5% от входа → переставим (иначе выбивает шумом)
             sl_dist_pct = abs(sl_val - entry) / entry
-            if sl_dist_pct < 0.02:
-                # SL ближе 2% — переставим дальше
+            min_dist = 0.05 if side == 'Sell' else 0.02
+            if sl_dist_pct < min_dist:
                 pass  # продолжаем ниже (не делаем continue)
             else:
                 continue  # SL на нормальном расстоянии — не трогаем
@@ -202,17 +204,18 @@ def check_and_fix_sl():
                     sl_price = max_sl
                     sl_desc += f' (capped +50%)'
 
-            # ── SL floor: не ближе 2% от входа (чтоб не выбивало шумом) ──
+            # ── SL floor: не ближе 2% (LONG) / 5% (SHORT) от входа ──
             if side == 'Buy':
                 min_sl_2pct = round(entry * 0.98, 4)
                 if sl_price > min_sl_2pct:
                     sl_price = min_sl_2pct
                     sl_desc += ' (min -2%)'
             else:
-                max_sl_2pct = round(entry * 1.02, 4)
-                if sl_price < max_sl_2pct:
-                    sl_price = max_sl_2pct
-                    sl_desc += ' (min +2%)'
+                # SHORT: SL не ближе +5% — иначе выбивает шумом на волатильных альткоинах
+                max_sl_5pct = round(entry * 1.05, 4)
+                if sl_price < max_sl_5pct:
+                    sl_price = max_sl_5pct
+                    sl_desc += ' (min +5%)'
 
             # Проверка что SL на правильной стороне
             if side == 'Buy' and sl_price >= mark:
