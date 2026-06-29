@@ -208,6 +208,7 @@ def ensemble_should_enter(signal_data: dict, market_state: Optional[dict] = None
         'scores': {k: round(v, 3) for k, v in scores.items()},
         'reasons': reasons,
         'available': available,
+        'votes': len(active_models),
     }
 
     return should_enter, round(avg_conf, 3), details

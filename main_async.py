@@ -247,6 +247,18 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 db.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
                 db.commit()
                 log_event(f'🧹 pump_state clean: {sym} (позиция закрыта)')
+            
+            # Также чистим pumps.json (legacy)
+            import json as _json
+            pump_file = DATA_DIR / 'pumps.json'
+            if pump_file.exists():
+                pumps = _json.loads(pump_file.read_text())
+                stale = [s for s in pumps if s not in (positions or {})]
+                if stale:
+                    for s in stale:
+                        del pumps[s]
+                    pump_file.write_text(_json.dumps(pumps, indent=2))
+                    log_event(f'🧹 pumps.json clean: {len(stale)} orphaned entries removed')
         except Exception:
             pass
 
