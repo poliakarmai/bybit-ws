@@ -247,7 +247,7 @@ def get_daily_pnl() -> dict:
     except Exception as e:
         _log.debug(f'get_daily_pnl trades: {e}')
 
-    result['total_pnl'] = result['realized_pnl']  # только realized, unrealized — из старых позиций
+    result['total_pnl'] = result['realized_pnl'] + result['unrealized_pnl']  # realized + unrealized
     result['total_pnl'] = round(result['total_pnl'], 2)
     result['unrealized_pnl'] = round(result['unrealized_pnl'], 2)
     result['realized_pnl'] = round(result['realized_pnl'], 2)
