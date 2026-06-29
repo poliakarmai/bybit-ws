@@ -258,6 +258,12 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 add_alert('ENTRY', msg)
             for entry_info in (fund_entries or []):
                 try:
+                    sym = entry_info['symbol']
+                    side = entry_info['side']
+                    entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
+                    if not entry_allowed:
+                        log_event(f'🛑 Risk blocked funding {sym}: {risk_reason}')
+                        continue
                     ok = await run_in_thread(execute_funding_entry, entry_info)
                     if ok:
                         log_event(f'💰 Funding Entry: {entry_info}')
@@ -281,6 +287,12 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 add_alert('ENTRY', msg)
             for entry_info in (mean_entries or []):
                 try:
+                    sym = entry_info['symbol']
+                    side = entry_info['side']
+                    entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
+                    if not entry_allowed:
+                        log_event(f'🛑 Risk blocked mean_revert {sym}: {risk_reason}')
+                        continue
                     ok = await run_in_thread(execute_mean_revert, entry_info)
                     if ok:
                         log_event(f'📊 Mean Revert Entry: {entry_info}')
