@@ -197,6 +197,24 @@ else:
 # ═══════════════════════════════════════════════════
 print(f"\n{'='*50}")
 print(f"PASS: {PASS}  FAIL: {FAIL}")
+
+# ── Фаза 8: авто-проверка двойной распаковки run_in_thread ──
+print("\n🔍 scan_unpack: проверка двойной распаковки...")
+import subprocess
+result = subprocess.run(
+    [sys.executable, str(Path(__file__).parent / 'scan_unpack.py')],
+    capture_output=True, text=True, timeout=10
+)
+bugs = result.stdout.count('🔴')
+if bugs > 0 or result.returncode != 0:
+    print(f"❌ Найдено {bugs} проблем с распаковкой run_in_thread!")
+    FAIL += 1
+else:
+    print("✅ Все распаковки run_in_thread корректны")
+    PASS += 1
+
+print(f"\n{'='*50}")
+print(f"PASS: {PASS}  FAIL: {FAIL}")
 if FAIL > 0:
     print("❌ REGRESSION FOUND — НЕ ДЕПЛОИТЬ!")
     sys.exit(1)
