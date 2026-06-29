@@ -635,11 +635,10 @@ class RPCHandler(BaseHTTPRequestHandler):
             "rpc_port": 8766,
             "rpc_host": "127.0.0.1",
             "repo": os.path.expanduser("~/bybit-ws"),
-            "install_dir": os.path.expanduser("~/.local/lib/bybit_ws"),
             "config_file": os.path.expanduser("~/.config/bybit-ws/config.yaml"),
             "service": "bybit-ws",
-            "sync_command": "cp ~/bybit-ws/{file}.py ~/.local/lib/bybit_ws/",
             "restart_command": "systemctl --user restart bybit-ws",
+            "deploy_command": "bash ~/bybit-ws/deploy.sh",
             "venv": os.path.expanduser("~/bybit-ws/.venv"),
         }
         self.send_response(200)

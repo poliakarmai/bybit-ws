@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# deploy.sh — АТОМАРНЫЙ деплой bybit-ws через symlink swap
+# deploy.sh — деплой bybit-ws: тесты → рестарт → canary
+# Сервис работает из WorkingDirectory (~/bybit-ws), без staging-копий.
 # Использование: bash deploy.sh [--force]
 set -euo pipefail
 
 REPO=~/bybit-ws
-LIVE_DIR=~/.local/lib/bybit_ws
-STAGING_DIR="$LIVE_DIR.staging.$$"
 VERSION=$(date +%Y%m%d_%H%M%S)
 
-echo "🚀 Deploy bybit-ws @ $VERSION (atomic symlink swap)"
+echo "🚀 Deploy bybit-ws @ $VERSION"
 
 # ── 1. Проверить что репо чистый ──
 cd "$REPO"
@@ -17,7 +16,7 @@ if ! git diff --quiet 2>/dev/null; then
     [ "${1:-}" = "--force" ] || exit 1
 fi
 
-# ── 2. Логическая целостность (импорты vs вызовы) ──
+# ── 2. Логическая целостность ──
 echo "🧠 Logic integrity tests..."
 python3 test_logic_integrity.py || {
     echo "❌ Logic integrity failed — деплой отменён"
@@ -31,38 +30,13 @@ python3 test_smoke.py || {
     exit 1
 }
 
-# ── 4. Копируем в staging-директорию ──
-echo "📦 Копирование в staging..."
-rm -rf "$STAGING_DIR"
-cp -rL "$REPO/bybit_ws" "$STAGING_DIR" 2>/dev/null || cp -r "$REPO/bybit_ws" "$STAGING_DIR"
-# Копируем корневые скрипты
-for f in sl_reentry.py entry_judge.py; do
-    [ -f "$REPO/$f" ] && cp "$REPO/$f" "$STAGING_DIR/"
-done
-echo "   Staging: $STAGING_DIR"
-
-# ── 5. Атомарный swap (symlink) ──
-echo "🔄 Атомарный swap..."
-# Создаём новый symlink во временной директории
-OLD_LINK=$(readlink -f "$LIVE_DIR" 2>/dev/null || echo "$LIVE_DIR")
-ln -sfn "$STAGING_DIR" "$LIVE_DIR.new"
-mv "$LIVE_DIR.new" "$LIVE_DIR" 2>/dev/null || {
-    # Если mv не сработал (разные FS), делаем через rm + ln
-    rm -f "$LIVE_DIR"
-    ln -s "$STAGING_DIR" "$LIVE_DIR"
-}
-echo "   Symlink: $LIVE_DIR → $STAGING_DIR"
-
-# ── 6. Рестарт ──
+# ── 4. Graceful рестарт ──
 echo "🔄 Рестарт сервиса..."
-echo "🔄 Остановка через SIGTERM (graceful shutdown)..."
 systemctl --user stop bybit-ws-async
-# Ждём graceful shutdown (до 10с)
 for i in $(seq 1 10); do
     systemctl --user is-active bybit-ws-async > /dev/null 2>&1 || break
     sleep 1
 done
-# Если не остановился — SIGKILL как fallback
 systemctl --user is-active bybit-ws-async > /dev/null 2>&1 && {
     echo "⚠️ SIGTERM не сработал — SIGKILL"
     systemctl --user kill -s SIGKILL bybit-ws-async 2>/dev/null || true
@@ -71,7 +45,7 @@ systemctl --user is-active bybit-ws-async > /dev/null 2>&1 && {
 systemctl --user start bybit-ws-async
 sleep 5
 
-# ── 6. Canary monitoring ──
+# ── 5. Canary monitoring ──
 HEALTH_FILE=~/.local/share/bybit-ws/health.txt
 MAX_CHECKS=8
 MAX_HEALTH_AGE=60
@@ -80,15 +54,7 @@ echo "🐤 Canary: $MAX_CHECKS checks..."
 for i in $(seq 1 $MAX_CHECKS); do
     sleep 5
     if ! systemctl --user is-active bybit-ws-async > /dev/null 2>&1; then
-        echo "❌ Check $i: service NOT active — ROLLBACK"
-        # Rollback: symlink back
-        [ -n "$OLD_LINK" ] && [ -d "$OLD_LINK" ] && {
-            rm -f "$LIVE_DIR"
-            ln -s "$OLD_LINK" "$LIVE_DIR"
-            systemctl --user restart bybit-ws-async
-            echo "↩️  Rollback to $OLD_LINK"
-        }
-        rm -rf "$STAGING_DIR"
+        echo "❌ Check $i: service NOT active"
         exit 1
     fi
 
@@ -106,10 +72,6 @@ for i in $(seq 1 $MAX_CHECKS); do
     echo "  ✅ Check $i: OK (health_age=${health_age}s)"
 done
 
-# ── 7. Очистка старых staging-директорий ──
-find "$(dirname "$LIVE_DIR")" -maxdepth 1 -name 'bybit_ws.staging.*' -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
-
 echo "✅ Деплой успешен"
 echo "   Версия: $(git -C "$REPO" rev-parse --short HEAD)"
-echo "   Live: $LIVE_DIR → $(readlink -f "$LIVE_DIR")"
 exit 0

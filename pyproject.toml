@@ -33,3 +33,6 @@ Issues = "https://github.com/poliakarmai/bybit-ws/issues"
 
 [project.scripts]
 bybit-ws = "bybit_ws.main:run_cli"
+
+[tool.setuptools.packages.find]
+include = ["bybit_ws*"]
