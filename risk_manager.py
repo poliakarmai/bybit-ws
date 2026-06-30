@@ -644,8 +644,8 @@ def check(
 
     # ── 6. Проверка максимальной маржи (динамическая) ──
     try:
-        max_total_margin = float(config.risk.get('max_total_margin', 300))
-        dynamic_pct = float(config.risk.get('dynamic_margin_pct', 0))
+        max_total_margin = float(cfg.risk.get('max_total_margin', 300))
+        dynamic_pct = float(cfg.risk.get('dynamic_margin_pct', 0))
         
         # Динамический лимит: % от available balance
         if dynamic_pct > 0:
@@ -749,3 +749,77 @@ def get_risk_full(positions: Optional[dict] = None) -> dict:
         },
         'timestamp': datetime.now().isoformat(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Emergency Close / Kill Switch
+# ═══════════════════════════════════════════════════════════════════════════
+
+def emergency_close_all(reason: str, positions: dict = None) -> dict:
+    """Закрыть ВСЕ позиции по рынку. Вызывается из RPC /emergency_close и /kill_switch.
+
+    Args:
+        reason: причина закрытия (для лога)
+        positions: словарь позиций {symbol: {...}}. Если None — загрузит сам.
+
+    Returns:
+        {'closed': int, 'failed': int, 'message': str}
+    """
+    from .api import bybit, fetch_positions
+
+    if positions is None:
+        try:
+            positions = fetch_positions()
+        except Exception as e:
+            return {'closed': 0, 'failed': 0, 'message': f'fetch_positions error: {e}'}
+
+    if not positions:
+        return {'closed': 0, 'failed': 0, 'message': 'No open positions'}
+
+    closed = 0
+    failed = 0
+    errors = []
+
+    for sym, p in positions.items():
+        if not isinstance(p, dict):
+            continue
+        size = float(p.get('size', 0) or 0)
+        if size <= 0:
+            continue
+        side = p.get('side', 'Buy')
+        idx = p.get('positionIdx', 0)
+        close_side = 'Sell' if side == 'Buy' else 'Buy'
+
+        try:
+            order = bybit('POST', '/v5/order/create', {
+                'category': 'linear',
+                'symbol': sym,
+                'side': close_side,
+                'orderType': 'Market',
+                'qty': str(size),
+                'positionIdx': idx,
+                'reduceOnly': True,
+                'timeInForce': 'IOC',
+            })
+            if order and order.get('retCode') == 0:
+                closed += 1
+            else:
+                failed += 1
+                err = order.get('retMsg', '?') if order else 'no response'
+                errors.append(f'{sym}: {err}')
+        except Exception as e:
+            failed += 1
+            errors.append(f'{sym}: {e}')
+
+    msg = f'CLOSED={closed} FAILED={failed}'
+    if errors:
+        msg += f' errors={errors[:3]}'
+
+    # Логируем
+    try:
+        from .alerts import log_event
+        log_event(f'🚨 EMERGENCY CLOSE: {reason} — {msg}')
+    except Exception:
+        pass
+
+    return {'closed': closed, 'failed': failed, 'message': msg}

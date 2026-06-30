@@ -514,6 +514,7 @@ def check_auto_short(positions):
                     continue
             except Exception as e:
                 log_event(f'⚠️ entry_judge short {sym}: {e}')
+                continue  # fail-closed: при ошибке судьи — не входим
 
             # ── Symbol concentration check (28.06.2026) ──
             try:
@@ -693,8 +694,8 @@ def check_junk_dca(positions):
         JUNK_DCA_LEVELS = getattr(junk_cfg, 'dca_levels', [1.0, 1.2])
     else:
         JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
-    MAX_LOSS_PCT = junk_cfg.get('max_loss_pct', 15) / 100  # 15% → 0.15
-    MAX_HOLD_HOURS = junk_cfg.get('max_hold_hours', 48)
+    MAX_LOSS_PCT = getattr(junk_cfg, 'max_loss_pct', 15) / 100 if junk_cfg is not None else 0.15
+    MAX_HOLD_HOURS = getattr(junk_cfg, 'max_hold_hours', 48) if junk_cfg is not None else 48
 
     state = _load_state()
     now = time.time()
@@ -748,7 +749,7 @@ def check_junk_dca(positions):
         unrealised_pnl = float(pos.get('unrealisedPnl', pos.get('upnl', 0)) or 0)
 
         if margin_used > 0 and unrealised_pnl < 0:
-            loss_pct = abs(unrealised_pnl) / (margin_used * SHORT_LEVERAGE)
+            loss_pct = abs(unrealised_pnl) / margin_used
             if loss_pct > MAX_LOSS_PCT:
                 # Hard stop — закрываем по рынку
                 try:

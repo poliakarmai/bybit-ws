@@ -630,10 +630,9 @@ def main_loop():
                             record_close(sym, direction, exit_price, rpnl)
                         except Exception:
                             pass
-                        # SL re-entry: запомнить для лесенки (только LONG)
-                        if side == 'Buy':
-                            sl_price = old_pos.get('mark', 0)
-                            notify_sl_hit(sym, sl_price, entry)
+                        # SL re-entry: запомнить для лесенки
+                        sl_price = old_pos.get('mark', 0)
+                        notify_sl_hit(sym, sl_price, entry, side)
                         # Cooldown для LONG: запретить повторный вход на N часов
                         record_sl_hit(sym)
                         continue

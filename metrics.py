@@ -7,10 +7,17 @@ from .file_utils import safe_json_write
 def _today_key():
     return datetime.now().strftime('%Y-%m-%d')
 
+def _load_metrics():
+    """Безопасная загрузка metrics.json с fallback на пустой словарь."""
+    try:
+        with open(METRICS_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
 def record_alert(level, is_false=False, symbol=None):
     """Записать алерт в метрики. symbol — тикер (напр. 'BTCUSDT')."""
-    with open(METRICS_FILE) as f:
-        metrics = json.load(f)
+    metrics = _load_metrics()
     today = _today_key()
     if today not in metrics:
         metrics[today] = {'tp_real': 0, 'tp_false': 0, 'sl_real': 0, 'sl_false': 0,
@@ -41,8 +48,7 @@ def record_alert(level, is_false=False, symbol=None):
     safe_json_write(METRICS_FILE, metrics)
 
 def record_auto_entry(placed=False, filled=False, pnl=0.0, symbol=None):
-    with open(METRICS_FILE) as f:
-        metrics = json.load(f)
+    metrics = _load_metrics()
     today = _today_key()
     if today not in metrics:
         metrics[today] = {'tp_real': 0, 'tp_false': 0, 'sl_real': 0, 'sl_false': 0,
@@ -81,8 +87,7 @@ def ensure_today():
         safe_json_write(METRICS_FILE, metrics)
 
 def get_metrics():
-    with open(METRICS_FILE) as f:
-        metrics = json.load(f)
+    metrics = _load_metrics()
     today = _today_key()
     return metrics.get(today, {})
 

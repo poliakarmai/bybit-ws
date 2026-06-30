@@ -50,8 +50,15 @@ def _save_state(state):
         json.dump(state, f, indent=2)
 
 
-def notify_sl_hit(symbol, sl_price, entry_price):
-    """Вызывается из main.py когда позиция закрыта по SL."""
+def notify_sl_hit(symbol, sl_price, entry_price, side='Buy'):
+    """Вызывается из main.py когда позиция закрыта по SL.
+    
+    Args:
+        symbol: тикер
+        sl_price: цена срабатывания SL
+        entry_price: цена входа в позицию
+        side: 'Buy' (LONG) или 'Sell' (SHORT)
+    """
     cfg = Config()
     rc = _get_reentry_config(cfg)
     state = _load_state()
@@ -70,6 +77,7 @@ def notify_sl_hit(symbol, sl_price, entry_price):
     state[symbol] = {
         'sl_price': float(sl_price),
         'entry_price': float(entry_price),
+        'side': side,
         'sl_time': now,
         'sl_time_str': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'pending': True,
@@ -129,9 +137,16 @@ def check_sl_reentry(positions, correlation_stop=False):
             state[sym] = info
             continue
 
+        reentry_side = info.get('side', 'Buy')  # 'Buy'=LONG, 'Sell'=SHORT
+
         # Режимный фильтр: не входить против тренда
-        if regime == 'TRENDING_DOWN':
+        if reentry_side == 'Buy' and regime == 'TRENDING_DOWN':
             log_event(f'🔕 SL re-entry {sym}: TRENDING_DOWN — LONG запрещён')
+            info['pending'] = False
+            state[sym] = info
+            continue
+        if reentry_side == 'Sell' and regime == 'TRENDING_UP':
+            log_event(f'🔕 SL re-entry {sym}: TRENDING_UP — SHORT запрещён')
             info['pending'] = False
             state[sym] = info
             continue
@@ -152,10 +167,17 @@ def check_sl_reentry(positions, correlation_stop=False):
         if current <= 0:
             continue
 
-        if current > sl_price * 1.02:
+        # Проверка восстановления цены: для LONG — цена продолжает падать (< SL*1.02),
+        # для SHORT — цена продолжает расти (> SL*0.98)
+        if reentry_side == 'Buy' and current > sl_price * 1.02:
             info['pending'] = False
             state[sym] = info
             log_event(f'🔕 SL re-entry: {sym} отскочила (${current:.4f} > SL ${sl_price:.4f})')
+            continue
+        if reentry_side == 'Sell' and current < sl_price * 0.98:
+            info['pending'] = False
+            state[sym] = info
+            log_event(f'🔕 SL re-entry: {sym} упала (${current:.4f} < SL ${sl_price:.4f})')
             continue
 
         drop_from_entry = (1 - current / entry_price) * 100 if entry_price else 0
@@ -163,35 +185,43 @@ def check_sl_reentry(positions, correlation_stop=False):
         orders_placed = 0
 
         if rc['mode'] == 'simple':
-            # DESIGN.md: один re-entry на Lower BB Daily, маржа x0.5 от предыдущей
-            bb = get_bb_data(sym, 'D')
-            price = bb['lower'] if bb and bb.get('lower', 0) > 0 else current * 0.95
+            # Один re-entry: для LONG — на Lower BB Daily, для SHORT — на Upper BB Weekly
+            if reentry_side == 'Buy':
+                bb = get_bb_data(sym, 'D')
+                price = bb['lower'] if bb and bb.get('lower', 0) > 0 else current * 0.95
+            else:
+                bb = get_bb_data(sym, 'W')
+                price = bb['upper'] if bb and bb.get('upper', 0) > 0 else current * 1.05
             price = round(price, 4)
             price = _round_to_tick(price, sym)
             margin = margin_for_strategy('reentry', score=6.5)
-            if margin > 0 and price < current:
+            price_ok = (price < current) if reentry_side == 'Buy' else (price > current)
+            if margin > 0 and price_ok:
                 usdt_qty = margin * rc['leverage']
                 qty = round(usdt_qty / price / qty_step) * qty_step
                 if qty > 0:
                     for pos_idx in (0, 1, 2):
                         order = bybit('POST', '/v5/order/create', {
-                            'category': 'linear', 'symbol': sym, 'side': 'Buy',
+                            'category': 'linear', 'symbol': sym, 'side': reentry_side,
                             'orderType': 'Limit', 'qty': str(qty),
                             'price': str(price), 'positionIdx': pos_idx,
                             'timeInForce': 'GTC',
                         })
                         if order.get('retCode') == 0:
                             orders_placed += 1
-                            log_event(f'📌 SL re-entry {sym}: simple @ ${price:.4f} ×{qty}')
+                            log_event(f'📌 SL re-entry {sym}: simple @ ${price:.4f} ×{qty} ({reentry_side})')
                             break
                         elif order.get('retCode') == 10001:
                             continue
                         else:
                             break
         else:
-            # Ladder-режим: уровни от SL-цены
+            # Ladder-режим: уровни от SL-цены (вниз для LONG, вверх для SHORT)
             for level_pct in rc['levels']:
-                price = round(sl_price * level_pct, 4)
+                if reentry_side == 'Buy':
+                    price = round(sl_price * level_pct, 4)  # ниже SL
+                else:
+                    price = round(sl_price * (2 - level_pct), 4)  # выше SL (инвертируем множитель)
                 if price < 0.0001:
                     continue
                 price = _round_to_tick(price, sym)
@@ -203,21 +233,24 @@ def check_sl_reentry(positions, correlation_stop=False):
                 qty = round(qty, _get_precision(qty_step))
                 if qty <= 0:
                     continue
-                # Лимитный BUY выше рынка исполнится мгновенно — ОК
-                # Но если сильно выше (>1%) — используем текущую чтобы избежать reject
-                if price > current * 1.01:
+                # Для LONG: лимитный BUY не должен быть сильно выше рынка
+                # Для SHORT: лимитный SELL не должен быть сильно ниже рынка
+                if reentry_side == 'Buy' and price > current * 1.01:
                     price = _round_to_tick(current * 0.999, sym)
+                elif reentry_side == 'Sell' and price < current * 0.99:
+                    price = _round_to_tick(current * 1.001, sym)
 
                 for pos_idx in (0, 1, 2):
                     order = bybit('POST', '/v5/order/create', {
-                        'category': 'linear', 'symbol': sym, 'side': 'Buy',
+                        'category': 'linear', 'symbol': sym, 'side': reentry_side,
                         'orderType': 'Limit', 'qty': str(qty),
                         'price': str(price), 'positionIdx': pos_idx,
                         'timeInForce': 'GTC',
                     })
                     if order.get('retCode') == 0:
                         orders_placed += 1
-                        log_event(f'📌 SL re-entry {sym}: лимитка ${price:.4f} ×{qty} (ур.{rc["levels"].index(level_pct)+1}/{len(rc["levels"])}, idx={pos_idx})')
+                        level_num = rc["levels"].index(level_pct) + 1
+                        log_event(f'📌 SL re-entry {sym}: лимитка ${price:.4f} ×{qty} (ур.{level_num}/{len(rc["levels"])}, idx={pos_idx}, {reentry_side})')
                         break
                     elif order.get('retCode') == 10001:
                         continue

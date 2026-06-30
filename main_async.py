@@ -623,10 +623,10 @@ async def async_main_loop():
             # ── Обновляем RPC-состояние ──
             try:
                 from .rpc import rpc_state as _rpc_state, update_health as _rpc_health
+                _rpc_health(alive=True, cycle_count=cycle)
                 _rpc_state['alive'] = True
                 _rpc_state['cycle_count'] = cycle
                 _rpc_state['last_cycle'] = time.time()
-                _rpc_health(alive=True)
             except Exception as e:
                 log_event(f'⚠️ RPC state update error: {e}')
 

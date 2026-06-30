@@ -14,6 +14,7 @@
 import os
 import json
 import time
+from .alerts import log_event
 
 PUMP_STATE_FILE = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')
 

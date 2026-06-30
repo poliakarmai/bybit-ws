@@ -111,48 +111,102 @@ def _severity(score: float, med: float, high: float) -> str:
 # ── FIFO matching ───────────────────────────────────────────────────────────
 
 def pair_trades_fifo(trades: list[Trade]) -> list[RoundTrip]:
-    """FIFO-матчинг buy→sell для расчёта round-trip PnL."""
-    queues: dict[str, deque] = defaultdict(deque)
+    """FIFO-матчинг buy↔sell для расчёта round-trip PnL.
+    
+    Поддерживает LONG (buy→sell) и SHORT (sell→buy).
+    """
+    long_queues: dict[str, deque] = defaultdict(deque)   # buy opens → sell closes
+    short_queues: dict[str, deque] = defaultdict(deque)  # sell opens → buy closes
     roundtrips: list[RoundTrip] = []
 
     for t in sorted(trades, key=lambda x: x.timestamp):
         if t.side == "buy":
-            queues[t.symbol].append({
-                "ts": t.timestamp,
-                "qty": t.quantity,
-                "price": t.price,
-                "fee": t.fee,
-            })
-            continue
-
-        # sell — match against oldest buys
-        remaining = t.quantity
-        q = queues[t.symbol]
-        while remaining > 1e-9 and q:
-            lot = q[0]
-            take = min(lot["qty"], remaining)
-            hold_h = (t.timestamp - lot["ts"]) / 3600.0 if t.timestamp > lot["ts"] else 0.0
-            gross = (t.price - lot["price"]) * take
-            buy_fee = lot["fee"] * (take / lot["qty"]) if lot["qty"] else 0.0
-            sell_fee = t.fee * (take / t.quantity) if t.quantity else 0.0
-            pnl = gross - buy_fee - sell_fee
-            cost = lot["price"] * take
-            pnl_pct = pnl / cost if cost else 0.0
-            roundtrips.append(RoundTrip(
-                symbol=t.symbol,
-                buy_ts=lot["ts"],
-                sell_ts=t.timestamp,
-                qty=take,
-                buy_price=lot["price"],
-                sell_price=t.price,
-                hold_hours=round(hold_h, 2),
-                pnl=round(pnl, 2),
-                pnl_pct=round(pnl_pct, 4),
-            ))
-            lot["qty"] -= take
-            remaining -= take
-            if lot["qty"] <= 1e-9:
-                q.popleft()
+            # Buy может ЗАКРЫВАТЬ SHORT или ОТКРЫВАТЬ LONG
+            sq = short_queues[t.symbol]
+            if sq:
+                # Закрываем SHORT: sell открыл → buy закрывает
+                remaining = t.quantity
+                while remaining > 1e-9 and sq:
+                    lot = sq[0]
+                    take = min(lot["qty"], remaining)
+                    hold_h = (t.timestamp - lot["ts"]) / 3600.0 if t.timestamp > lot["ts"] else 0.0
+                    # SHORT PnL: sell_price - buy_price (обратный знак)
+                    gross = (lot["price"] - t.price) * take
+                    open_fee = lot["fee"] * (take / lot["qty"]) if lot["qty"] else 0.0
+                    close_fee = t.fee * (take / t.quantity) if t.quantity else 0.0
+                    pnl = gross - open_fee - close_fee
+                    cost = lot["price"] * take
+                    pnl_pct = pnl / cost if cost else 0.0
+                    roundtrips.append(RoundTrip(
+                        symbol=t.symbol,
+                        buy_ts=lot["ts"],   # open (sell) timestamp
+                        sell_ts=t.timestamp,  # close (buy) timestamp
+                        qty=take,
+                        buy_price=lot["price"],
+                        sell_price=t.price,
+                        hold_hours=round(hold_h, 2),
+                        pnl=round(pnl, 2),
+                        pnl_pct=round(pnl_pct, 4),
+                    ))
+                    lot["qty"] -= take
+                    remaining -= take
+                    if lot["qty"] <= 1e-9:
+                        sq.popleft()
+                if remaining > 1e-9:
+                    # Остаток → открывает LONG
+                    long_queues[t.symbol].append({
+                        "ts": t.timestamp, "qty": remaining,
+                        "price": t.price, "fee": t.fee * (remaining / t.quantity) if t.quantity else 0.0,
+                    })
+            else:
+                # Нет открытых SHORT → открываем LONG
+                long_queues[t.symbol].append({
+                    "ts": t.timestamp, "qty": t.quantity,
+                    "price": t.price, "fee": t.fee,
+                })
+        else:
+            # Sell может ЗАКРЫВАТЬ LONG или ОТКРЫВАТЬ SHORT
+            lq = long_queues[t.symbol]
+            if lq:
+                # Закрываем LONG: buy открыл → sell закрывает
+                remaining = t.quantity
+                while remaining > 1e-9 and lq:
+                    lot = lq[0]
+                    take = min(lot["qty"], remaining)
+                    hold_h = (t.timestamp - lot["ts"]) / 3600.0 if t.timestamp > lot["ts"] else 0.0
+                    gross = (t.price - lot["price"]) * take
+                    buy_fee = lot["fee"] * (take / lot["qty"]) if lot["qty"] else 0.0
+                    sell_fee = t.fee * (take / t.quantity) if t.quantity else 0.0
+                    pnl = gross - buy_fee - sell_fee
+                    cost = lot["price"] * take
+                    pnl_pct = pnl / cost if cost else 0.0
+                    roundtrips.append(RoundTrip(
+                        symbol=t.symbol,
+                        buy_ts=lot["ts"],
+                        sell_ts=t.timestamp,
+                        qty=take,
+                        buy_price=lot["price"],
+                        sell_price=t.price,
+                        hold_hours=round(hold_h, 2),
+                        pnl=round(pnl, 2),
+                        pnl_pct=round(pnl_pct, 4),
+                    ))
+                    lot["qty"] -= take
+                    remaining -= take
+                    if lot["qty"] <= 1e-9:
+                        lq.popleft()
+                if remaining > 1e-9:
+                    # Остаток → открывает SHORT
+                    short_queues[t.symbol].append({
+                        "ts": t.timestamp, "qty": remaining,
+                        "price": t.price, "fee": t.fee * (remaining / t.quantity) if t.quantity else 0.0,
+                    })
+            else:
+                # Нет открытых LONG → открываем SHORT
+                short_queues[t.symbol].append({
+                    "ts": t.timestamp, "qty": t.quantity,
+                    "price": t.price, "fee": t.fee,
+                })
     return roundtrips
 
 

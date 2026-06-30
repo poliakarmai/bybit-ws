@@ -64,7 +64,7 @@ def check_time_exit(positions: dict, open_orders: dict = None) -> list:
         if entry <= 0 or size <= 0:
             continue
 
-        pnl_pct = (mark - entry) / entry * 100
+        pnl_pct = (entry - mark) / entry * 100 if p.get('side') == 'Sell' else (mark - entry) / entry * 100
 
         # Абсолютный максимум: >48ч → закрыть в любом случае
         if age_hours > TIME_EXIT_MAX_HOURS:

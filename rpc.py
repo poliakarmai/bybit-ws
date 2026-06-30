@@ -1612,6 +1612,32 @@ class RPCHandler(BaseHTTPRequestHandler):
         except Exception as e:
             _error(self, 'Token reset failed', str(e), 500)
 
+    # ═══════════════════════════════════════════════════════════════
+    # Emergency handlers
+    # ═══════════════════════════════════════════════════════════════
+
+    def _handle_emergency_close(self):
+        """Emergency close: MARKET close ALL positions. Use: POST /emergency_close"""
+        try:
+            from .risk_manager import emergency_close_all
+            from .api import fetch_positions
+            positions = fetch_positions()
+            if not positions:
+                _json_response(self, {"status": "ok", "closed": 0, "message": "No open positions"})
+                return
+            result = emergency_close_all("MANUAL via RPC /emergency_close", positions)
+            _json_response(self, {"status": "ok", **result})
+        except Exception as e:
+            _json_response(self, {"status": "error", "message": str(e)}, 500)
+
+    def _handle_kill_switch(self):
+        """Kill switch: MARKET close ALL + pause bot. Use: POST /kill_switch"""
+        from .rpc import rpc_state
+        rpc_state['paused'] = True
+        rpc_state['paused_at'] = time.time()
+        rpc_state['paused_reason'] = 'kill_switch activated'
+        self._handle_emergency_close()
+
 
 def start_rpc_server(port=8766, bind='127.0.0.1'):
     """Запустить RPC-сервер в фоновом потоке."""
@@ -1627,119 +1653,4 @@ def update_health(alive=True, cycle_count=0, cycle_duration=0.0):
     rpc_state["cycle_count"] = cycle_count
     rpc_state["last_cycle"] = time.time()
     rpc_state["cycle_duration"] = cycle_duration
-
-    def _handle_metrics_prometheus(self):
-        """Prometheus /metrics endpoint."""
-        from . import DATA_DIR
-        import time as _time
-        lines = []
-        try:
-            from .rpc import rpc_state
-            cycle = rpc_state.get('cycle_count', 0)
-            latency = rpc_state.get('cycle_duration', 0)
-            paused = 1 if rpc_state.get('paused') else 0
-            lines.append(f'bybit_ws_cycle_count {cycle}')
-            lines.append(f'bybit_ws_cycle_latency_seconds {latency:.3f}')
-            lines.append(f'bybit_ws_paused {paused}')
-        except Exception:
-            pass
-        try:
-            metrics_path = str(DATA_DIR / 'metrics.json')
-            if os.path.exists(metrics_path):
-                with open(metrics_path) as f:
-                    m = json.loads(f.read())
-                lines.append(f'bybit_ws_daily_pnl {m.get("daily_pnl", 0):.2f}')
-                lines.append(f'bybit_ws_win_rate {m.get("win_rate", 0):.3f}')
-                lines.append(f'bybit_ws_tp_count {m.get("tp_count", 0)}')
-                lines.append(f'bybit_ws_sl_count {m.get("sl_count", 0)}')
-                lines.append(f'bybit_ws_total_trades {m.get("total_trades", 0)}')
-        except Exception:
-            pass
-        try:
-            from .api import fetch_positions
-            pos = fetch_positions()
-            lines.append(f'bybit_ws_positions_total {len(pos)}')
-            pnl = sum(float(p.get('upnl', 0) or 0) for p in pos.values() if isinstance(p, dict))
-            lines.append(f'bybit_ws_unrealized_pnl {pnl:.2f}')
-        except Exception:
-            pass
-        lines.append('')
-        self._text_reply('\n'.join(lines), content_type='text/plain; version=0.0.4')
-
-    def _text_reply(self, text, content_type='application/json'):
-        self.send_response(200)
-        self.send_header('Content-Type', content_type)
-        self.end_headers()
-        self.wfile.write(text.encode())
-
-    def _handle_emergency_close(self):
-        """Emergency close: MARKET close ALL positions. Use: POST /emergency_close"""
-        try:
-            from .risk_manager import emergency_close_all
-            from .api import fetch_positions
-            positions = fetch_positions()
-            if not positions:
-                self._json_reply({"status": "ok", "closed": 0, "message": "No open positions"})
-                return
-            result = emergency_close_all("MANUAL KILL SWITCH via RPC", positions)
-            self._json_reply({"status": "ok", **result})
-        except Exception as e:
-            self._json_reply({"status": "error", "message": str(e)})
-
-    def _handle_kill_switch(self):
-        """Universal kill switch: emergency close + circuit breaker + pause.
-        Use: POST /kill_switch  or  GET /rpc/kill_switch"""
-        from .risk_manager import _circuit_breaker_active
-        from .rpc import rpc_state
-        rpc_state["paused"] = True
-        self._handle_emergency_close()
-
-    # ── Paper Trading handlers ──
-
-    def _handle_paper_balance(self):
-        """GET /paper/balance — баланс paper-счёта."""
-        try:
-            from bybit_ws.paper_trading import paper_get_balance, is_paper_enabled
-            if not is_paper_enabled():
-                self._json_reply({"enabled": False, "message": "Paper trading disabled (BYBIT_PAPER_ENABLED=0)"})
-                return
-            balance = paper_get_balance()
-            self._json_reply({"enabled": True, "balance": balance, "currency": "USDT"})
-        except Exception as e:
-            self._json_reply({"status": "error", "message": str(e)})
-
-    def _handle_paper_positions(self):
-        """GET /paper/positions — открытые paper-позиции."""
-        try:
-            from bybit_ws.paper_trading import is_paper_enabled, get_paper_exchange
-            if not is_paper_enabled():
-                self._json_reply({"enabled": False, "positions": []})
-                return
-            px = get_paper_exchange()
-            positions = px.fetch_positions() if px else {}
-            pos_list = []
-            for sym, p in positions.items():
-                pos_list.append({
-                    "symbol": sym,
-                    "side": p.get("side"),
-                    "size": p.get("size"),
-                    "entry": p.get("entry"),
-                    "mark": p.get("mark"),
-                    "upnl": p.get("upnl", 0),
-                    "leverage": p.get("leverage", 3),
-                    "stop_loss": p.get("stopLoss"),
-                    "liq_price": p.get("liqPrice"),
-                })
-            self._json_reply({"enabled": True, "positions": pos_list, "count": len(pos_list)})
-        except Exception as e:
-            self._json_reply({"status": "error", "message": str(e)})
-
-    def _handle_paper_summary(self):
-        """GET /paper/summary — сводка paper-торговли."""
-        try:
-            from bybit_ws.paper_trading import paper_get_summary
-            summary = paper_get_summary()
-            self._json_reply(summary)
-        except Exception as e:
-            self._json_reply({"status": "error", "message": str(e)})
 

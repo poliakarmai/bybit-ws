@@ -624,6 +624,7 @@ def auto_entry_scan(positions):
                     continue
             except Exception as e:
                 log_event(f'⚠️ entry_judge {sym}: {e}')
+                continue  # fail-closed: при ошибке судьи — не входим
 
             # ── Correlation-adjusted sizing (27.06) ──
             corr_sizer = 1.0
