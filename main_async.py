@@ -712,8 +712,9 @@ async def async_main_loop():
                     if is_ab_enabled():
                         ab = _ab_status()
                         if isinstance(ab, dict) and ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
-                            log_event(f'🧪 A/B вердикт: {ab["significance"]["verdict"]} '
-                                      f'(p_boot={ab["significance"].get("p_value_bootstrap")})')
+                            sig = ab.get('significance') or {}
+                            log_event(f'🧪 A/B вердикт: {sig.get("verdict", "?")} '
+                                      f'(p_boot={sig.get("p_value_bootstrap")})')
                 except Exception as e:
                     log_event(f'⚠️ ab_status log: {e}')
 
