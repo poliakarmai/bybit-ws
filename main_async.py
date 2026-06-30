@@ -168,6 +168,11 @@ async def run_in_thread(fn, *args, timeout=25):
         log_event(f'⚠️ TIMEOUT {fn_name} after {timeout}s — result discarded')
         return [], fn_name
     except Exception as e:
+        import traceback
+        fn_name = fn.__name__ if hasattr(fn, '__name__') else 'unknown'
+        tb = traceback.format_exc()
+        log_event(f'💥 run_in_thread({fn_name}) unhandled: {e}')
+        log_event(f'   traceback: {tb[:500]}')
         return [], str(e)
 
 
@@ -795,7 +800,7 @@ async def async_main_loop():
         except Exception as e:
             import traceback
             log_event(f'⚠️ cycle #{cycle} error: {e}')
-            log_event(f'   traceback: {traceback.format_exc()[-500:]}')
+            log_event(f'   traceback: {traceback.format_exc()[:500]}')
             await asyncio.sleep(CYCLE_SECONDS)
 
     log_event('🛑 Async main loop stopped')
