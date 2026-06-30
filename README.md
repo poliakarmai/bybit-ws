@@ -1,45 +1,45 @@
 # bybit-ws — AI-Native Trading Engine
 
-**Bollinger Grid с авто-входами, трейлингом и DCA. 8 стратегий. MCP-сервер для AI-агентов. Telegram-алерты.**
+**Bollinger Grid с авто-входами, ATR-адаптивными SL/TP, трейлингом, DCA, self-learning и post-trade кластерным анализом. MCP-сервер для AI-агентов. Telegram/ntfy-алерты.**
 
-[![Version](https://img.shields.io/badge/version-7.0.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py) [![Phase 7](https://img.shields.io/badge/phase_7-✓-green)](./AGENTS.md)
+[![Version](https://img.shields.io/badge/version-7.3.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-16%2F16-brightgreen)](./test_smoke.py) [![Phase 7.3](https://img.shields.io/badge/phase_7.3-✓-green)](./AGENTS.md)
 
 ---
 
-## Архитектура модулей (v6.0.0)
+## Архитектура модулей (v7.3)
 
 ```
-┌─────────────────── MAIN LOOP (30s) ───────────────────┐
-│                                                        │
-│  Каждый цикл:                                          │
-│    • state_db.py        — SQLite (WAL, 8 таблиц)      │
-│    • auto_sl.py         — проверка/фикс стоп-лоссов    │
-│    • trailing_sl.py     — подтяжка SL (LONG + SHORT)   │
-│    • junk_trail.py      — трейлинг TP (JUNK-шорты)    │
-│    • auto_tp.py         — авто-TP на Middle/Upper BB   │
-│    • dca.py             — DCA-докупки                  │
-│    • reporting.py       — compliance-аудит (LONG+SHORT)│
-│                                                        │
-│  Каждые 10 циклов (HEAVY):                              │
-│    • auto_entry.py      — авто-входы (LONG scoring)    │
-│    • auto_short.py      — авто-SHORT + JUNK-шорты      │
-│    • pump_detect.py     — детект пампов (24ч/нед)      │
-│    • correlation.py     — корреляционная матрица       │
-│                                                        │
-│  Мониторинг:                                           │
-│    • health.py          — ликвидации, сквизы, фондинг  │
-│    • overbought.py      — детект перегрева             │
-│    • cost_tracker.py    — учёт комиссий                │
-│    • cleanup.py         — чистка просроченных ордеров  │
-│    • ws_client.py       — WebSocket live цены/BB       │
-│    • mtf_confirmation.py— D/W/M конфлюенс              │
-│                                                        │
-└────────────────────────────────────────────────────────┘
+┌─────────────────── MAIN LOOP (async, 30s) ───────────────────┐
+│  main_async.py — главный цикл (asyncio)                      │
+│                                                               │
+│  Каждый цикл:                                                 │
+|    • state_db.py        — SQLite SSOT (WAL, 11 таблиц)       |
+│    • auto_sl.py         — ATR-adaptive SL v2 (±k×ATR, 2% floor)│
+│    • trailing_sl.py     — подтяжка SL (LONG + SHORT)          │
+│    • auto_tp.py         — ATR-based TP (1.0×/2.0×/3.0× ATR)  │
+│    • time_exit.py       — Time exit (6ч/48ч)                  │
+│    • риск-менеджмент     — Circuit breaker, BlackSwan 3-tier  │
+│                                                               │
+│  Каждые 10 циклов (HEAVY, ~5 мин):                            │
+│    • auto_entry.py      — авто-LONG (MTF+OB+Volume+Judge)    │
+│    • auto_short.py      — авто-SHORT + Dry Spell Throttle     │
+│    • pump_detect.py     — детект пампов (24ч/нед)            │
+│    • correlation.py     — корреляционная матрица              │
+│    • dca.py             — DCA-докупки                         │
+│                                                               │
+│  Раз в сутки (2880 циклов):                                   │
+│    • post_trade.py      — кластерный анализ (WR<40% → блок)  │
+│    • journal/self_learn.py — self-learning + canary v3       │
+│                                                               │
+│  Импорт истории (каждый цикл):                                │
+│    • Bybit closed-pnl → trades.jsonl                          │
+│    • → post_trade_features.jsonl (с 30.06)                    │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
          │
-         ▼ RPC (порт 8766) + Web (порт 9999)
+         ▼ RPC (порт 8766) + WS push (порт 8768)
     • rpc.py              — JSON-RPC, /metrics Prometheus
-    • web/proxy_server.py — прокси дашборда
-    • web/dashboard.html  — дашборд v5.0 (риски, позиции, сигналы)
+    • push_notifier.py    — ntfy + Telegram алерты
 ```
 
 ### Полный список файлов движка

@@ -1,18 +1,19 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Карта проекта, команды, правила.  
-> Обновлено: 2026-06-29 (Фаза 7 завершена — ATR-based TP, POSITION_IDX auto-detect, dead code audit, deploy simplification, GSC clean)
+> Обновлено: 2026-06-30 (post_trade save_trade_features hook, self_learn fix, очистка диска, telegram bridge восстановлен)
 
 ## Что это
 
 Трейдинг-монитор для Bybit фьючерсов. Стратегия: **Bollinger Grid** (LONG/SHORT по BB-полосам).  
-Systemd-сервис `bybit-ws-async`, ~35 MB RAM, SQLite — SSOT.
+Systemd-сервис `bybit-ws-async`, ~45 MB RAM, SQLite — SSOT.
 
 ## Главный цикл (async, 30с)
 
 ```
 ЦИКЛ (30с)
   ├─ Снапшот позиций (REST, 20с таймаут)
+  ├─ Импорт истории Bybit (closed-pnl → trades.jsonl + post_trade_features.jsonl)
   ├─ Black Swan check (3-tier: -3%/15min→50%, -5%/30min→80%, -8%/1h→100%)
   ├─ Лёгкие проверки (каждый цикл):
   │   ├─ SL check + fix (ATR-adaptive, capped -50%/+50%)
@@ -35,9 +36,10 @@ Systemd-сервис `bybit-ws-async`, ~35 MB RAM, SQLite — SSOT.
   │   │   └─ Risk Manager (CB, margin, max pos, banned clusters)
   │   ├─ Auto-TP (ATR-adaptive: 1.0×/2.0×/3.0× ATR)
   │   ├─ TP/SL Self-Check (прямой REST-запрос)
-  │   ├─ Time-Based Exit (6ч без PnL / 48ч абсолют)
-  │   ├─ Post-trade cluster analysis (раз в сутки)
-  │   └─ Journal insights (раз в сутки)
+  │   └─ Time-Based Exit (6ч без PnL / 48ч абсолют)
+  ├─ Суточные задачи (каждые 2880 циклов ≈ 24ч):
+  │   ├─ Post-trade cluster analysis (анализ WR по кластерам + автоблок)
+  │   └─ Self-learning + Canary mode (корректировка min_score, sl_pct)
   ├─ SL re-entry (с режимным фильтром)
   ├─ Heartbeat (каждые 12ч)
   └─ Отчётность
@@ -72,13 +74,14 @@ bybit-ws/
 ├── push_notifier.py      ← Push (ntfy + Telegram)
 ├── journal/              ← Журнал + самообучение
 │   ├── analyzer.py       ← Анализатор сделок (FIFO, bias)
-│   └── self_learn.py     ← Self-learning + Canary mode v3
+│   ├── adapter.py        ← Адаптер загрузки (SQLite + JSONL)
+│   └── self_learn.py     ← Self-learning + Canary mode v3 (раз в сутки)
 ├── .github/workflows/    ← CI/CD (28.06)
 │   └── test.yml          ← Smoke-тесты + GSC на push/PR
 ├── scripts/
 │   └── walkforward_rf.py ← Walk-forward RF валидация
 ├── deploy.sh             ← Атомарный деплой (SIGTERM→SIGKILL)
-└── test_smoke.py         ← Интеграционные тесты (45/45)
+└── test_smoke.py         ← Интеграционные тесты (11/11)
 ```
 
 ## Как запускать
@@ -92,7 +95,7 @@ systemctl --user status bybit-ws-async
 bash deploy.sh
 
 # Тесты
-python3 test_smoke.py          # 45 интеграционных
+python3 test_smoke.py          # 11 интеграционных
 python3 test_modules.py        # 5 модульных
 python3 test_ml_smoke.py       # 3 ML
 ```
@@ -109,7 +112,8 @@ python3 test_ml_smoke.py       # 3 ML
 | RPC | `http://127.0.0.1:8766` |
 | Prometheus | `http://127.0.0.1:8766/metrics` (Bearer auth) |
 | Self-learning лог | `~/.local/share/bybit-ws/self_learn.jsonl` |
-| Post-trade лог | `~/.local/share/bybit-ws/post_trade_features.jsonl` |
+| Trades (все сделки) | `~/.local/share/bybit-ws/trades.jsonl` |
+| Post-trade features | `~/.local/share/bybit-ws/post_trade_features.jsonl` ← **наполняется с 30.06** |
 | Blocked clusters | `~/.local/share/bybit-ws/blocked_clusters.json` |
 | Дорожная карта | `obsidian-vault/hermes/bybit-ws-roadmap.md` |
 
@@ -301,6 +305,8 @@ Self-learning с защитой от переобучения:
 | Heavy cycle 67-77с | REST-запросы | В бюджете 300с |
 | DOGE/STG/ADA NO TP | qty < мин. ордера | PERM_SKIP, поставится при DCA |
 | `orderQty truncated` | позиция мелкая | TP не ставится |
+| Gateway RAM 2.3G | утечка в Hermes | Не влияет на bybit-ws |
+| self_learn раз в сутки | `cycle % 2880 == 1`, сброс при рестарте | Ок, данных достаточно |
 
 ## Инварианты
 
@@ -317,12 +323,14 @@ Self-learning с защитой от переобучения:
 11. BB pre-fetch: кеш 5мин в начале тяжёлого цикла
 12. Prometheus /metrics: Bearer auth
 13. CI/CD: GitHub Actions smoke + GSC на push/PR
+14. Post-trade: save_trade_features() при каждом закрытии, кластерный анализ раз в неделю
+15. Self-learning: раз в сутки, canary v3 (10% входов, авто-rollback)
 
 ## Технические характеристики
 
 | Метрика | Значение |
 |---------|----------|
-| RAM | ~35 MB |
+| RAM | ~45 MB |
 | Main cycle | 30 seconds |
 | Heavy cycle | 67-77 seconds |
 | Entry Judge timeout | 5 seconds |
@@ -330,7 +338,7 @@ Self-learning с защитой от переобучения:
 | БД | SQLite WAL (synchronous=NORMAL, busy_timeout=5000) |
 | Деплой | Atomic (symlink swap, zero-downtime) |
 | Мониторинг | Prometheus /metrics, Heartbeat 12ч, Telegram/ntfy |
-| Тесты | 45 smoke + 5 module + 3 ML |
+| Тесты | 16 (11 smoke + 5 module) |
 
 ## Требования
 
@@ -363,8 +371,9 @@ websocket-client (optional) — WS-потоки
 | Session params | NY/Asia/Weekend адаптация |
 | Риск-менеджмент | Multi-layer: 7 фильтров, circuit breaker, black swan |
 | ML Stack | LSTM + RF + DSPy + post-trade cluster analysis |
-| Self-learning | JSONL-журнал, адаптивные пороги |
-| Тесты | 53 теста (smoke + module + ML) |
+| Self-learning | JSONL-журнал, адаптивные пороги, canary v3 |
+| Post-trade | Кластерный анализ (WR<40% → блок), features с 30.06 |
+| Тесты | 16 тестов (smoke 11 + module 5) |
 | CI/CD | GitHub Actions |
 | Документация | AGENTS.md, roadmap, troubleshooting |
 
@@ -385,6 +394,8 @@ websocket-client (optional) — WS-потоки
 | Где тейк-профиты? | `auto_tp.py` | `auto_take_profit()` |
 | Где самообучение? | `journal/self_learn.py` | `apply_journal_insights()` |
 | Где кластерный анализ? | `post_trade.py` | `analyze_clusters()`, `is_cluster_blocked()` |
+| Где сделки пишутся? | `main_async.py:512-552` | импорт Bybit closed-pnl → trades.jsonl + post_trade_features |
+| Где post_trade features? | `~/.local/share/bybit-ws/post_trade_features.jsonl` | наполняется с 30.06 |
 | Где сессии? | `session_params.py` | `get_session()` |
 | Где конфиг? | `~/.config/bybit-ws/config.yaml` | `~/.config/bybit-ws/env` |
 | Где API-ключи? | `~/.config/bybit-ws/env` | chmod 600 |
@@ -404,6 +415,12 @@ grep -rn "from .auto_sl import\|import.*auto_sl" ~/bybit-ws/bybit_ws/
 
 # Найти все места записи в БД
 grep -rn "execute\|commit\|INSERT\|UPDATE" ~/bybit-ws/bybit_ws/state_db.py
+
+# Найти сделки за период (trades.jsonl)
+grep "2026-06-3[0-9]" ~/.local/share/bybit-ws/trades.jsonl | python3 -c "import sys,json; [print(json.loads(l)['symbol'], json.loads(l)['pnl']) for l in sys.stdin]"
+
+# Найти post_trade_features
+cat ~/.local/share/bybit-ws/post_trade_features.jsonl | python3 -c "import sys,json; [print(json.loads(l)) for l in sys.stdin]"
 
 # Найти все HTTP-запросы к Bybit
 grep -rn "bybit(\|fetch_\|place_\|cancel_" ~/bybit-ws/bybit_ws/api.py
@@ -461,7 +478,9 @@ Bybit API ──REST──▶ main_async ──▶ SQLite (state.db)
 
 События ──▶ events.log ──▶ grep для отладки
 Метрики ──▶ metrics.json ──▶ Prometheus /metrics
-Сделки  ──▶ trade_history (SQLite) ──▶ journal analyzer
+Сделки  ──▶ trades.jsonl ──▶ journal analyzer
+         ──▶ post_trade_features.jsonl ──▶ кластерный анализ (WR<40% → блок)
+Трейды  ──▶ trade_history (SQLite) ──▶ adapter.py → self_learn
 ```
 
 ### Принятие решений
@@ -662,9 +681,8 @@ grep "truncated\|PERM_SKIP" ~/.local/share/bybit-ws/events.log | tail -5
 ## PRE-DEPLOY CHECKLIST
 ## ═══════════════════════════════════════
 
-- [ ] `python3 test_smoke.py` → 45/45 PASS
+- [ ] `python3 test_smoke.py` → 11/11 PASS
 - [ ] `python3 test_modules.py` → 5/5 PASS
-- [ ] `python3 test_ml_smoke.py` → 3/3 PASS
 - [ ] `sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA integrity_check"` → ok
 - [ ] `curl -s http://127.0.0.1:8766/health` → {"status":"alive"}
 - [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий (<13ч)
