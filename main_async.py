@@ -529,6 +529,22 @@ async def async_main_loop():
                         }) + '\n')
                         imported += 1
                         existing_keys.add(key)
+                        # ── Post-trade features: сохраняем для кластерного анализа ──
+                        try:
+                            from .post_trade import save_trade_features
+                            save_trade_features({
+                                'symbol': sym,
+                                'side': side,
+                                'pnl': float(item.get('closedPnl', 0)),
+                                'exit_price': price,
+                                'entry_price': float(item.get('avgEntryPrice', 0)),
+                                'closed_at': ts_val,
+                                'qty': qty,
+                                'regime': 'NEUTRAL',
+                                'session': 'normal',
+                            })
+                        except Exception:
+                            pass
             log_event(f'📥 Импорт истории Bybit: {imported} новых трейдов (всего {len(existing_keys)})')
     except Exception as e:
         log_event(f'⚠️ bybit history import: {e}')
