@@ -133,17 +133,28 @@ def check_and_fix_sl():
             sl_val = float(sl)
             entry = p['entry']
             side = p['side']
-            if side == 'Buy' and sl_val > entry:
-                log_event(f'🔒 {sym}: SL ${sl_val:.4f} > entry ${entry:.4f} — ручная фиксация')
-                continue
-            if side == 'Sell' and sl_val < entry:
-                # SL ниже входа для SHORT — неправильно, переставляем на +5%
-                sl_price = round(entry * 1.05, 4)
+            mark = p['mark']  # для проверки стороны SL относительно рынка
+            # SL на неправильной стороне от рынка → исправляем
+            if side == 'Buy' and sl_val > mark:
+                # LONG: SL выше рынка → немедленно триггерится → фикс
+                sl_price = round(mark * 0.95, 4)
                 body = {'category': 'linear', 'symbol': sym, 'positionIdx': p.get('positionIdx', 0),
                         'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
                 data = bybit('POST', '/v5/position/trading-stop', body)
                 if data and data.get('retCode') == 0:
-                    log_event(f'🔧 {sym}: SHORT SL исправлен ${entry:.4f}→${sl_price:.4f} (был ${sl_val:.4f})')
+                    log_event(f'🔧 {sym}: LONG SL исправлен ${sl_val:.4f}→${sl_price:.4f} (был выше рынка ${mark:.4f})')
+                else:
+                    err_msg = data.get('retMsg', '?') if data else 'no response'
+                    log_event(f'⚠️ {sym}: LONG SL fix failed: {err_msg}')
+                continue
+            if side == 'Sell' and sl_val < mark:
+                # SHORT: SL ниже рынка → немедленно триггерится → фикс
+                sl_price = round(mark * 1.05, 4)
+                body = {'category': 'linear', 'symbol': sym, 'positionIdx': p.get('positionIdx', 0),
+                        'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
+                data = bybit('POST', '/v5/position/trading-stop', body)
+                if data and data.get('retCode') == 0:
+                    log_event(f'🔧 {sym}: SHORT SL исправлен ${sl_val:.4f}→${sl_price:.4f} (был ниже рынка ${mark:.4f})')
                 else:
                     err_msg = data.get('retMsg', '?') if data else 'no response'
                     log_event(f'⚠️ {sym}: SHORT SL fix failed: {err_msg}')
