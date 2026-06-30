@@ -137,7 +137,16 @@ def check_and_fix_sl():
                 log_event(f'🔒 {sym}: SL ${sl_val:.4f} > entry ${entry:.4f} — ручная фиксация')
                 continue
             if side == 'Sell' and sl_val < entry:
-                log_event(f'🔒 {sym}: SL ${sl_val:.4f} < entry ${entry:.4f} — ручная фиксация')
+                # SL ниже входа для SHORT — неправильно, переставляем на +5%
+                sl_price = round(entry * 1.05, 4)
+                body = {'category': 'linear', 'symbol': sym, 'positionIdx': p.get('positionIdx', 0),
+                        'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
+                data = bybit('POST', '/v5/position/trading-stop', body)
+                if data and data.get('retCode') == 0:
+                    log_event(f'🔧 {sym}: SHORT SL исправлен ${entry:.4f}→${sl_price:.4f} (был ${sl_val:.4f})')
+                else:
+                    err_msg = data.get('retMsg', '?') if data else 'no response'
+                    log_event(f'⚠️ {sym}: SHORT SL fix failed: {err_msg}')
                 continue
             # Проверка: не слишком ли близко SL
             # LONG: <2% от входа → переставим дальше
@@ -222,7 +231,8 @@ def check_and_fix_sl():
                 # ATR/BB SL выше рынка → позиция в минусе → аварийный SL
                 sl_price = round(mark * 0.95, 4)
                 sl_desc = f'аварийный SL (mark×0.95, ATR SL был бы выше рынка)'
-            if side == 'Sell' and sl_price <= mark:
+            elif side == 'Sell' and sl_price <= mark:
+                # ATR/BB SL ниже рынка для SHORT → позиция в минусе → аварийный SL
                 sl_price = round(mark * 1.05, 4)
                 sl_desc = f'аварийный SL (mark×1.05, ATR SL был бы ниже рынка)'
         else:

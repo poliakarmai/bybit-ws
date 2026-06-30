@@ -1015,7 +1015,7 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         daily_loss = metrics.get(last_trade_date, {}).get("pnl_total", 0) if last_trade_date else 0
         # Добавляем unrealized PnL из positions.json
-        unrealized = sum(float(p.get("upnl", 0) or 0) for p in positions.values())
+        unrealized = sum(float(p.get("upnl", 0) or 0) for p in positions.values()) if positions else 0
         daily_loss = round(daily_loss + unrealized, 2)
         total_margin = sum(float(p.get("margin", 0) or p.get("positionIM", 0)) for p in positions.values())
         position_count = len(positions)
