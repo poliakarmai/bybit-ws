@@ -256,8 +256,9 @@ def send_push(
         }
         title = level_titles.get(level, f"{emoji} Alert")
 
-    # Санитайзинг title для ntfy (не принимает / и пробелы в заголовках)
-    title = title.replace('/', '|').replace('\n', ' ')
+    # Санитайзинг title для HTTP-заголовков (RFC 7230)
+    # | невалиден в HTTP-заголовках → заменяем на -
+    title = title.replace('/', '-').replace('|', '-').replace('\n', ' ')
 
     # Пробуем ntfy
     ntfy_ok = _send_ntfy(
