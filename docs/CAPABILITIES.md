@@ -1,4 +1,4 @@
-# bybit-ws — Bollinger Grid трейдинг-монитор v7.1
+# bybit-ws — Bollinger Grid трейдинг-монитор v7.6
 
 Автоматическая торговля фьючерсами Bybit. 24/7 systemd-сервис. SQLite WAL (SSOT).
 Документация: [ARCHITECTURE.md](ARCHITECTURE.md) (внутреннее устройство), [API.md](API.md) (эндпоинты), [ROADMAP.md](ROADMAP.md) (план).
