@@ -2,7 +2,7 @@
 
 **Bollinger Grid с авто-входами, ATR-адаптивными SL/TP, трейлингом, DCA, self-learning и post-trade кластерным анализом. MCP-сервер для AI-агентов. Telegram/ntfy-алерты.**
 
-[![Version](https://img.shields.io/badge/version-7.3.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-16%2F16-brightgreen)](./test_smoke.py) [![Phase 7.3](https://img.shields.io/badge/phase_7.3-✓-green)](./AGENTS.md)
+[![Version](https://img.shields.io/badge/version-7.6.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py) [![Phase 7.6](https://img.shields.io/badge/phase_7.6-✓-green)](./AGENTS.md)
 
 ---
 

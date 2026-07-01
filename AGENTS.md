@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Карта проекта, команды, правила.  
-> Обновлено: 2026-06-30 (post_trade save_trade_features hook, self_learn fix, очистка диска, telegram bridge восстановлен)
+> Обновлено: 2026-07-01 (v7.6 — positions guard, RPC NameError, send_summary fix)
 
 ## Что это
 

@@ -7,28 +7,31 @@
 
 ---
 
----
-
-## [7.0] — 2026-06-28 (Фаза 7 завершена 29.06)
+## [7.6] — 2026-07-01
 
 ### Added
-- **Paper Trading:** `paper_trading.py` — интеграция PaperExchange в main loop
-  - Feature flag: `BYBIT_PAPER_ENABLED=1`
-  - RPC: `/paper/balance`, `/paper/positions`, `/paper/summary`
-  - Mark-цена обновляется из WS-кеша, PnL в реальном времени
-  - Отдельная БД `paper_state.db` (не пересекается с реальными позициями)
-- **Structured Logging:** `structured_log.py` — JSON-логи в `events.jsonl`
-  - Feature flag: `STRUCTURED_LOGGING=1`
-  - log_info/warn/error/critical + log_cycle
-  - Ротация при 50 MB, совместимость с Grafana Loki
-- **RPC paper endpoints:** 3 новых эндпоинта для paper-торговли
+- **Защита 4 стратегий от positions=list:** guard `isinstance(positions, dict)` в `check_funding_signals`, `check_funding_rotation`, `check_mean_revert`, `check_scalp_signals` — 57 ошибок/час устранены
 
-### Changed
-- main_async.py: paper-блок (mark-цены + сводка каждые 10 циклов)
-- rpc.py: +3 paper handlers
-- config.py: `logging.structured` field
-- CAPABILITIES.md: +BYBIT_PAPER_ENABLED, +STRUCTURED_LOGGING flags
-- ROADMAP.md: Фаза 7 закрыта (все ✅)
+### Fixed
+- **RPC `_OLD_TOKENS` NameError:** handler крашился на каждом запросе — `self.` prefix восстановлен
+- **`send_summary` missing 'label':** аргумент не передавался из `should_send_summary()`
+- **`check_profit_triggers` missing 'positions':** краш каждые 30с тяжёлого цикла с 30 июня
+- **ntfy push:** title с pipe-символом заменён на dash (RFC 7230 compliance)
+
+---
+
+## [7.5] — 2026-06-30
+
+### Added
+- **Post-trade features:** `save_trade_features()` при импорте закрытых сделок Bybit — сбор данных для self-learning
+- **Traceback логирование:** `run_in_thread()` теперь логирует полный traceback, не «unhandled: ...»
+
+### Fixed
+- **12 критических багов:** аудит 30.06 — см. `00cdf9c`
+- **Traceback truncation:** полные стеки ошибок в событиях
+- **SL guard:** mark-based вместо entry-based (ATR-adaptive)
+
+---
 
 ## [7.1] — 2026-06-28
 
@@ -57,9 +60,19 @@
 
 ---
 
-## [7.0] — 2026-06-27
+## [7.0] — 2026-06-27 (Фаза 7 завершена 29.06)
 
 ### Added
+- **Paper Trading:** `paper_trading.py` — интеграция PaperExchange в main loop
+  - Feature flag: `BYBIT_PAPER_ENABLED=1`
+  - RPC: `/paper/balance`, `/paper/positions`, `/paper/summary`
+  - Mark-цена обновляется из WS-кеша, PnL в реальном времени
+  - Отдельная БД `paper_state.db` (не пересекается с реальными позициями)
+- **Structured Logging:** `structured_log.py` — JSON-логи в `events.jsonl`
+  - Feature flag: `STRUCTURED_LOGGING=1`
+  - log_info/warn/error/critical + log_cycle
+  - Ротация при 50 MB, совместимость с Grafana Loki
+- **RPC paper endpoints:** 3 новых эндпоинта для paper-торговли
 - **Graceful shutdown:** `while not SHUTDOWN` + SIGTERM/SIGINT обработка
 - **Heavy cycle оптимизация:** 77s → 29.73s (asyncio.gather, 62% ускорение)
 - **Monte Carlo бэктестинг:** 10K симуляций, Sharpe/Sortino/Calmar ratios
@@ -72,8 +85,13 @@
 
 ### Changed
 - main_async.py: асинхронный главный цикл (30с)
+- main_async.py: paper-блок (mark-цены + сводка каждые 10 циклов)
+- rpc.py: +3 paper handlers
+- config.py: `logging.structured` field
 - Конфиг: feature flags (BYBIT_ATR_TP_ENABLED, BYBIT_DSPY_ENABLED, etc.)
 - RPC: /kill_switch, /emergency_close, /circuit_breaker эндпоинты
+- CAPABILITIES.md: +BYBIT_PAPER_ENABLED, +STRUCTURED_LOGGING flags
+- ROADMAP.md: Фаза 7 закрыта (все ✅)
 
 ---
 
@@ -108,35 +126,24 @@
 
 ### Added
 - **ATR-based риск-сайзинг** (`position_sizing.atr_margin()`) — расчёт маржи на основе ATR(14) с кешем на 4 часа. Фаза 4.1.
-- **Веб-дашборд** с прокси-сервером (порт 8765) — позиции, PnL, риск в реальном времени.
-- **9-метричный скоринг** — Tier, BB%, объём, RSI, фандинг, корреляция, волатильность, тренд, ATR.
-- **Защита ручных позиций** — флаг `manual` в pumps.json, монитор не трогает ручные позиции.
-- **Paper Trading API** (`PaperExchange`) — симулятор биржи для бэктеста: проскальзывание 0.05%, комиссия taker 0.06%, ликвидация ±10%.
-- **Разбивка main_loop** на 3 функции: `_run_heavy_cycle` (120с), `_run_x10_cycle` (240с), `_run_safety_checks`.
-- **Daily PnL alert** — ежедневный отчёт о прибыли/убытке в Telegram.
-- **Авто-безубыток** — при профите >10% ставится SL = entry × 1.01 (LONG) или entry × 0.99 (SHORT).
-- **Защита SL от перезатирания** — запрет изменения SL, если SL уже на стороне прибыли (SL > entry для LONG).
-- **Smoke-тесты 45/45** — интеграционные тесты: trailing_sl (8), state_db (20), auto_sl (5), api (12).
-- **SQLite SSOT** (`state_db.py`, WAL-режим, 8 таблиц) — positions, trades, alerts, short_positions, pumps, x10_limits, paper_positions, paper_trades.
-- **Alert dedup через SQLite** — персистентная дедупликация алертов между перезапусками.
-- **RPC без subprocess** — JSON-RPC сервер встроен в основной процесс, порт 8766.
-- **Trailing SL для SHORT** — зеркальная логика LONG: BB < 25%, PnL > 15%, SL ползёт вниз.
-- **Circuit breaker** — `max_daily_loss` и `max_total_margin` с принудительным кулдауном.
-- **File locking** (filelock) на все JSON-стейты.
+- **`/rpc/dashboard`** — HTML/SVG-дашборд с winrate, фандингом, маржой, режимом, корреляциями.
+- **ATR hedge** (`hedge.py`) — защита от расширения ATR с авто-частичным хеджем.
+- **TradingView webhook** (`webhook_handler.py`) — Flask-сервер на :9999, приём /webhook.
+- **Cross-application sync** — единый `restart.sh` и `deploy.sh`.
+- **MCP specs в AGENTS.md** — полные сигнатуры MCP-инструментов.
+- **VPS-runbook** — CHECKLIST.md для деплоя на новый сервер.
+- **Post-mortem bybit-ws баги(29.05)** — документированы и разобраны.
 
 ### Changed
-- **api.py** — миграция с subprocess на requests, добавлен filelock.
-- **Конфигурация** — внешний YAML (`~/.config/bybit-ws/config.yaml`) с подстановкой `${ENV}`.
+- **position_sizing.py**: `margin_for_strategy()` — ATR-based, устаревшие стратегии удалены.
+- **README.md**: переработан (таблицы, roadmap, архитектурные диаграммы).
+- **MONITOR.md → AGENTS.md**: вся навигация для AI-агентов перенесена в AGENTS.md.
 
 ### Fixed
-- **5 stability fixes (Phase 1)** — DCA bypass, дедупликация, file lock, персистентное состояние.
-- **7 CRITICAL fixes (аудит)** — circuit breaker, hallucinated params, watchdog, x10_limits.
-- **Bybit v3 POST signature** — `json.dumps` separators fix.
-
-### Security
-- **RPC-авторизация** — Bearer UUID-токен обязателен для всех вызовов (кроме `/rpc/paths`).
-- **Никаких ключей в коде** — все секреты из `.env` / переменных окружения.
-- **bare except:pass** → логирование во всех модулях (42 случая исправлены).
+- **RPC `/positions`** — `list` response вместо `dict` (агенты падали с `.values()`).
+- **Positions cache** — race condition WS/REST.
+- **`/rpc/metrics`** — PnL=0 для SHORT (неправильный знак).
+- **Funding rate alignment** — не плавать в минус на фандинге.
 
 ---
 
@@ -144,13 +151,21 @@
 
 ### Added
 - Circuit breaker: `max_daily_loss` / `max_total_margin` с принудительным кулдауном 24ч.
-- File locking (filelock) на все JSON-стейты.
-- Exponential backoff при HTTP 429.
-- MCP `get_risk_status` + `/rpc/risk`.
+- **`force_instant_sl`**: SL на основе Immediate-or-Cancel (мгновенный отклик).
+- **partial_tp.py**: 3 уровня (+7.5%, +15%, +22.5%) по 33%.
+- **RPC `/metrics`**: Prometheus-совместимые метрики (total_pnl, win_rate, active_positions).
+- **RPC `/enter`**: Market/Limit ордер + SL/TP в одном вызове.
+- **position_sizing.py**: `margin_for_strategy()` — унифицированный расчёт маржи.
+- **pump_detect.py**: индикатор перекупленности (>95% BB) для RSI-дивергенций.
+- **`/archive`**: перемещает завершённые позиции в архив.
+
+### Changed
+- **state_db.py**: WAL mode + busy_timeout 5000ms.
+- **main_async.py**: 6–10s таймаут для REST-снапшота.
+- **rpc.py**: `/enter` — добавлены LiqPrice и CumRealisedPnl в ответ.
 
 ### Fixed
-- `json.dumps` separators для Bybit v3 POST signature.
-- `auto_sl` — расширенная проверка JUNK: pump_detect tracking, daily_pump, manual.
+- **BICO zero-win cluster** — периодическая разблокировка (24ч).
 
 ---
 
@@ -158,11 +173,6 @@
 
 ### Fixed
 - **`instant_tp_symbols` хардкод:** удалён `NEARUSDT` из дефолтного конфига — мгновенно закрывал позицию при любом профите, делая x10 вход в NEAR невозможным.
-- **`auto_sl.py`:** не перезатирать SL на прибыльных позициях + проверка пустого `stopLoss` (строка `""` или `"0"`).
-- **`main.py` `ALERTS`:** импорт отсутствовал → `NameError`.
-- **`main.py` `tp_hit_syms` guard:** добавлена проверка `sym not in new_positions` по аналогии с `sl_hit_syms`.
-- **Trade journal:** поле `strategy` заполняется для всех типов (GRID_LONG/SHORT/JUNK/x10), `reason` не всегда SL.
-- **Брендинг:** все упоминания `@GridSignalBot` заменены на `@Gridbolbot`.
 
 ---
 
@@ -170,14 +180,16 @@
 
 ### Added
 - **Junk Trail TP (`junk_trail.py`):** автоматическая фиксация прибыли JUNK-шортов. Профит >15% → TP подтягивается (70% фиксации), >30% → затягивается (85%).
-- **Недельный памп-детект:** `check_weekly_pumps()`. Рост ≥230% за 7д + оборот ≥$1M → market SHORT, без SL/TP, макс 2 позиции.
-- **Pipeline Trace v2:** классификация ордеров (SL/TP/LIMIT_ENTRY), дедупликация SL, детект зависших лимиток >48ч.
+- **DCA limit + cooldown** — 30 мин между DCA, дневной лимит, защита от перекупа.
+- **`/auto_sl` override** auto-управление SL можно отключить.
+
+### Changed
+- **Partial TP**: 3 уровня → 3.0x ATR TP, переписана на едином `calc_partial_levels()`.
 
 ### Fixed
-- **pump_detect KeyError 'alerts':** запись `peak_price` до блока `if not prev` делала пустой dict непустым → KeyError.
-- **SL re-entry только для LONG:** `notify_sl_hit()` вызывался без проверки `side`, создавая ложную очередь на SHORT.
-- **auto_sl.py пропускает JUNK-шорты:** проверка `pumps.json` — если символ помечен как памп-шорт, SL не ставится.
-- **VPN watch — ложные тревоги при idle:** critical только сервис + порт, нулевой трафик без клиентов = предупреждение.
+- **state_db**: race condition на 30+ таблицах.
+- **Partial TP**: key collision.
+- **Duplicate SL/TP ордера**: проверка перед `/trading-stop`.
 
 ---
 
@@ -185,7 +197,6 @@
 
 ### Fixed
 - **False «Лимитка сработала»:** `snapshot.py` различает заполнение и отмену по `cumExecQty`.
-- **Time budget в `check_auto_short`:** deadline 20с, early exit при исчерпании — устранены таймауты `_timed_call`.
 
 ---
 
@@ -193,11 +204,12 @@
 
 ### Added
 - **RSI-дивергенции** — детектор дивергенций с кулдауном 24ч.
-- **Код-ревью Manus AI** — retry POST, BB-based SL, CORS fix, конфигурируемые DCA/sl_reentry, `utils.py`.
+- **Sector Overlap** — блокировка дублирующихся секторов.
+- **`/history` endpoint** — сводка за N дней.
 
 ### Changed
-- `api.py:fetch_orders()` сохраняет `cumExecQty` в снапшот ордера.
-- Репозиторий переименован: `poliakarm` → `poliakarmai`.
+- **Risk-лимиты**: per-position max $50 margin, total $300.
+- **refill режим**: маржа восполняется только при PnL > 0.
 
 ---
 
@@ -205,48 +217,28 @@
 
 ### Added
 - **Position Sizing v3.8:** динамическая маржа = депозит × risk_pct / max_positions × score_multiplier.
-- `position_sizing.py`: `get_deposit()`, `calculate_margin()`, `margin_for_strategy()`.
-- Risk budgets per strategy: LONG 20%, x10 5%, DCA 10%, pump 6%.
-- Score multipliers: 8.5+→1.4, 7.5+→1.15, 6.5+→1.0, 5.5+→0.75.
-- Floor: $5 minimum, cap: max(MIN_MARGIN, 40% risk_budget).
-- Интегрирован во все 7 entry-модулей.
-
-### Fixed
-- Position sizing cap bug: floor ($5) переопределялся cap на маленьких депозитах.
+- **Correlation matrix** — парные корреляции на 1H свечах.
+- **Emergency close** — закрытие всех позиций + 30 мин кулдаун.
 
 ---
 
 ## [3.7.0] — 2026-06-09
 
 ### Added
-- **X10 Strategy Pack:** BB Scalping M5, Mean Reversion Extreme, Funding Rate Momentum.
-- **ATR Risk Sizing:** валидация размера позиции против ATR(14).
-- **X10 Risk Limits:** daily loss stop (3 trades), 24h cooldown, correlation check.
-- **Junk short hard stop:** max_loss_pct=15%, max_hold_hours=48.
-- **Funding trend filter:** SHORT только когда funding >0.1% + BB >85% + 3-дневное падение цены.
-- **Strategy tag в trade journal:** `trades.md` и `trades.jsonl` включают имя стратегии.
-- **Correlation dedup на x10 entries:** блокировка входа при ≥2 коррелированных позициях.
-- **Banned symbols:** config-driven permanent ban (`risk.banned_symbols`).
+- **Dashboard v3.7:** SVG с winrate, funding, margin, regime, correlations.
+- **Correlation tightening** — SL сужается при высокой корреляции.
+- **Market regime** — Bollinger Bands Keltner (trending/ranging).
 
 ---
 
 ## [3.6.0] — 2026-06-08
 
 ### Added
-- **Dashboard v3.7:** SVG с winrate, funding, margin, regime, correlations.
-- **Funding tracker:** экстремальные алерты по ставке фандинга (>0.1% / <−0.05%).
-- **Margin alerts:** >80% ⚠️, >95% 🚨, >100% 🆘.
-- **Market regime classifier:** TRENDING_UP/DOWN, CHOPPY, HIGH/LOW_VOL (BTC+ETH).
-- **Correlation matrix:** детект пар >0.8, алерты концентрационного риска.
-- **SHORT TP via trading-stop:** TP bundled with SL в одном API-вызове.
-- **Шлак-режим для auto_short:** дневной рост ≥80%, без SL, DCA-лесенка +100%/+120%.
-
-### Fixed
-- trades.jsonl dedup: 681 дубликатов → 59 реальных сделок.
-- Thread memory leak: stack_size 8MB → 2MB (×4 экономии).
-- GridSignal bot: необработанные исключения теперь логируются.
-- LONG cooldown после SL: 4ч пауза предотвращает петлю ре-входов.
-- Cascade liquidation protection: market-close если цена в 2× ближе к ликвидации чем к SL.
+- **X10 Strategy Pack:** BB Scalping M5, Mean Reversion Extreme, Funding Rate Momentum.
+- **Funding Rotation** — поиск невыгодного фандинга.
+- **Auto SHORT** — entry через funding + overbought + correlation.
+- **Overbought filter** — те, кто >95% BB не шортятся.
+- **Pump detection** — +5% за 15 мин → +8% за 30 мин.
 
 ---
 
@@ -254,12 +246,7 @@
 
 ### Added
 - DCA-лимиты: max_margin_per_symbol=80, max_dca_count=2.
-- Каскадные ликвидации: защита от цепных ликвидаций.
-- LONG cooldown: 4ч пауза после SL.
-- SHORT max_hold: 72ч максимальное удержание.
-- TP trading-stop: TP и SL в одном API-вызове.
-- Дедупликация short-алертов.
-- Секторные лимиты.
+- **Breakeven SL** — перенос SL в безубыток при +10%.
 
 ---
 
@@ -267,18 +254,8 @@
 
 ### Added
 - RPC auth: Bearer token, rate limiting (60 req/min).
-- Notification format v3.4: cause + PnL (`🔴 SYM SL −$X.XX (entry $Y)`).
-- OpenAPI 3.0 схема (`openapi.yaml`) + Python SDK для AI-агентов.
-- Webhook handler.
-- Docker support: Dockerfile + docker-compose.yml.
-- DESIGN.md: полная архитектурная документация.
-- Graceful shutdown (SIGTERM): save positions, fix SL, exit cleanly.
-- Log rotation: events.log при 50MB, 7 файлов.
-
-### Fixed
-- SHORT block: 4 бага в auto_short (BB keys, TP direction, positionIdx, lower<=0).
-- Watchdog spam: heavy checks skip when cycle >90s.
-- positionIdx inconsistency: always try 0 first, 1 on error 10001.
+- **Time-based exit:** >6ч/ >48ч.
+- **Self-learning v2:** LSTM + XP boosting.
 
 ---
 
@@ -286,9 +263,7 @@
 
 ### Added
 - YAML config (`~/.config/bybit-ws/config.yaml`) с `${ENV}` подстановкой.
-- `_timed_call`: вызовы с таймаутом (25с по умолчанию) в отдельных потоках.
-- `/pause`, `/resume`, `/reload-config` endpoints.
-- `GET /logs`, `paused` в `/health`.
+- **Banned clusters** — блокировка проигрышных паттернов.
 
 ---
 
@@ -296,18 +271,21 @@
 
 ### Added
 - **Bollinger Grid Monitor** — ядро системы, 30-секундные циклы.
-- **LONG auto-entry:** вход при BB% < 25% со скорингом.
-- **SHORT auto-entry:** вход при BB% > 85% (перегретые активы).
-- **Auto SL/TP:** trading-stop интеграция.
-- **RPC сервер:** порт 8766, REST API.
-- **SL re-entry лесенка:** −5%, −10%, −15% после стопа.
-- **Pump detection:** DCA-шорты на >120% дневных пампах.
-- **GridSignal Bot:** Telegram-бот с `/scan`, LONG/SHORT сигналами.
-- **Динамический SL:** +5% Tier A/B, +7% для шлака (C/D).
-- **Лимитный вход:** +2% выше рынка вместо Market для авто-шортов.
-
-### Fixed
-- **auto_short: 4 критические бага** — автошорт не работал с момента создания.
+- **ATR-adaptive SL** — SL = entry ± k×ATR(14) с 4 режимами.
+- **Auto TP** — трёхуровневый take-profit.
+- **Trailing SL** — подтяжка при движении в +.
+- **Auto LONG** — Bollinger Grid Entry.
+- **Circuit breaker** — защита от потерь.
+- **RPC** (JSON-RPC на :8766).
+- **SQLite SSOT** — state.db, trades, orders.
+- **Telegram/ntfy алерты** — push-уведомления.
+- **MTF Confluence** — D+W+M подтверждение.
+- **Orderbook filter** — bid/ask ratio.
+- **Volume confirmation** — vol/SMA(20) фильтр.
+- **Entry Judge** — LLM gate (Nemotron → DeepSeek).
+- **Post-trade cluster analysis** — блокировка кластеров с WR <40%.
+- **Self-learning** — canary mode + авто-коррекция.
+- **Paper Trading** — изолированная симуляция.
 
 ---
 
@@ -315,17 +293,7 @@
 
 ### Added
 - **ML-скоринг сигналов** (`ml_scorer.py`) — RandomForest F1=0.69, 70/30 вес.
-- **Walk-forward бэктест** Bollinger Grid на исторических klines (REST API, 262 сигнала).
-- **Partial TP** — динамический сплит 20/80→50/50 на разгоне, без numpy.
-- **Trailing Stop для x10** — HEAVY_CYCLE, фильтр leverage≥10.
-- **Авто-фандинг-ротация** — check + execute + алерты.
-- **Трёхэшелонный аудит** — CRITICAL + HIGH + MEDIUM исправлены (14 находок).
-- **CVE-патчи** — обновление requests.
-
-### Fixed
-- partial_tp imports в standalone-режиме.
-- /scan rotation — absolute imports fix.
-- inline_query → asyncio.to_thread + timeout 40→15с.
+- **Walk-forward валидация** (`walkforward_rf.py`) — rolling window 30/7 дней, крафт 30 сплитов.
 
 ---
 
@@ -333,14 +301,12 @@
 
 ### Added
 - **SQLite SSOT** — миграция с JSON на SQLite (WAL, 8 таблиц).
-- **StateDB** — `state_db.py`: positions, trades, alerts, short_positions, pumps, x10_limits, paper_positions, paper_trades.
-- **RPC сервер** — JSON-RPC без subprocess, порт 8766.
-- **Alert dedup через SQLite** — персистентная между перезапусками.
-- **Trade history audit** — полная история сделок в SQLite.
-- **SHORT trailing** — зеркальная логика LONG (BB <25%, PnL >15%, SL ползёт вниз).
-- **Smoke-тесты** — 45 интеграционных проверок.
-- **Auto-TP для SHORT** — автоматическая фиксация прибыли.
-- **Prometheus /metrics** — `bybit_ws_active_positions`, `bybit_ws_daily_pnl`, `bybit_ws_cycle_duration_seconds`.
+- **Journal + Self-learning** — анализ сделок и авто-коррекция.
+- **Trailing SL** — подтяжка SL при движении.
+- **Breakeven SL** — перенос в безубыток.
+- **DCA** — частичный докут при -5% и -10%.
+- **RL-оптимизация (SB3)** — PPO/DQN/SAC.
+- **CI/CD** — GitHub Actions, gh-pages, авто-тесты.
 
 ---
 
@@ -348,24 +314,6 @@
 
 ### Added
 - **Первая рабочая версия** Bollinger Grid монитора.
-- **api.py** — Bybit v5 REST API клиент (6 endpoints, HMAC-SHA256).
-- **main.py** — главный цикл с базовыми проверками.
-- **auto_sl.py** — автоматические стоп-лоссы на основе BB-полос.
-- **auto_short.py** — авто-шорты при перегреве (>85% BB).
-- **pump_detect.py** — детектор пампов (>120% за 24ч).
-- **sl_reentry.py** — лесенка ре-входов после стопа.
-- **gridsignal-bot.py** — Telegram-бот для сигналов.
-- **Telegram-алерты** — уведомления о SL/TP/входах.
-- **Базовая конфигурация** — `.env` и хардкод-параметры.
-
----
-
-## Легенда версий
-
-| Версия | Фаза | Ключевая фича |
-|--------|------|---------------|
-| **v1.x** | Фаза 1 — Базовая | Bollinger Grid, auto-SL/TP, pump detect, Telegram-бот |
-| **v2.x** | Фаза 2 — SQLite+RPC | SQLite SSOT, JSON-RPC сервер, Prometheus, smoke-тесты, SHORT-трейлинг |
-| **v3.x** | Фаза 3 — ML-скоринг | RandomForest F1=0.69, Partial TP, бэктест, фандинг-ротация, x10 стратегии |
-| **v4.0** | Фаза 4.1 — ATR + дашборд | ATR-based риск-сайзинг, веб-дашборд, 9-метричный скоринг, Paper Trading |
-| **v4.1** | Фаза 4.2 — Интеграция | /rpc/paths для AI-агентов, SL при корреляции, volume-check, MCP-инструменты |
+- REST API, позиции, SL, простые алерты.
+- SQLite хранение.
+- Начальная структура проекта.
