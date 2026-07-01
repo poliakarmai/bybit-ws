@@ -26,7 +26,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import optuna
+try:
+    import optuna
+    _OPTUNA_AVAILABLE = True
+except ImportError:
+    optuna = None  # type: ignore
+    _OPTUNA_AVAILABLE = False
 
 # ── Пути ──────────────────────────────────────────────────────────────────────
 HOME = Path.home()

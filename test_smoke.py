@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 # symlink bybit_ws → bybit-ws в /home/openclaw
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws.trailing_sl import trailing_sl
+from bybit_ws.trailing_sl import trailing_sl, tight_trailing_sl
 from bybit_ws.auto_sl import _get_tiers
 from bybit_ws.manual_positions import is_manual_position
 from bybit_ws.state_db import StateDB
@@ -87,6 +87,39 @@ def test_sl_close(mock_m, mock_bb):
 def test_sl_far(mock_m, mock_bb):
     print("\n─── trailing_sl: SL далеко ───")
     check("обновляем", len(trailing_sl({'BTCUSDT': {'entry': 100, 'mark': 118, 'side': 'Buy', 'size': 1, 'positionIdx': 0, 'stopLoss': 99.5}})) == 1)
+
+
+# ═════════════ 1b. tight_trailing_sl (5 тестов) ═════════════
+
+@patch('bybit_ws.trailing_sl.is_manual_position', return_value=False)
+def test_tight_first_activation(mock_m):
+    print("\n─── tight_trailing: +3% → SL=entry*1.02 ───")
+    actions = tight_trailing_sl({'BTCUSDT': {'entry': 100, 'mark': 103, 'side': 'Buy', 'size': 1, 'positionIdx': 0, 'stopLoss': None}})
+    check("SL сгенерирован", len(actions) == 1)
+    if actions: check("SL=102.0", abs(actions[0][4] - 102.0) < 0.01, f"(got {actions[0][4]})")
+
+@patch('bybit_ws.trailing_sl.is_manual_position', return_value=False)
+def test_tight_below_threshold(mock_m):
+    print("\n─── tight_trailing: +2% → бездействие ───")
+    check("не генерируем", len(tight_trailing_sl({'BTCUSDT': {'entry': 100, 'mark': 102, 'side': 'Buy', 'size': 1, 'positionIdx': 0, 'stopLoss': None}})) == 0)
+
+@patch('bybit_ws.trailing_sl.is_manual_position', return_value=False)
+def test_tight_continue_trail(mock_m):
+    print("\n─── tight_trailing: SL уже активен → mark*0.99 ───")
+    # SL=102 (уже активирован), mark=108 (+8%) → SL должен стать 108*0.99=106.92
+    actions = tight_trailing_sl({'BTCUSDT': {'entry': 100, 'mark': 108, 'side': 'Buy', 'size': 1, 'positionIdx': 0, 'stopLoss': 102.0}})
+    check("SL подтянут", len(actions) == 1)
+    if actions: check("SL=106.92", abs(actions[0][4] - 106.92) < 0.01, f"(got {actions[0][4]})")
+
+@patch('bybit_ws.trailing_sl.is_manual_position', return_value=False)
+def test_tight_short_skip(mock_m):
+    print("\n─── tight_trailing: SHORT → бездействие ───")
+    check("не трогаем шорты", len(tight_trailing_sl({'ETHUSDT': {'entry': 100, 'mark': 82, 'side': 'Sell', 'size': 1, 'positionIdx': 1, 'stopLoss': None}})) == 0)
+
+@patch('bybit_ws.trailing_sl.is_manual_position', return_value=True)
+def test_tight_manual_skip(mock_m):
+    print("\n─── tight_trailing: ручная → бездействие ───")
+    check("не трогаем", len(tight_trailing_sl({'BTCUSDT': {'entry': 100, 'mark': 105, 'side': 'Buy', 'size': 1, 'positionIdx': 0, 'stopLoss': None}})) == 0)
 
 
 # ═════════════ 2. state_db (20+ проверок) ═════════════
@@ -175,6 +208,8 @@ def test_api():
 if __name__ == '__main__':
     test_long(); test_short(); test_short_low_pnl(); test_long_low_bb()
     test_short_high_bb(); test_manual(); test_sl_close(); test_sl_far()
+    test_tight_first_activation(); test_tight_below_threshold()
+    test_tight_continue_trail(); test_tight_short_skip(); test_tight_manual_skip()
     test_state_db()
     test_auto_sl()
     test_api()

@@ -166,7 +166,8 @@ def _send_ntfy(
     ntfy_tags = tags or NTFY_TAGS_MAP.get(priority, "")
 
     # Очищаем от не-ASCII (эмодзи в заголовках HTTP ломают httpx)
-    safe_title = (title or "Bybit WS Alert").encode("ascii", errors="ignore").decode("ascii")
+    # .strip() — иначе после вырезания эмодзи остаётся лидирующий пробел
+    safe_title = (title or "Bybit WS Alert").encode("ascii", errors="ignore").decode("ascii").strip()
     safe_tags = ntfy_tags.encode("ascii", errors="ignore").decode("ascii") if ntfy_tags else ""
 
     headers = {

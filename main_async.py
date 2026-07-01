@@ -47,7 +47,7 @@ from .state_db import adb
 # Синхронные модули (вызываются через executor)
 from .auto_sl import check_and_fix_sl, check_breakeven_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
-from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, apply_trailing_sl
+from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, tight_trailing_sl, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
 from .overbought import check_overbought, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl
@@ -674,6 +674,11 @@ async def async_main_loop():
                 if simple_trail_actions:
                     await run_in_thread(apply_trailing_sl, simple_trail_actions)
 
+                # Tight трейлинг (идея Алексея: +3% → SL=entry+2%, дальше mark×0.99)
+                tight_trail_actions, _ = await run_in_thread(tight_trailing_sl, new_positions)
+                if tight_trail_actions:
+                    await run_in_thread(apply_trailing_sl, tight_trail_actions)
+
                 # Безубыток (каждые 4 цикла)
                 if cycle % 4 == 0:
                     be_msgs, _ = await run_in_thread(check_breakeven_sl)
@@ -733,7 +738,7 @@ async def async_main_loop():
                     from .ab_test import is_ab_enabled, get_status as _ab_status
                     if is_ab_enabled():
                         ab = _ab_status()
-                        if isinstance(ab, dict) and ab.get('significance', {}).get('verdict', '') not in ('', 'недостаточно данных'):
+                        if isinstance(ab, dict) and (ab.get('significance') or {}).get('verdict', '') not in ('', 'недостаточно данных'):
                             sig = ab.get('significance') or {}
                             log_event(f'🧪 A/B вердикт: {sig.get("verdict", "?")} '
                                       f'(p_boot={sig.get("p_value_bootstrap")})')
