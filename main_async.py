@@ -720,8 +720,9 @@ async def async_main_loop():
 
             # ── Отчётность ──
             try:
-                if should_send_summary():
-                    await run_in_thread(send_summary)
+                label = should_send_summary()
+                if label:
+                    await run_in_thread(send_summary, label)
                 await run_in_thread(check_profit_triggers, new_positions)
             except Exception as e:
                 log_event(f'⚠️ reporting error: {e}')
