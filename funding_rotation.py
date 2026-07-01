@@ -111,6 +111,8 @@ def check_funding_rotation(positions) -> list[dict]:
     Возвращает список действий (пока только алерты, без авто-исполнения).
     Каждое действие: {'action': 'rotate', 'from': sym, 'to': sym, 'reason': str}
     """
+    if not isinstance(positions, dict):
+        return []
     if not positions:
         return []
 

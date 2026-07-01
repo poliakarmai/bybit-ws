@@ -103,6 +103,8 @@ def _calc_rsi(closes, period=RSI_PERIOD):
 
 def check_scalp_signals(positions, balance_usdt):
     """Сканирует Tier A/B монеты на скальп-сигналы. Возвращает список алертов."""
+    if not isinstance(positions, dict):
+        return [], []
     state = _load_state()
     now = time.time()
     alerts = []

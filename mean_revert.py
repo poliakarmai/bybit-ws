@@ -81,6 +81,8 @@ def _get_daily_bb(sym):
 
 def check_mean_revert(positions):
     """Сканирует на экстремальные BB% для Mean Reversion x10."""
+    if not isinstance(positions, dict):
+        return [], []
     state = _load_state()
     now = time.time()
     alerts = []

@@ -102,6 +102,8 @@ def _get_bb_and_funding(sym):
 
 def check_funding_signals(positions):
     """Сканирует на сигналы Funding Rate Momentum."""
+    if not isinstance(positions, dict):
+        return [], []
     state = _load_state()
     now = time.time()
     alerts = []
