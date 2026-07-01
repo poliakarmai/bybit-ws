@@ -438,7 +438,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         provided = auth.replace('Bearer ', '', 1) if auth.startswith('Bearer ') else ''
         if provided == token:
             pass  # ok
-        elif provided and provided in _OLD_TOKENS and time.time() < _OLD_TOKENS[provided]:
+        elif provided and provided in self._OLD_TOKENS and time.time() < self._OLD_TOKENS[provided]:
             pass  # grace period
         else:
             return False
