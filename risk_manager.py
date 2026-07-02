@@ -298,8 +298,9 @@ def check_new_entry_correlation(
             if other in positions:
                 other_pos = positions[other]
                 other_side = other_pos.get('side', '')
-                # Блокируем только если направления совпадают
-                if other_side == new_side:
+                # Блокируем только если направления совпадают И корреляция положительная
+                # (отрицательная корреляция = хедж = диверсификация, не концентрация)
+                if other_side == new_side and r > 0:
                     blocked_pairs.append((other, r))
 
     if blocked_pairs:

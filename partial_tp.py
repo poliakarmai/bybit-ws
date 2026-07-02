@@ -121,13 +121,14 @@ def calculate_split(
     return middle_frac, upper_frac
 
 
-def check_partial_tp() -> list[str]:
+def check_partial_tp(positions=None) -> list[str]:
     """
     Проверяет все открытые позиции и корректирует TP-сплит.
     Возвращает список алертов.
     """
     alerts = []
-    positions = fetch_positions()
+    if positions is None:
+        positions = fetch_positions()
 
     if not positions:
         return alerts

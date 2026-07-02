@@ -632,12 +632,14 @@ def auto_entry_scan(positions):
                 try:
                     from .correlation import max_corr_with_open
                     max_c, corr_sym = max_corr_with_open(sym, positions)
-                    if abs(max_c) > 0.85:
-                        log_event(f'🔗 CORR BLOCK {sym}: r={max_c:.2f} с {corr_sym} > 0.85')
+                    if max_c > 0.85:
+                        log_event(f'🔗 CORR BLOCK {sym}: r={max_c:+.2f} с {corr_sym} > 0.85 (концентрация)')
                         continue
-                    elif abs(max_c) > 0.70:
+                    elif max_c > 0.70:
                         corr_sizer = 0.5
-                        log_event(f'🔗 CORR {sym}: r={max_c:.2f} с {corr_sym} → size ×0.5')
+                        log_event(f'🔗 CORR {sym}: r={max_c:+.2f} с {corr_sym} → size ×0.5')
+                    elif max_c < -0.70:
+                        log_event(f'🔗 HEDGE {sym}: r={max_c:+.2f} с {corr_sym} (отрицательная — диверсификация)')
                 except Exception:
                     pass
 

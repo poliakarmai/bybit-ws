@@ -73,14 +73,15 @@ def _get_lot_step(sym):
         return 0.1
 
 
-def check_dca():
+def check_dca(positions=None):
     """Проверить позиции на DCA-уровни и поставить лимитки при необходимости."""
     alerts = []
 
     # Бан-лист: символы, для которых DCA временно отключён
     DCA_BLACKLIST = {"FLOWUSDT"}  # недостаточно баланса для докупки
 
-    positions = fetch_positions()
+    if positions is None:
+        positions = fetch_positions()
     if not positions:
         return alerts
 

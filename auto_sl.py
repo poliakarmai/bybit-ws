@@ -114,10 +114,11 @@ def _get_tiers(cfg):
     return tier_ab, one_way
 
 
-def check_and_fix_sl():
+def check_and_fix_sl(positions=None):
     """Проверить все позиции, поставить ATR-adaptive SL тем у кого нет."""
     alerts = []
-    positions = fetch_positions()
+    if positions is None:
+        positions = fetch_positions()
     if not positions:
         return alerts
 
@@ -175,27 +176,28 @@ def check_and_fix_sl():
         size = p['size']
         entry = p['entry']
 
-        # BE-SL: в плюсе → безубыток
-        if side == 'Buy' and mark > entry:
-            sl_price = round(entry, 4)
+        # BE-SL: в плюсе >3% → безубыток с зазором +1%
+        # (не ставим раньше — ATR-adaptive SL даёт позиции дышать)
+        if side == 'Buy' and mark > entry * 1.03:
+            sl_price = round(entry * 1.01, 4)  # +1% выше входа = безубыток с зазором
             if sl_price < mark:
                 body = {'category': 'linear', 'symbol': sym, 'positionIdx': idx,
                         'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
                 data = bybit('POST', '/v5/position/trading-stop', body)
                 if data and data.get('retCode') == 0:
-                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток)')
+                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, +3% от входа)')
                 else:
                     err = data.get('retMsg', '?') if data else 'no response'
                     alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
             continue
-        if side == 'Sell' and mark < entry:
-            sl_price = round(entry, 4)
+        if side == 'Sell' and mark < entry * 0.97:
+            sl_price = round(entry * 0.99, 4)  # -1% ниже входа = безубыток с зазором
             if sl_price > mark:
                 body = {'category': 'linear', 'symbol': sym, 'positionIdx': idx,
                         'stopLoss': str(sl_price), 'slTriggerBy': 'MarkPrice'}
                 data = bybit('POST', '/v5/position/trading-stop', body)
                 if data and data.get('retCode') == 0:
-                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток)')
+                    alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, -3% от входа)')
                 else:
                     err = data.get('retMsg', '?') if data else 'no response'
                     alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
@@ -292,10 +294,11 @@ def check_and_fix_sl():
     return alerts
 
 
-def check_breakeven_sl():
+def check_breakeven_sl(positions=None):
     """Безубыток: при движении +10% → SL = entry + 1%."""
     alerts = []
-    positions = fetch_positions()
+    if positions is None:
+        positions = fetch_positions()
     if not positions:
         return alerts
 

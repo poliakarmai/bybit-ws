@@ -411,14 +411,14 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
     # DCA
     if not rpc_state.get("paused"):
-        dca_msgs = await run_in_thread(check_dca)
+        dca_msgs = await run_in_thread(check_dca, positions)
         for msg in (dca_msgs[0] or []):
             add_alert('ENTRY', msg)
             send_high_alert(msg, level='ENTRY')  # Push: ⚡ на телефон
 
     # Partial TP (каждые 4 цикла)
     if cycle_count % 4 == 0:
-        ptp_msgs = await run_in_thread(check_partial_tp)
+        ptp_msgs = await run_in_thread(check_partial_tp, positions)
         for msg in (ptp_msgs[0] or []):
             add_alert('TP', msg)
             send_high_alert(msg, level='TP')  # Push: ⚡ на телефон
@@ -571,11 +571,11 @@ async def async_main_loop():
 
     # Стартовая проверка SL
     if old_positions:
-        sl_alerts, _ = await run_in_thread(check_and_fix_sl)
+        sl_alerts, _ = await run_in_thread(check_and_fix_sl, old_positions)
         if isinstance(sl_alerts, list):
             for a in sl_alerts:
                 add_alert('SL', a)
-        be_alerts, _ = await run_in_thread(check_breakeven_sl)
+        be_alerts, _ = await run_in_thread(check_breakeven_sl, old_positions)
         if isinstance(be_alerts, list):
             for a in be_alerts:
                 add_alert('SL', a)
@@ -659,7 +659,7 @@ async def async_main_loop():
             # ── Лёгкие проверки (каждый цикл) ──
             if new_positions:
                 # SL
-                sl_msgs, _ = await run_in_thread(check_and_fix_sl)
+                sl_msgs, _ = await run_in_thread(check_and_fix_sl, new_positions)
                 if isinstance(sl_msgs, list):
                     for a in sl_msgs:
                         add_alert('SL', a)
@@ -681,7 +681,7 @@ async def async_main_loop():
 
                 # Безубыток (каждые 4 цикла)
                 if cycle % 4 == 0:
-                    be_msgs, _ = await run_in_thread(check_breakeven_sl)
+                    be_msgs, _ = await run_in_thread(check_breakeven_sl, new_positions)
                     if isinstance(be_msgs, list):
                         for a in be_msgs:
                             add_alert('SL', a)

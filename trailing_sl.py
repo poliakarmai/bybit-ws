@@ -139,9 +139,9 @@ def simple_trailing_sl(positions):
 # Только вверх — никогда не опускаем SL.
 
 def tight_trailing_sl(positions):
-    """Агрессивный трейлинг для лонгов (идея Алексея):
-    +3% → SL = entry * 1.02 (первая активация).
-    Далее SL = max(текущий_SL, mark * 0.99) — всегда 1% ниже рынка.
+    """Агрессивный трейлинг (идея Алексея):
+    LONG: +3% → SL = entry * 1.02 (первая активация), далее SL = max(текущий_SL, mark * 0.99).
+    SHORT: -3% → SL = entry * 0.98 (первая активация), далее SL = min(текущий_SL, mark * 1.01).
     """
     actions = []
     for sym, p in positions.items():
@@ -151,32 +151,54 @@ def tight_trailing_sl(positions):
             p['entry'], p['mark'], p['side'], p['size'], p['positionIdx']
         )
         current_sl = p.get('stopLoss')
-        if size <= 0 or side != 'Buy':
-            continue  # Только LONG
-
-        pnl_pct = (mark - entry) / entry * 100
-
-        # Первая активация: +3%
-        if pnl_pct < 3:
+        if size <= 0:
             continue
 
-        # Если SL ещё не активирован (None или ниже/равен entry)
-        if current_sl is None or float(current_sl or 0) <= entry:
-            # Первый подъём: SL = entry + 2%
-            sl_target = round(entry * 1.02, 4)
-        else:
-            # SL уже активирован — подтягиваем до mark * 0.99
-            sl_target = round(mark * 0.99, 4)
-            # Не опускаем
-            if sl_target <= float(current_sl or 0):
+        if side == 'Buy':
+            pnl_pct = (mark - entry) / entry * 100
+
+            # Первая активация: +3%
+            if pnl_pct < 3:
                 continue
 
-        if sl_target > entry and sl_target < mark:
-            actions.append((sym, idx, side, size, sl_target))
-            log_event(
-                f'🎯 Tight SL {sym}: entry=${entry:.4f} mark=${mark:.4f} '
-                f'pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
-            )
+            if current_sl is None or float(current_sl or 0) <= entry:
+                sl_target = round(entry * 1.02, 4)
+            else:
+                sl_target = round(mark * 0.99, 4)
+                if sl_target <= float(current_sl or 0):
+                    continue
+
+            if sl_target > entry and sl_target < mark:
+                actions.append((sym, idx, side, size, sl_target))
+                log_event(
+                    f'🎯 Tight SL {sym}: entry=${entry:.4f} mark=${mark:.4f} '
+                    f'pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
+                )
+
+        elif side == 'Sell':
+            pnl_pct = (entry - mark) / entry * 100
+
+            # Первая активация: -3%
+            if pnl_pct < 3:
+                continue
+
+            if current_sl is None or float(current_sl or float('inf')) >= entry:
+                # Первый спуск: SL = entry - 2%
+                sl_target = round(entry * 0.98, 4)
+            else:
+                # SL уже активирован — подтягиваем до mark * 1.01
+                sl_target = round(mark * 1.01, 4)
+                # Не поднимаем
+                if sl_target >= float(current_sl or 0):
+                    continue
+
+            if sl_target < entry and sl_target > mark:
+                actions.append((sym, idx, side, size, sl_target))
+                log_event(
+                    f'🎯 Tight SL {sym}: entry=${entry:.4f} mark=${mark:.4f} '
+                    f'pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
+                )
+
     return actions
 
 
