@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 MAX_ADJUSTMENT = 0.20
 LEARN_LOG = Path.home() / ".local" / "share" / "bybit-ws" / "self_learn.jsonl"
 CANARY_STATE = Path.home() / ".local" / "share" / "bybit-ws" / "canary_state.json"
+_canary_lock = threading.Lock()   # защита read-modify-write canary_state.json
 
 # ── Canary constants ──
 CANARY_ENTRY_PCT = 0.10       # 10% входов используют canary-параметры
@@ -111,35 +113,36 @@ def get_canary_param(param_name: str, baseline_value: Any) -> Any:
 
 def record_canary_result(win: bool):
     """Записать результат canary-сделки."""
-    state = _load_canary_state()
-    if not state.get("active"):
-        return
+    with _canary_lock:
+        state = _load_canary_state()
+        if not state.get("active"):
+            return
 
-    state["canary_trades"] = state.get("canary_trades", 0) + 1
-    if win:
-        state["canary_wins"] = state.get("canary_wins", 0) + 1
+        state["canary_trades"] = state.get("canary_trades", 0) + 1
+        if win:
+            state["canary_wins"] = state.get("canary_wins", 0) + 1
 
-    state["history"].append({
-        "ts": datetime.now().isoformat(),
-        "action": "trade",
-        "win": win,
-        "canary_trades": state["canary_trades"],
-        "canary_wins": state["canary_wins"],
-    })
+        state["history"].append({
+            "ts": datetime.now().isoformat(),
+            "action": "trade",
+            "win": win,
+            "canary_trades": state["canary_trades"],
+            "canary_wins": state["canary_wins"],
+        })
 
-    # Проверяем не пора ли финализировать
-    started = state.get("started_at")
-    if started and state["canary_trades"] >= 10:
-        try:
-            started_ts = datetime.fromisoformat(started)
-            hours_elapsed = (datetime.now() - started_ts).total_seconds() / 3600
-            if hours_elapsed >= CANARY_WINDOW_HOURS:
-                _finalize_canary(state)
-                return
-        except Exception:
-            pass
+        # Проверяем не пора ли финализировать
+        started = state.get("started_at")
+        if started and state["canary_trades"] >= 10:
+            try:
+                started_ts = datetime.fromisoformat(started)
+                hours_elapsed = (datetime.now() - started_ts).total_seconds() / 3600
+                if hours_elapsed >= CANARY_WINDOW_HOURS:
+                    _finalize_canary(state)
+                    return
+            except Exception:
+                pass
 
-    _save_canary_state(state)
+        _save_canary_state(state)
 
 
 def _finalize_canary(state: dict):

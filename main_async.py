@@ -101,10 +101,11 @@ def _clean_pump_state(data_dir, positions):
 
 
 def _import_bybit_trades(data_dir):
-    """Sync helper: import closed trades from Bybit API + dedup."""
+    """Sync helper: import closed trades from Bybit API + dedup + canary tracking."""
     import json as _json
     from .api import bybit
     from .alerts import log_event
+    from .journal.self_learn import record_canary_result as _record_canary
     trades_file = data_dir / 'trades.jsonl'
     existing_keys = set()
     if trades_file.exists():
@@ -127,14 +128,21 @@ def _import_bybit_trades(data_dir):
                 qty = float(item.get('qty', 0))
                 price = float(item.get('avgExitPrice', item.get('avgEntryPrice', 0)))
                 ts_val = int(item.get('updatedTime', 0)) / 1000
+                pnl = float(item.get('closedPnl', 0))
                 key = (sym, ts_val, side)
                 if key not in existing_keys and qty > 0:
                     _f.write(_json.dumps({
                         'symbol': sym, 'side': side, 'qty': qty,
                         'price': price, 'ts': ts_val, 'fee': 0, 'source': 'bybit_history',
+                        'pnl': pnl,
                     }) + '\n')
                     imported += 1
                     existing_keys.add(key)
+                    # Проброс в canary-трекер (no-op если canary не активен)
+                    try:
+                        _record_canary(pnl > 0)
+                    except Exception:
+                        pass
     log_event(f'📥 Импорт истории Bybit: {imported} новых трейдов (всего {len(existing_keys)})')
     return imported
 
@@ -699,32 +707,20 @@ async def async_main_loop():
             # ── Self-learning + Post-trade анализ (раз в сутки) ──
             if cycle % 2880 == 1:
                 try:
-                    from .journal import analyzer as _journal_analyzer
+                    from .journal.adapter import load_from_sqlite
                     from .journal.self_learn import apply_journal_insights as _apply_insights
                     from .post_trade import analyze_clusters as _cluster_analysis
 
-                    # Загружаем trades из файла (в потоке)
-                    trades_data = await run_in_thread(_load_trades_for_journal, DATA_DIR)
-                    trades = []
-                    raw_trades = trades_data[0] if isinstance(trades_data, tuple) else (trades_data or [])
-                    for _d in raw_trades:
-                        try:
-                            trades.append(_journal_analyzer.Trade(
-                                symbol=_d.get('symbol', ''),
-                                side=_d.get('side', 'buy'),
-                                quantity=float(_d.get('qty', 0)),
-                                price=float(_d.get('price', 0)),
-                                fee=float(_d.get('fee', 0)),
-                                timestamp=float(_d.get('ts', 0)),
-                            ))
-                        except Exception:
-                            pass
-
-                    journal = _journal_analyzer.analyze(trades) if trades else None
-                    if journal:
+                    # Загружаем из SQLite (SSOT) — адаптер создаёт парные entry+close сделки
+                    result = await run_in_thread(load_from_sqlite)
+                    journal = result[0] if isinstance(result, tuple) else result
+                    if journal and 'error' not in journal:
                         adjustments = await _apply_insights(journal, cfg)
                         if adjustments:
                             log_event(f'🧠 Self-learn: {len(adjustments)} adjustments applied')
+                    else:
+                        log_event(f'⚠️ self_learn: {journal.get("error", "no data")}' if journal else '⚠️ self_learn: no data')
+
                     clusters = _cluster_analysis()
                     if clusters:
                         blocked = clusters.get('blocked', [])
