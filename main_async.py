@@ -493,13 +493,6 @@ async def async_main_loop():
     except Exception as e:
         log_event(f'⚠️ ensure_today error: {e}')
 
-    # ── Импорт истории Bybit (закрытые PnL) для журнала — раз в 10 циклов ──
-    if cycle % 10 == 0:
-        try:
-            imported = _import_bybit_trades(DATA_DIR)
-        except Exception as e:
-            log_event(f'⚠️ bybit history import: {e}')
-
     # ── Фаза 5.2: Проверить Optuna feature flag ──
     if os.environ.get('BYBIT_OPTUNA_ENABLED', '0') == '1':
         try:
@@ -573,6 +566,13 @@ async def async_main_loop():
         try:
             cycle += 1
             t0 = time.monotonic()
+
+            # ── Импорт истории Bybit (закрытые PnL) — раз в 10 циклов ──
+            if cycle % 10 == 0:
+                try:
+                    _import_bybit_trades(DATA_DIR)
+                except Exception as e:
+                    log_event(f'⚠️ bybit history import: {e}')
 
             if cycle <= 2 or cycle % 10 == 0:
                 log_event(f'🔄 cycle #{cycle}: starting...')
