@@ -113,8 +113,10 @@ def test_tight_continue_trail(mock_m):
 
 @patch('bybit_ws.trailing_sl.is_manual_position', return_value=False)
 def test_tight_short_skip(mock_m):
-    print("\n─── tight_trailing: SHORT → бездействие ───")
-    check("не трогаем шорты", len(tight_trailing_sl({'ETHUSDT': {'entry': 100, 'mark': 82, 'side': 'Sell', 'size': 1, 'positionIdx': 1, 'stopLoss': None}})) == 0)
+    print("\n─── tight_trailing: SHORT -18% → SL=entry*0.98 ───")
+    short_pos = {'ETHUSDT': {'entry': 100, 'mark': 82, 'side': 'Sell', 'size': 1, 'positionIdx': 1, 'stopLoss': None}}
+    result = tight_trailing_sl(short_pos)
+    check("short tight активирован", len(result) == 1 and result[0][4] == 98.0)
 
 @patch('bybit_ws.trailing_sl.is_manual_position', return_value=True)
 def test_tight_manual_skip(mock_m):
