@@ -493,61 +493,12 @@ async def async_main_loop():
     except Exception as e:
         log_event(f'⚠️ ensure_today error: {e}')
 
-    # ── Импорт истории Bybit (закрытые PnL) для журнала ──
-    try:
-        from .api import bybit
-        import json as _json
-        trades_file = DATA_DIR / 'trades.jsonl'
-        existing_keys = set()
-        if trades_file.exists():
-            with open(trades_file) as _f:
-                for _line in _f:
-                    _line = _line.strip()
-                    if _line:
-                        try:
-                            _d = _json.loads(_line)
-                            existing_keys.add((_d.get('symbol',''), _d.get('ts',0), _d.get('side','')))
-                        except Exception:
-                            pass
-        hist_result = await run_in_thread(bybit, 'GET', '/v5/position/closed-pnl?category=linear&limit=100')
-        hist = hist_result[0] if isinstance(hist_result, tuple) else hist_result
-        imported = 0
-        if hist and hist.get('retCode') == 0:
-            with open(trades_file, 'a') as _f:
-                for item in hist['result'].get('list', []):
-                    sym = item.get('symbol', '')
-                    side = 'sell' if item.get('side') == 'Sell' else 'buy'
-                    qty = float(item.get('qty', 0))
-                    price = float(item.get('avgExitPrice', item.get('avgEntryPrice', 0)))
-                    ts_val = int(item.get('updatedTime', 0)) / 1000
-                    key = (sym, ts_val, side)
-                    if key not in existing_keys and qty > 0:
-                        _f.write(_json.dumps({
-                            'symbol': sym, 'side': side, 'qty': qty,
-                            'price': price, 'pnl': float(item.get('closedPnl', 0)),
-                            'ts': ts_val, 'fee': 0, 'source': 'bybit_history',
-                        }) + '\n')
-                        imported += 1
-                        existing_keys.add(key)
-                        # ── Post-trade features: сохраняем для кластерного анализа ──
-                        try:
-                            from .post_trade import save_trade_features
-                            save_trade_features({
-                                'symbol': sym,
-                                'side': side,
-                                'pnl': float(item.get('closedPnl', 0)),
-                                'exit_price': price,
-                                'entry_price': float(item.get('avgEntryPrice', 0)),
-                                'closed_at': ts_val,
-                                'qty': qty,
-                                'regime': 'NEUTRAL',
-                                'session': 'normal',
-                            })
-                        except Exception:
-                            pass
-            log_event(f'📥 Импорт истории Bybit: {imported} новых трейдов (всего {len(existing_keys)})')
-    except Exception as e:
-        log_event(f'⚠️ bybit history import: {e}')
+    # ── Импорт истории Bybit (закрытые PnL) для журнала — раз в 10 циклов ──
+    if cycle % 10 == 0:
+        try:
+            imported = _import_bybit_trades(DATA_DIR)
+        except Exception as e:
+            log_event(f'⚠️ bybit history import: {e}')
 
     # ── Фаза 5.2: Проверить Optuna feature flag ──
     if os.environ.get('BYBIT_OPTUNA_ENABLED', '0') == '1':
