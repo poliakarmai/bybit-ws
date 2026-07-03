@@ -462,7 +462,7 @@ def auto_entry_scan(positions):
         sym_min_score = _optuna_min_scores.get(sym, min_score)
         try:
             from bybit_ws.journal.self_learn import get_canary_param
-            sym_min_score = get_canary_param('min_score', sym_min_score)
+            sym_min_score = get_canary_param('min_score', sym_min_score, symbol=sym, side='buy')
         except Exception:
             pass
         if result and result['score'] >= sym_min_score:

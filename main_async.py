@@ -105,7 +105,7 @@ def _import_bybit_trades(data_dir):
     import json as _json
     from .api import bybit
     from .alerts import log_event
-    from .journal.self_learn import record_canary_result as _record_canary
+    from .journal.self_learn import record_canary_result as _record_canary, match_canary_entry as _match_canary
     trades_file = data_dir / 'trades.jsonl'
     existing_keys = set()
     if trades_file.exists():
@@ -138,9 +138,11 @@ def _import_bybit_trades(data_dir):
                     }) + '\n')
                     imported += 1
                     existing_keys.add(key)
-                    # Проброс в canary-трекер (no-op если canary не активен)
+                    # Проброс в canary-трекер: только для канареечных входов
                     try:
-                        _record_canary(pnl > 0)
+                        entry_ts = int(item.get('createdTime', 0)) / 1000  # время входа
+                        if _match_canary(sym, side, ts_val, window=int(ts_val - entry_ts) + 3600):
+                            _record_canary(pnl > 0)
                     except Exception:
                         pass
     log_event(f'📥 Импорт истории Bybit: {imported} новых трейдов (всего {len(existing_keys)})')

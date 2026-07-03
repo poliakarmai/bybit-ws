@@ -25,12 +25,15 @@ logger = logging.getLogger(__name__)
 MAX_ADJUSTMENT = 0.20
 LEARN_LOG = Path.home() / ".local" / "share" / "bybit-ws" / "self_learn.jsonl"
 CANARY_STATE = Path.home() / ".local" / "share" / "bybit-ws" / "canary_state.json"
+CANARY_ENTRIES = Path.home() / ".local" / "share" / "bybit-ws" / "canary_entries.jsonl"
 _canary_lock = threading.Lock()   # защита read-modify-write canary_state.json
+_entries_lock = threading.Lock()  # защита canary_entries.jsonl
 
 # ── Canary constants ──
 CANARY_ENTRY_PCT = 0.10       # 10% входов используют canary-параметры
 CANARY_WINDOW_HOURS = 48      # окно оценки до promote/rollback
 CANARY_WR_DROP_THRESHOLD = 0.10  # падение WR >10% → откат
+CANARY_MATCH_WINDOW = 3600    # матчинг canary-входа с закрытием: ±1ч
 
 
 def _load_canary_state() -> dict:
@@ -98,17 +101,102 @@ def should_use_canary() -> bool:
     return random.random() < CANARY_ENTRY_PCT
 
 
-def get_canary_param(param_name: str, baseline_value: Any) -> Any:
-    """Получить значение параметра: canary или baseline."""
+def get_canary_param(param_name: str, baseline_value: Any,
+                     symbol: str = None, side: str = None) -> Any:
+    """Получить значение параметра: canary или baseline.
+
+    Если возвращает canary-значение и передан symbol — маркирует вход
+    в canary_entries.jsonl для последующего матчинга с закрытием.
+    """
     if not should_use_canary():
         return baseline_value
 
     state = _load_canary_state()
     params = state.get("params", {})
     if param_name in params:
-        logger.debug(f"canary: using {param_name}={params[param_name]} (baseline={baseline_value})")
-        return params[param_name]
+        canary_val = params[param_name]
+        logger.debug(f"canary: using {param_name}={canary_val} (baseline={baseline_value})")
+        if symbol:
+            mark_canary_entry(symbol, side or 'buy', time.time())
+        return canary_val
     return baseline_value
+
+
+def mark_canary_entry(symbol: str, side: str, entry_ts: float):
+    """Записать canary-вход для будущего матчинга с закрытием."""
+    entry = {
+        "symbol": symbol,
+        "side": side,
+        "entry_ts": entry_ts,
+        "marked_at": datetime.now().isoformat(),
+    }
+    with _entries_lock:
+        try:
+            CANARY_ENTRIES.parent.mkdir(parents=True, exist_ok=True)
+            with open(CANARY_ENTRIES, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.warning(f"canary mark entry: {e}")
+
+
+def match_canary_entry(symbol: str, side: str, close_ts: float,
+                       window: int = None) -> bool:
+    """Проверить: был ли canary-вход для этого символа в окрестности close_ts.
+
+    Возвращает True и удаляет совпавшую запись из файла.
+    window — секунды до close_ts (по умолчанию CANARY_MATCH_WINDOW).
+    """
+    if window is None:
+        window = CANARY_MATCH_WINDOW
+
+    with _entries_lock:
+        if not CANARY_ENTRIES.exists():
+            return False
+        try:
+            lines = CANARY_ENTRIES.read_text().strip().split("\n")
+        except Exception:
+            return False
+
+        matched = False
+        kept = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except Exception:
+                kept.append(line)
+                continue
+            if (entry.get("symbol") == symbol
+                    and entry.get("side") == side
+                    and close_ts - entry.get("entry_ts", 0) <= window
+                    and close_ts >= entry.get("entry_ts", 0)):
+                matched = True
+                # Не сохраняем — убираем совпавшую запись
+            else:
+                kept.append(line)
+
+        # Периодически чистим старые (>48ч)
+        now = time.time()
+        kept = [l for l in kept if _entry_age(l) < CANARY_WINDOW_HOURS * 3600
+                or _entry_age(l) < 0]  # keep broken lines
+
+        try:
+            CANARY_ENTRIES.write_text("\n".join(kept) + ("\n" if kept else ""))
+        except Exception:
+            pass
+
+    return matched
+
+
+def _entry_age(line: str) -> float:
+    """Возраст записи canary_entries в секундах (>0 — старее, <0 — сломана)."""
+    try:
+        entry = json.loads(line)
+        return time.time() - entry.get("entry_ts", 0)
+    except Exception:
+        return -1
 
 
 def record_canary_result(win: bool):
