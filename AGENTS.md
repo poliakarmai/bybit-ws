@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Карта проекта, команды, правила.  
-> Обновлено: 2026-07-01 (v7.6 — positions guard, RPC NameError, send_summary fix)
+> Обновлено: 2026-07-04 (v7.7 — codebase-memory MCP: 14 тулов структурного поиска)
 
 ## Что это
 
@@ -689,6 +689,69 @@ grep "truncated\|PERM_SKIP" ~/.local/share/bybit-ws/events.log | tail -5
 - [ ] `df -h ~/.local/share/bybit-ws/` → >500MB свободно
 - [ ] `free -h` → >200MB RAM свободно
 - [ ] `bash deploy.sh` → атомарный swap
+
+## ═══════════════════════════════════════
+## CODEBASE-MEMORY MCP — структурный поиск (v7.7)
+## ═══════════════════════════════════════
+
+**Вместо grep'а используй `mcp_codebase_memory_*`.** Проект проиндексирован tree-sitter'ом: 2681 узел, 8514 рёбер, поиск <1мс.
+
+### Основные тулы
+
+| Тула | Назначение | Пример |
+|------|-----------|--------|
+| `search_graph` | BM25-поиск по коду | `query="self learning canary"` |
+| `trace_path` | Граф вызовов (callers/callees) | `function_name="auto_entry_scan"`, `depth=2` |
+| `get_architecture` | Архитектурный срез: кластеры, хотспоты, слои | `aspects=["summary"]` |
+| `query_graph` | Cypher-запросы (сложные паттерны) | `WHERE f.transitive_loop_depth >= 3` |
+| `search_code` | Текстовый поиск (grep-замена) | `pattern="def canary"` |
+| `get_code_snippet` | Фрагмент кода функции/класса | `qualified_name="home-openclaw-bybit-ws..."` |
+| `detect_changes` | Git diff → affected symbols + risk | `since="HEAD~5"` |
+| `get_graph_schema` | Схема графа (node labels, edge types) | — |
+| `index_repository` | Индексация репозитория | `repo_path="/abs/path"` |
+| `index_status` | Статус индексации | — |
+| `list_projects` | Список проектов | — |
+| `delete_project` | Удалить проект из индекса | — |
+| `manage_adr` | Architecture Decision Records | — |
+| `ingest_traces` | Инжест трейсов выполнения | — |
+
+### Когда что использовать
+
+| Задача | Инструмент | Почему не grep |
+|--------|-----------|----------------|
+| «Где определяется canary?» | `search_graph(query="canary")` | BM25-ранжирование, находит definition, а не usage |
+| «Кто вызывает auto_entry_scan?» | `trace_path(direction="inbound")` | grep покажет usage, но не граф на 2 хопа |
+| «Какие hotspots в проекте?» | `get_architecture` | grep не знает fan-in/fan-out |
+| «Где O(n²) в циклах?» | `query_graph` → `transitive_loop_depth` | grep не понимает структуру |
+| «Что сломал последний коммит?» | `detect_changes(since="HEAD~1")` | git diff покажет текст, но не affected symbols |
+| «Покажи код функции» | `get_code_snippet` | read_file требует знать файл + строки |
+
+### Боевые Cypher-запросы
+
+```cypher
+-- Хотспоты: глубокая вложенность циклов
+MATCH (f:Function) WHERE f.transitive_loop_depth >= 3
+RETURN f.qualified_name, f.transitive_loop_depth
+ORDER BY f.transitive_loop_depth DESC LIMIT 10
+
+-- O(n²): линейный поиск внутри цикла
+MATCH (f:Function) WHERE f.linear_scan_in_loop >= 1
+RETURN f.qualified_name, f.linear_scan_in_loop, f.transitive_loop_depth
+
+-- Самые связанные функции (high fan-in = risky to change)
+MATCH (f:Function) WHERE f.fan_in > 20
+RETURN f.qualified_name, f.fan_in ORDER BY f.fan_in DESC
+
+-- Неиспользуемые функции (fan-in=0, fan-out=0)
+MATCH (f:Function) WHERE f.fan_in = 0 AND f.fan_out = 0
+RETURN f.qualified_name, f.file_path
+```
+
+### Питфоллы
+
+- **Абсолютные пути.** Индексация `repo_path="."` → повреждённый проект. Всегда `"$PWD"`.
+- **Имя проекта:** `/home/openclaw/bybit-ws` → `home-openclaw-bybit-ws`. Проверить: `list_projects`.
+- **После коммита индекс не обновляется автоматически.** Перед `detect_changes` — переиндексировать если были изменения.
 
 ## ═══════════════════════════════════════
 ## ГЛОССАРИЙ
