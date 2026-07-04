@@ -205,7 +205,7 @@ def _run_heavy_cycle(cfg, new_positions, new_orders, cycle_count, now_ts):
         for fn, alert_type in [(check_pumps, 'STOP'), (check_weekly_pumps, 'STOP'),
                                 (check_rsi_divergence, 'STOP'),
                                 (check_squeeze, 'INFO'), (check_funding_pump, 'STOP')]:
-            msgs, err = _a(fn, new_positions if fn == check_pumps else None) if fn in (check_pumps, check_weekly_pumps) else _a(fn)
+            msgs, err = _a(fn, new_positions if fn == check_pumps else None) if fn in {check_pumps, check_weekly_pumps} else _a(fn)
             if err: log_event(f'⏱️ {err}: таймаут')
             else:
                 for msg in (msgs or []): add_alert(alert_type, msg)
