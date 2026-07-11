@@ -186,6 +186,8 @@ def check_and_fix_sl(positions=None):
                 data = bybit('POST', '/v5/position/trading-stop', body)
                 if data and data.get('retCode') == 0:
                     alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, +3% от входа)')
+                elif data and data.get('retMsg') == 'not modified':
+                    pass  # SL already at target — not an error
                 else:
                     err = data.get('retMsg', '?') if data else 'no response'
                     alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
@@ -198,6 +200,8 @@ def check_and_fix_sl(positions=None):
                 data = bybit('POST', '/v5/position/trading-stop', body)
                 if data and data.get('retCode') == 0:
                     alerts.append(f'🛡 BE-SL {sym}: ${sl_price:.4f} (безубыток, -3% от входа)')
+                elif data and data.get('retMsg') == 'not modified':
+                    pass  # SL already at target
                 else:
                     err = data.get('retMsg', '?') if data else 'no response'
                     alerts.append(f'⚠️ BE-SL {sym} НЕ встал: {err}')
@@ -286,6 +290,8 @@ def check_and_fix_sl(positions=None):
         if data and data.get('retCode') == 0:
             msg = f'🛡 SL {sym}: ${sl_price:.4f} ({sl_desc}, вход ${entry:.4f})'
             alerts.append(msg)
+        elif data and data.get('retMsg') == 'not modified':
+            pass  # SL already at target — not an error
         else:
             err = data.get('retMsg', '?') if data else 'no response'
             msg = f'⚠️ SL {sym} НЕ встал: {err}'
@@ -353,6 +359,8 @@ def check_breakeven_sl(positions=None):
         data = bybit('POST', '/v5/position/trading-stop', body)
         if data and data.get('retCode') == 0:
             alerts.append(f'🛡 Б/у-SL {sym}: ${sl_price:.4f} ({sl_desc})')
+        elif data and data.get('retMsg') == 'not modified':
+            pass  # SL already at target
         else:
             err = data.get('retMsg', '?') if data else 'no response'
             log_event(f'⚠️ Б/у-SL {sym} НЕ встал: {err}')
