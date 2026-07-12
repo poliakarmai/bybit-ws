@@ -7,6 +7,26 @@
 
 ---
 
+## [7.9] — 2026-07-12
+
+### Added
+- **Unified SL Manager** (`unified_sl.py`): 5 механизмов SL объединены в один
+  с приоритетом tight_trail > simple_trail > hard_trail > breakeven > default.
+  Сокращает API-вызовы к Bybit на ~75% (16/цикл → 4/цикл).
+
+### Fixed
+- `unified_sl.py` не копировался в `bybit_ws/` при деплое → ModuleNotFoundError
+- Спам «SL НЕ встал: not modified» в auto_sl.py — обрабатывается как no-op
+
+### Changed
+- smoke-тесты: 11 → 52
+
+## [7.7] — 2026-07-04
+
+### Changed
+- README обновлён до v7.8
+- AGENTS.md сжат по HumanLayer harness engineering
+
 ## [7.6] — 2026-07-01
 
 ### Added
