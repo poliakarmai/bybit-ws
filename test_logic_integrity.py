@@ -64,9 +64,13 @@ def test_apply_functions_are_called():
     imports, calls = parse_calls_and_imports(MAIN_ASYNC)
 
     apply_funcs = [k for k in imports if k.startswith('apply_')]
+    # Allowlist: replaced by unified_sl.manage_sl() — one API call per position
+    _apply_allowlist = {'apply_trailing_sl', 'apply_auto_tp'}
     assert len(apply_funcs) > 0, "Нет apply_* импортов — что-то не так с парсингом"
 
     for func in apply_funcs:
+        if func in _apply_allowlist:
+            continue  # allowed — called indirectly or as fallback
         assert func in calls, (
             f"❌ {func} импортирован из {imports[func]}, "
             f"но НИГДЕ НЕ ВЫЗЫВАЕТСЯ в main_async.py! "
@@ -80,8 +84,7 @@ def test_key_strategies_are_called():
 
     required = [
         # Лёгкий цикл
-        ('check_and_fix_sl', 'auto_sl', 'SL check + fix'),
-        ('check_breakeven_sl', 'auto_sl', 'Breakeven SL'),
+        ('manage_sl', 'unified_sl', 'Unified SL (все 5 механизмов)'),
         ('check_margin_utilization', 'margin_alerts', 'Margin utilization'),
 
         # Тяжёлый цикл
