@@ -116,8 +116,7 @@ def get_canary_param(param_name: str, baseline_value: Any,
     if param_name in params:
         canary_val = params[param_name]
         logger.debug(f"canary: using {param_name}={canary_val} (baseline={baseline_value})")
-        if symbol:
-            mark_canary_entry(symbol, side or 'buy', time.time())
+        # NOTE: mark_canary_entry() moved to auto_entry.py — только после реального входа
         return canary_val
     return baseline_value
 

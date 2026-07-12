@@ -681,6 +681,13 @@ def auto_entry_scan(positions):
                     f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
+                # ── Canary: маркируем вход для последующего матчинга при закрытии ──
+                try:
+                    from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
+                    if should_use_canary():
+                        mark_canary_entry(sym, 'buy', time.time())
+                except Exception:
+                    pass
                 # -- Фаза 5.3: A/B-тест стратегий (успешный вход) --
                 try:
                     from .ab_test import is_ab_enabled, assign_variant, _generate_signal_id, record_paper_entry
