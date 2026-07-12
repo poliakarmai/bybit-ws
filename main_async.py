@@ -106,7 +106,12 @@ def _import_bybit_trades(data_dir):
     import json as _json
     from .api import bybit
     from .alerts import log_event
-    from .journal.self_learn import record_canary_result as _record_canary, match_canary_entry as _match_canary
+    from .journal.self_learn import (
+        record_canary_result as _record_canary,
+        match_canary_entry as _match_canary,
+        record_exit as _record_exit,        # NEW v4
+        record_trade_result as _record_streak,  # NEW v4
+    )
     trades_file = data_dir / 'trades.jsonl'
     existing_keys = set()
     if trades_file.exists():
@@ -139,9 +144,29 @@ def _import_bybit_trades(data_dir):
                     }) + '\n')
                     imported += 1
                     existing_keys.add(key)
+                    # ── v4: Exit reason tracking + streak ──
+                    entry_ts = int(item.get('createdTime', 0)) / 1000
+                    try:
+                        hold_h = (ts_val - entry_ts) / 3600 if entry_ts > 0 else 0
+                        # Детект причины выхода
+                        exit_reason = 'Unknown'
+                        # Проверяем stopLoss/takeProfit поля
+                        sl_price = item.get('stopLoss', '')
+                        tp_price = item.get('takeProfit', '')
+                        if sl_price and float(sl_price) > 0:
+                            exit_reason = 'SL'
+                        elif tp_price and float(tp_price) > 0:
+                            exit_reason = 'TP'
+                        elif hold_h > 48:
+                            exit_reason = 'Time'  # Долгий холд → скорее time exit
+                        _record_exit(sym, side, pnl, exit_reason, hold_h,
+                                     float(item.get('avgEntryPrice', 0)),
+                                     float(item.get('avgExitPrice', 0)))
+                        _record_streak(pnl)
+                    except Exception:
+                        pass
                     # Проброс в canary-трекер: только для канареечных входов
                     try:
-                        entry_ts = int(item.get('createdTime', 0)) / 1000  # время входа
                         if _match_canary(sym, side, ts_val, window=int(ts_val - entry_ts) + 3600):
                             _record_canary(pnl > 0)
                     except Exception:

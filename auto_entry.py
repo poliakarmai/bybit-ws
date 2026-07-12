@@ -458,11 +458,15 @@ def auto_entry_scan(positions):
         if not bb:
             continue
         result = full_score_coin(sym, bb, ticker_line)
-        # Per-symbol min_score: Canary → Optuna → режим → глобальный
+        # v4: Per-symbol min_score: canary → symbol_profile → session → optuna → global
         sym_min_score = _optuna_min_scores.get(sym, min_score)
         try:
-            from bybit_ws.journal.self_learn import get_canary_param
+            from bybit_ws.journal.self_learn import get_canary_param, get_symbol_params, get_session_modifier
             sym_min_score = get_canary_param('min_score', sym_min_score, symbol=sym, side='buy')
+            # Per-symbol profile override
+            sym_min_score = get_symbol_params(sym, 'min_score', sym_min_score)
+            # Session modifier
+            sym_min_score = int(sym_min_score * get_session_modifier('min_score'))
         except Exception:
             pass
         if result and result['score'] >= sym_min_score:
@@ -476,6 +480,17 @@ def auto_entry_scan(positions):
     for s in scored:
         try:
             sym = s['symbol']
+
+            # ── v4: Streak check — блокируем вход при серии лосей ──
+            try:
+                from bybit_ws.journal.self_learn import get_streak_status
+                streak = get_streak_status()
+                if streak.get("blocked"):
+                    log_event(f'🛑 STREAK BLOCK: {streak["consecutive_losses"]} losses — входы заблокированы на {streak["remaining_hours"]:.1f}ч')
+                    continue
+            except Exception:
+                pass
+
             cooldown = _load_cooldown()
             cfg = Config()
             cooldown_sl = cfg.strategy.long.get('cooldown_after_sl', 14400)
@@ -508,6 +523,16 @@ def auto_entry_scan(positions):
             sym_discount = _get_symbol_param(sym, 'entry_discount', 1.0)
             price = round(bb2['lower'] * sym_discount * entry_discount_mult, 4)
             qty = math.ceil(margin * 3 / price)
+            # ── v4: Streak size multiplier — половинный размер при 3+ лосях ──
+            try:
+                from bybit_ws.journal.self_learn import get_streak_status
+                streak = get_streak_status()
+                mult = streak.get("size_multiplier", 1.0)
+                if mult < 1.0:
+                    qty = max(1, math.ceil(qty * mult))
+                    log_event(f'⚠️ STREAK SIZE: {streak["consecutive_losses"]} losses → size ×{mult} → {qty}')
+            except Exception:
+                pass
             if qty < 1:
                 continue
 
