@@ -45,7 +45,8 @@ from .api import (
 from .state_db import adb
 
 # Синхронные модули (вызываются через executor)
-from .auto_sl import check_and_fix_sl, check_breakeven_sl
+from .auto_sl import check_and_fix_sl, check_breakeven_sl  # legacy — kept for reference
+from .unified_sl import manage_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
 from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, tight_trailing_sl, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
@@ -525,13 +526,9 @@ async def async_main_loop():
 
     # Стартовая проверка SL
     if old_positions:
-        sl_alerts, _ = await run_in_thread(check_and_fix_sl, old_positions)
+        sl_alerts, _ = await run_in_thread(manage_sl, old_positions, 0)
         if isinstance(sl_alerts, list):
             for a in sl_alerts:
-                add_alert('SL', a)
-        be_alerts, _ = await run_in_thread(check_breakeven_sl, old_positions)
-        if isinstance(be_alerts, list):
-            for a in be_alerts:
                 add_alert('SL', a)
 
     # RPC — запускаем в отдельном потоке (как в main.py)
@@ -619,33 +616,11 @@ async def async_main_loop():
 
             # ── Лёгкие проверки (каждый цикл) ──
             if new_positions:
-                # SL
-                sl_msgs, _ = await run_in_thread(check_and_fix_sl, new_positions)
+                # Unified SL — все механизмы в одном, 1 API-вызов на позицию
+                sl_msgs, _ = await run_in_thread(manage_sl, new_positions, cycle)
                 if isinstance(sl_msgs, list):
                     for a in sl_msgs:
                         add_alert('SL', a)
-
-                # Трейлинг (жёсткий: BB + >15%)
-                trail_actions, _ = await run_in_thread(trailing_sl, new_positions)
-                if trail_actions:
-                    await run_in_thread(apply_trailing_sl, trail_actions)
-
-                # Простой трейлинг (каждые +5% прибыли, без BB-условий)
-                simple_trail_actions, _ = await run_in_thread(simple_trailing_sl, new_positions)
-                if simple_trail_actions:
-                    await run_in_thread(apply_trailing_sl, simple_trail_actions)
-
-                # Tight трейлинг (идея Алексея: +3% → SL=entry+2%, дальше mark×0.99)
-                tight_trail_actions, _ = await run_in_thread(tight_trailing_sl, new_positions)
-                if tight_trail_actions:
-                    await run_in_thread(apply_trailing_sl, tight_trail_actions)
-
-                # Безубыток (каждые 4 цикла)
-                if cycle % 4 == 0:
-                    be_msgs, _ = await run_in_thread(check_breakeven_sl, new_positions)
-                    if isinstance(be_msgs, list):
-                        for a in be_msgs:
-                            add_alert('SL', a)
 
                 # Маржа
                 margin_msgs, _ = await run_in_thread(check_margin_utilization, new_positions)
