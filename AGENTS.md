@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-07-04 (v7.8 — сжато по HumanLayer harness engineering)
+> Обновлено: 2026-07-12 (v7.9 — Unified SL)
 
 ## Что это
 
@@ -13,16 +13,17 @@ Systemd-сервис `bybit-ws-async`, ~45 MB RAM, SQLite — SSOT.
 ```
 bybit-ws/
 ├── main_async.py         ← Главный цикл (async, 30с)
-├── auto_entry.py         ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
-├── auto_sl.py            ← ATR-adaptive SL (capped -50%/+50%)
-├── auto_tp.py            ← ATR-based TP (1×/2×/3× ATR)
+├── unified_sl.py          ← Unified SL (5→1, приоритет: tight>simple>hard>BE>default)
+├── auto_entry.py          ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
+├── auto_sl.py             ← ATR-adaptive SL (legacy, заменён unified_sl)
+├── auto_tp.py             ← ATR-based TP (1×/2×/3× ATR)
 ├── risk_manager.py       ← Risk + BlackSwan (3-tier) + emergency_close
 ├── entry_judge.py        ← Cross-model judge (Nemotron→DeepSeek, fail-closed)
 ├── rpc.py                ← JSON-RPC (:8766) + /kill_switch + /metrics
 ├── state_db.py           ← SQLite SSOT (WAL, busy_timeout=5с)
 ├── journal/              ← Самообучение + Canary mode
 ├── deploy.sh             ← Атомарный деплой
-└── test_smoke.py         ← 11 интеграционных тестов
+└── test_smoke.py         ← 52 интеграционных тестов
 ```
 
 ## Запуск

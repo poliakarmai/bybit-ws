@@ -2,11 +2,11 @@
 
 **Bollinger Grid с авто-входами, ATR-адаптивными SL/TP, трейлингом, DCA, self-learning и post-trade кластерным анализом. MCP-сервер для AI-агентов. Telegram/ntfy-алерты.**
 
-[![Version](https://img.shields.io/badge/version-7.6.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-45%2F45-brightgreen)](./test_smoke.py) [![Phase 7.6](https://img.shields.io/badge/phase_7.6-✓-green)](./AGENTS.md)
+[![Version](https://img.shields.io/badge/version-7.9.0-blue)](./CHANGELOG.md) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen)](./test_smoke.py) [![Phase 7.9](https://img.shields.io/badge/phase_7.9-✓-green)](./AGENTS.md)
 
 ---
 
-## Архитектура модулей (v7.3)
+## Архитектура модулей (v7.9)
 
 ```
 ┌─────────────────── MAIN LOOP (async, 30s) ───────────────────┐
@@ -14,8 +14,7 @@
 │                                                               │
 │  Каждый цикл:                                                 │
 |    • state_db.py        — SQLite SSOT (WAL, 11 таблиц)       |
-│    • auto_sl.py         — ATR-adaptive SL v2 (±k×ATR, 2% floor)│
-│    • trailing_sl.py     — подтяжка SL (LONG + SHORT)          │
+|    • unified_sl.py      — Unified SL (5 механизмов → 1)      |
 │    • auto_tp.py         — ATR-based TP (1.0×/2.0×/3.0× ATR)  │
 │    • time_exit.py       — Time exit (6ч/48ч)                  │
 │    • риск-менеджмент     — Circuit breaker, BlackSwan 3-tier  │
