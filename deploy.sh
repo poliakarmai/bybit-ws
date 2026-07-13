@@ -73,5 +73,7 @@ for i in $(seq 1 $MAX_CHECKS); do
 done
 
 echo "✅ Деплой успешен"
+git rev-parse HEAD > ~/.local/share/bybit-ws/.last_deploy_sha
+echo "Записан SHA: $(git rev-parse --short HEAD)"
 echo "   Версия: $(git -C "$REPO" rev-parse --short HEAD)"
 exit 0
