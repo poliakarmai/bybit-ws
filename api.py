@@ -366,6 +366,10 @@ def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
         return True
     else:
         err = data.get('retMsg', '?') if data else 'no response'
+        if 'not modified' in str(err).lower() or 'unchanged' in str(err).lower():
+            return True  # SL already at this level — success, не спамим
+        if '110043' in str(err):
+            return True  # уже существует
         log_event(f'❌ SL ошибка {symbol}: {err}')
         return False
 
