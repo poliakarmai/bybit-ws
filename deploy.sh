@@ -9,6 +9,13 @@ VERSION=$(date +%Y%m%d_%H%M%S)
 
 echo "🚀 Deploy bybit-ws @ $VERSION"
 
+# ── 0. Pre-deploy evaluation ──
+echo "📊 Pre-deploy evaluation..."
+python3 ~/.hermes/skills/meta/agent-evaluation/scripts/eval-run.py --suite deterministic || {
+    echo "❌ Evaluation failed — деплой отменён"
+    exit 1
+}
+
 # ── 1. Проверить что репо чистый ──
 cd "$REPO"
 if ! git diff --quiet 2>/dev/null; then
