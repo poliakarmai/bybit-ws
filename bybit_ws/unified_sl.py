@@ -80,8 +80,8 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
         if current_sl is not None and abs(sl_target - current_sl) / entry < 0.001:
             continue
 
-        # Throttle check — но пропускаем tight_trail если цена сильно ушла
-        if not _throttled(sym) and 'tight' not in sl_desc:
+        # Throttle check — для ВСЕХ типов SL (включая tight)
+        if not _throttled(sym):
             continue
 
         # Place SL

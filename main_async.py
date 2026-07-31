@@ -42,7 +42,8 @@ from .api import (
 )
 
 # Async DB
-from .state_db import adb
+from .state_db import adb, StateDB
+sync_db = StateDB()
 
 # Синхронные модули (вызываются через executor)
 from .auto_sl import check_and_fix_sl, check_breakeven_sl  # legacy — kept for reference
@@ -237,6 +238,9 @@ async def async_positions_snapshot():
         await asyncio.get_event_loop().run_in_executor(
             None, save_json, POSITIONS_SNAPSHOT, positions
         )
+        await asyncio.get_event_loop().run_in_executor(
+            None, sync_db.save_positions, positions
+        )
     if orders:
         await asyncio.get_event_loop().run_in_executor(
             None, save_json, ORDERS_SNAPSHOT, orders
@@ -273,6 +277,9 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
                     # Сохраняем снепшоты
                     await asyncio.get_event_loop().run_in_executor(
                         None, save_json, POSITIONS_SNAPSHOT, rest_positions
+                    )
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, sync_db.save_positions, rest_positions
                     )
                     # Сверяем: если REST отличается → логируем, но используем REST
                     ws_keys = set(positions.keys())
@@ -707,7 +714,7 @@ async def async_main_loop():
                     log_event(f'⚠️ ab_status log: {e}')
 
             # ── Self-learning + Post-trade анализ (раз в сутки) ──
-            if cycle % 2880 == 1:
+            if cycle % 720 == 1:
                 try:
                     from .journal.adapter import load_from_sqlite
                     from .journal.self_learn import apply_journal_insights as _apply_insights
@@ -717,9 +724,13 @@ async def async_main_loop():
                     result = await run_in_thread(load_from_sqlite)
                     journal = result[0] if isinstance(result, tuple) else result
                     if journal and 'error' not in journal:
+                        p = journal.get('profile', {})
+                        log_event(f'🧠 Self-learn: {p.get("total_trades",0)} trades, '
+                                  f'WR={p.get("win_rate",0):.1%}, PnL=${p.get("total_pnl",0):.0f}')
                         adjustments = await _apply_insights(journal, cfg)
                         if adjustments:
-                            log_event(f'🧠 Self-learn: {len(adjustments)} adjustments applied')
+                            log_event(f'🧠 Self-learn adjustments: {list(adjustments.keys())}')
+
                     else:
                         log_event(f'⚠️ self_learn: {journal.get("error", "no data")}' if journal else '⚠️ self_learn: no data')
 

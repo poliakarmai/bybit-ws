@@ -419,6 +419,25 @@ class AsyncStateDB:
         rows = await db.execute('SELECT * FROM positions')
         return [dict(r) for r in await rows.fetchall()]
 
+    async def save_positions(self, positions_dict):
+        """Сохранить снепшот позиций (batch-замена)."""
+        db = await self._ensure_db()
+        now = int(time.time())
+        async with self._lock:
+            await db.execute('DELETE FROM positions')
+            for sym, p in positions_dict.items():
+                await db.execute('''
+                    INSERT INTO positions (symbol, side, entry, mark, size, leverage,
+                        stop_loss, take_profit, position_idx, upnl, liq_price, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    sym, p.get('side'), p.get('entry', 0), p.get('mark', 0),
+                    p.get('size', 0), p.get('leverage', 0), p.get('stopLoss', 0),
+                    p.get('takeProfit', 0), p.get('positionIdx', 0),
+                    p.get('upnl', 0), p.get('liqPrice', 0), now
+                ))
+            await db.commit()
+
     async def update_position(self, symbol, data):
         db = await self._ensure_db()
         await db.execute('''

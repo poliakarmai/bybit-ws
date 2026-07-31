@@ -14,7 +14,7 @@ from .alerts import log_event
 from .manual_positions import is_manual_position
 from .file_utils import safe_json_write
 
-import json, os
+import json, os, math
 
 # ── ATR-adaptive split thresholds ──
 ATR_HIGH_THRESHOLD = 0.05    # >5% ATR/price → high vol
@@ -248,6 +248,18 @@ def auto_take_profit(positions, orders, skip_syms=None):
     return actions
 
 
+def _get_lot_step(sym):
+    """Получить минимальный шаг лота для символа (lotSizeFilter.qtyStep)."""
+    try:
+        from .api import fetch_instruments_info
+        info = fetch_instruments_info()
+        if info and sym in info:
+            lot_filter = info[sym].get('lotSizeFilter', {})
+            return float(lot_filter.get('qtyStep', 0.001))
+    except Exception:
+        pass
+    return 0.001
+
 def apply_auto_tp(actions):
     """Применить auto-TP с retry backoff."""
     from .api import place_take_profit
@@ -257,6 +269,15 @@ def apply_auto_tp(actions):
         if qty < 0.5:
             TP_FAIL_COUNT.pop(sym, None)
             TP_FAIL_BACKOFF.pop(sym, None)
+            continue
+
+        # Проверка qty_step: не отправлять ордер если qty округляется в 0
+        qty_step = _get_lot_step(sym)
+        if qty_step > 0:
+            qty = math.floor(qty / qty_step) * qty_step
+            qty_decimals = len(str(qty_step).split('.')[1]) if '.' in str(qty_step) else 0
+            qty = round(qty, qty_decimals)
+        if qty <= 0:
             continue
 
         if sym in TP_FAIL_BACKOFF and now < TP_FAIL_BACKOFF[sym]:

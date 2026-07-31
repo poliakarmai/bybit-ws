@@ -43,7 +43,7 @@ _streak_lock = threading.Lock()
 
 # ── Canary constants ────────────────────────────────
 CANARY_ENTRY_PCT = 0.10
-CANARY_WINDOW_HOURS = 48
+CANARY_WINDOW_HOURS = 6
 CANARY_WR_DROP_THRESHOLD = 0.10
 CANARY_MATCH_WINDOW = 3600
 
@@ -529,7 +529,7 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     total_pnl = profile.get("total_pnl", 0)
 
     canary_state = _load_canary_state()
-    if canary_state.get("active"):
+    if is_canary_active():
         logger.info("Canary already active, skipping")
         return applied
 

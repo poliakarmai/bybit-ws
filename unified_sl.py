@@ -13,6 +13,7 @@ from . import TRAIL_SL_PERCENT
 # Throttle: не чаще чем раз в N секунд на позицию (по имени символа)
 _last_sl_update: dict[str, float] = {}
 SL_THROTTLE = 120  # секунд между реальными обновлениями SL
+SL_BACKOFF = 600    # секунд после "not modified" — не дёргаем API
 
 # Безубыток — каждые 4 цикла (~2 мин), но не чаще throttling'а
 SL_BREAKEVEN_CYCLES = 4
@@ -80,8 +81,8 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
         if current_sl is not None and abs(sl_target - current_sl) / entry < 0.001:
             continue
 
-        # Throttle check — но пропускаем tight_trail если цена сильно ушла
-        if not _throttled(sym) and 'tight' not in sl_desc:
+        # Throttle check — не дёргаем API чаще чем раз в 2 минуты на символ
+        if not _throttled(sym):
             continue
 
         # Place SL
