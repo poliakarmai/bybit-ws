@@ -753,6 +753,41 @@ def get_risk_full(positions: Optional[dict] = None) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# BlackSwan v2 — корреляционная паника (v9, 01.08.2026)
+# ═══════════════════════════════════════════════════════════════════════════
+
+BLACKSWAN_MIN_RED_POSITIONS = 3   # мин. кол-во позиций в минусе для паники
+BLACKSWAN_TOTAL_UPNL_THRESHOLD = -50  # общий uPnL хуже этого → триггер
+
+def check_correlation_panic(positions: dict) -> Optional[str]:
+    """BlackSwan v2: если 3+ позиций одновременно в минус — паника.
+    
+    Вызывается каждый цикл из main_async. При срабатывании — emergency close.
+    """
+    if not positions:
+        return None
+    
+    red_count = 0
+    total_upnl = 0.0
+    red_symbols = []
+    
+    for sym, p in positions.items():
+        upnl = float(p.get('unrealisedPnl', p.get('upnl', 0)))
+        total_upnl += upnl
+        if upnl < 0:
+            red_count += 1
+            red_symbols.append(f'{sym}(${upnl:.0f})')
+    
+    if red_count >= BLACKSWAN_MIN_RED_POSITIONS and total_upnl < BLACKSWAN_TOTAL_UPNL_THRESHOLD:
+        reason = (
+            f'BlackSwan: {red_count} позиций в минусе ({", ".join(red_symbols)}), '
+            f'общий uPnL=${total_upnl:.0f} < ${BLACKSWAN_TOTAL_UPNL_THRESHOLD}'
+        )
+        return reason
+    
+    return None
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Emergency Close / Kill Switch
 # ═══════════════════════════════════════════════════════════════════════════
 

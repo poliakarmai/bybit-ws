@@ -118,3 +118,15 @@ Walk-forward валидация ML.
 
 ### Gateway Stability
 - deprovision.py: `restart` → `reload` (больше не роняет gateway каждый час)
+
+## Фаза 9 (начало 01.08.2026)
+
+### v8.1 — Журнал + LSTM-фильтр
+- MEAN-REVERT отключён (сливал на BB%=0-5%)
+- trade_history: контекст входа (BB%, RSI, MTF, regime), DCA/partial TP счётчики, exit_reason
+- LSTM: RANGING и CHOPPY блокируют входы, BYBIT_REGIME_AUTO=1
+
+### v9 — Адаптивный TP/SL по LSTM-режиму
+- TP: RANGING→ближе (0.7×/1.2×/1.8×), TRENDING→дальше (1.5×/2.5×/3.5×)
+- SL: RANGING→×0.7 (быстрее режем), TRENDING→×1.2 (даём пространство)
+- MTF-фикс: блокировать входы без данных D-TF (дыра закрыта)

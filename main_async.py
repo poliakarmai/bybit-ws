@@ -687,6 +687,30 @@ async def async_main_loop():
             )
 
             # ── Лёгкие проверки (каждый цикл) ──
+            # BlackSwan v2: корреляционная паника
+            if new_positions:
+                try:
+                    from .risk_manager import check_correlation_panic, emergency_close_all
+                    panic_reason = check_correlation_panic(new_positions)
+                    if panic_reason:
+                        from .api import bybit
+                        log_event(f'🦢 BLACKSWAN: {panic_reason}')
+                        # Закрываем только красные позиции, не все
+                        red_syms = [s for s, p in new_positions.items() 
+                                   if float(p.get('unrealisedPnl', p.get('upnl', 0))) < 0]
+                        for sym in red_syms:
+                            try:
+                                close_side = 'Sell' if new_positions[sym].get('side', 'Buy') == 'Buy' else 'Buy'
+                                bybit('POST', '/v5/order/create', {
+                                    'category': 'linear', 'symbol': sym, 'side': close_side,
+                                    'orderType': 'Market', 'qty': str(new_positions[sym].get('size', 0)),
+                                    'positionIdx': new_positions[sym].get('positionIdx', 0), 'reduceOnly': True,
+                                })
+                            except Exception:
+                                pass
+                        send_high_alert(f'🦢 BLACKSWAN: {panic_reason} — закрыто {len(red_syms)} позиций', level='CRITICAL')
+                except Exception as e:
+                    log_event(f'⚠️ blackswan check error: {e}')
             if new_positions:
                 # Unified SL — все механизмы в одном, 1 API-вызов на позицию
                 sl_msgs, _ = await run_in_thread(manage_sl, new_positions, cycle)
