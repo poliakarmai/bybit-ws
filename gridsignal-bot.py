@@ -241,50 +241,9 @@ def init_db():
         conn.execute('ALTER TABLE alerts ADD COLUMN bb_zone REAL DEFAULT 100')
     except Exception:
         pass  # already exists
-    # ── One-click trading: риск-профиль ──
-    conn.execute('''CREATE TABLE IF NOT EXISTS user_risk (
-        user_id INTEGER PRIMARY KEY,
-        risk_pct REAL DEFAULT 5.0,
-        leverage INTEGER DEFAULT 3,
-        margin_mode TEXT DEFAULT 'isolated',
-        max_positions INTEGER DEFAULT 5,
-        updated_at TEXT
-    )''')
     conn.commit()
     return conn
 
-
-# ── One-click trading helpers ──
-
-def get_user_risk(conn, user_id: int) -> dict:
-    """Получить риск-профиль пользователя."""
-    row = conn.execute('SELECT risk_pct, leverage, margin_mode, max_positions FROM user_risk WHERE user_id=?',
-                       (user_id,)).fetchone()
-    if not row:
-        conn.execute('INSERT OR IGNORE INTO user_risk(user_id) VALUES(?)', (user_id,))
-        conn.commit()
-        return {'risk_pct': 5.0, 'leverage': 3, 'margin_mode': 'isolated', 'max_positions': 5}
-    return {'risk_pct': row[0], 'leverage': row[1], 'margin_mode': row[2], 'max_positions': row[3]}
-
-
-def set_user_risk(conn, user_id: int, **kwargs):
-    """Обновить риск-профиль. kwargs: risk_pct, leverage, margin_mode, max_positions."""
-    fields = []
-    values = []
-    for k in ('risk_pct', 'leverage', 'max_positions'):
-        if k in kwargs:
-            fields.append(f'{k}=?')
-            values.append(kwargs[k])
-    if 'margin_mode' in kwargs:
-        fields.append('margin_mode=?')
-        values.append(kwargs['margin_mode'])
-    if fields:
-        fields.append("updated_at=?")
-        values.append(_now())
-        values.append(user_id)
-        conn.execute('INSERT OR IGNORE INTO user_risk(user_id) VALUES(?)', (user_id,))
-        conn.execute(f"UPDATE user_risk SET {', '.join(fields)} WHERE user_id=?", values)
-        conn.commit()
 
 def get_user(conn, user_id: int) -> dict:
     row = conn.execute('SELECT user_id, username, first_name, scans_today, last_scan_ts, deposit, subscribed FROM users WHERE user_id = ?', (user_id,)).fetchone()
@@ -747,45 +706,6 @@ def share_keyboard(symbol: str) -> InlineKeyboardMarkup:
     ]])
 
 
-def oneclick_keyboard(symbol: str, side: str = 'Buy') -> InlineKeyboardMarkup:
-    """Кнопки для one-click trading (только админ)."""
-    side_label = '📈 LONG' if side == 'Buy' else '📉 SHORT'
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🎯 Взять {side_label}", callback_data=f"oc:enter:{symbol}:{side}")],
-        [InlineKeyboardButton("📤 Поделиться", switch_inline_query=symbol.replace('USDT', ''))]
-    ])
-
-
-# ── RPC helper ──
-
-def rpc_call(endpoint: str, body: dict = None, method: str = 'POST') -> dict:
-    """Вызвать bybit-ws RPC и вернуть JSON или {'error': ...}."""
-    import urllib.request
-    try:
-        token = _load_rpc_token_sync()
-        url = f"http://localhost:8766{endpoint}"
-        data = json.dumps(body).encode() if body else None
-        req = urllib.request.Request(url, data=data, method=method)
-        req.add_header('Authorization', f'Bearer {token}')
-        req.add_header('Content-Type', 'application/json')
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return json.loads(resp.read())
-    except Exception as e:
-        return {'error': str(e)}
-
-
-def _load_rpc_token_sync():
-    """Синхронная загрузка RPC токена (для вызовов из бота)."""
-    try:
-        db_path = os.path.expanduser("~/.local/share/bybit-ws/state.db")
-        db = sqlite3.connect(db_path)
-        row = db.execute("SELECT value FROM kv_store WHERE key='rpc_auth_token'").fetchone()
-        db.close()
-        return row[0] if row else ''
-    except Exception:
-        return ''
-
-
 # ═══════════════════════════════════════════════════════════════
 # Команды
 # ═══════════════════════════════════════════════════════════════
@@ -1020,17 +940,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(t('scan_remaining', lang, max(0, remaining), MAX_SCANS_PER_DAY))
     lines.append(t('scan_footer', lang))
 
-    # ── Клавиатура: админ → one-click, остальные → share ──
-    is_admin = user_id == GRIDSIGNAL_ADMIN_ID
-    if is_admin:
-        # Для LONG сигналов — кнопка Взять LONG; для SHORT — Взять SHORT
-        first_signal = signals[0]
-        sig_side = 'Sell' if first_signal.get('mode', '').startswith('SHORT') else 'Buy'
-        keyboard = oneclick_keyboard(first_signal['symbol'], sig_side)
-    else:
-        keyboard = share_keyboard(signals[0]['symbol'])
-
-    await status_msg.edit_text("\n".join(lines), reply_markup=keyboard)
+    await status_msg.edit_text("\n".join(lines), reply_markup=share_keyboard(signals[0]['symbol']))
     update_scan_count(conn, user_id)
     conn.close()
 
@@ -1038,222 +948,43 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ══ #5 /setrisk ══
 
 async def cmd_setrisk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """💰 /setrisk — риск-профиль для one-click trading.
-    Использование:
-      /setrisk                    — показать текущие настройки
-      /setrisk depo 500           — депозит $500
-      /setrisk risk 5             — 5% риска на сделку
-      /setrisk lev 3              — плечо 3x
-      /setrisk mode isolated      — isolated margin
-      /setrisk all 500 5 3 iso    — всё сразу: депо 500, риск 5%, плечо 3x, isolated
-    """
     user_id = update.effective_user.id
     args = context.args
+    if not args:
+        conn = init_db()
+        user = get_user(conn, user_id)
+        lang = get_lang(conn, user_id)
+        d = user.get('deposit', 0)
+        conn.close()
+        if d > 0:
+            await update.message.reply_text(f"💰 Текущий депозит: **${d:,.0f}**\n2% риска = ${d*0.02:.0f} на сигнал")
+        else:
+            await update.message.reply_text(t('deposit_none', lang))
+        return
+    try:
+        deposit = float(args[0])
+        if deposit < 10:
+            conn = init_db()
+            lang = get_lang(conn, user_id)
+            conn.close()
+            await update.message.reply_text(t('deposit_min', lang))
+            return
+    except ValueError:
+        conn = init_db()
+        lang = get_lang(conn, user_id)
+        conn.close()
+        await update.message.reply_text(t('deposit_usage', lang))
+        return
+
     conn = init_db()
     lang = get_lang(conn, user_id)
-    user = get_user(conn, user_id)
-    risk = get_user_risk(conn, user_id)
-
-    if not args:
-        d = user.get('deposit', 0)
-        risk_amount = d * (risk['risk_pct'] / 100) if d > 0 else 0
-        text = (
-            f"💰 **Риск-профиль**\n"
-            f"Депозит: **${d:,.0f}**\n"
-            f"Риск на сделку: **{risk['risk_pct']:.0f}%** (${risk_amount:.0f})\n"
-            f"Плечо: **{risk['leverage']}x**\n"
-            f"Маржа: **{risk['margin_mode']}**\n"
-            f"Макс. позиций: **{risk['max_positions']}**\n"
-            f"\\n/setrisk risk 5 — изменить % риска\n"
-            f"/setrisk lev 3 — изменить плечо"
-        )
-        conn.close()
-        await update.message.reply_text(text)
-        return
-
-    # ── Парсинг аргументов ──
-    mode = args[0].lower() if args else ''
-    changed = False
-
-    if mode == 'all' and len(args) >= 5:
-        # /setrisk all 500 5 3 iso
-        try:
-            deposit = float(args[1])
-            risk_pct = float(args[2])
-            leverage = int(args[3])
-            margin_mode = args[4].lower()
-            if margin_mode not in ('isolated', 'cross'):
-                conn.close()
-                await update.message.reply_text('❌ margin_mode: isolated или cross')
-                return
-            conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
-            get_user(conn, user_id)
-            set_user_risk(conn, user_id, risk_pct=risk_pct, leverage=leverage, margin_mode=margin_mode)
-            log_event(conn, user_id, 'setrisk', update)
-            conn.commit()
-            changed = True
-        except (ValueError, IndexError):
-            conn.close()
-            await update.message.reply_text('❌ /setrisk all <депозит> <риск%> <плечо> <isolated|cross>')
-            return
-    elif mode == 'depo' and len(args) >= 2:
-        try:
-            deposit = float(args[1])
-            if deposit < 10:
-                conn.close()
-                await update.message.reply_text('❌ Минимальный депозит: $10')
-                return
-            conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
-            get_user(conn, user_id)
-            log_event(conn, user_id, 'setrisk', update)
-            conn.commit()
-            changed = True
-        except ValueError:
-            conn.close()
-            await update.message.reply_text('❌ /setrisk depo <число>')
-            return
-    elif mode == 'risk' and len(args) >= 2:
-        try:
-            rp = float(args[1])
-            if rp < 1 or rp > 100:
-                conn.close()
-                await update.message.reply_text('❌ Риск: 1-100%')
-                return
-            set_user_risk(conn, user_id, risk_pct=rp)
-            changed = True
-        except ValueError:
-            conn.close()
-            await update.message.reply_text('❌ /setrisk risk <1-100>')
-            return
-    elif mode == 'lev' and len(args) >= 2:
-        try:
-            lev = int(args[1])
-            if lev < 1 or lev > 100:
-                conn.close()
-                await update.message.reply_text('❌ Плечо: 1-100x')
-                return
-            set_user_risk(conn, user_id, leverage=lev)
-            changed = True
-        except ValueError:
-            conn.close()
-            await update.message.reply_text('❌ /setrisk lev <1-100>')
-            return
-    elif mode == 'mode' and len(args) >= 2:
-        mm = args[1].lower()
-        if mm not in ('isolated', 'cross'):
-            conn.close()
-            await update.message.reply_text('❌ Режим: isolated или cross')
-            return
-        set_user_risk(conn, user_id, margin_mode=mm)
-        changed = True
-    else:
-        # Старая совместимость: /setrisk 500 = /setrisk depo 500
-        try:
-            deposit = float(args[0])
-            if deposit < 10:
-                conn.close()
-                await update.message.reply_text(t('deposit_min', lang))
-                return
-            conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
-            get_user(conn, user_id)
-            log_event(conn, user_id, 'setrisk', update)
-            conn.commit()
-            changed = True
-        except ValueError:
-            conn.close()
-            await update.message.reply_text(
-                '❌ Использование:\\n'
-                '/setrisk — показать настройки\\n'
-                '/setrisk depo 500 — депозит\\n'
-                '/setrisk risk 5 — % риска\\n'
-                '/setrisk lev 3 — плечо\\n'
-                '/setrisk mode isolated — тип маржи'
-            )
-            return
-
+    get_user(conn, user_id)
+    conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
+    log_event(conn, user_id, 'setrisk', update)
+    conn.commit()
     conn.close()
-    if changed:
-        # Показать что получилось
-        conn2 = init_db()
-        user2 = get_user(conn2, user_id)
-        risk2 = get_user_risk(conn2, user_id)
-        d = user2.get('deposit', 0)
-        ra = d * (risk2['risk_pct'] / 100) if d > 0 else 0
-        await update.message.reply_text(
-            f"✅ **Настройки обновлены**\n"
-            f"💰 Депозит: ${d:,.0f}\n"
-            f"📊 Риск: {risk2['risk_pct']:.0f}% (${ra:.0f})\n"
-            f"⚡ Плечо: {risk2['leverage']}x\n"
-            f"🔒 Маржа: {risk2['margin_mode']}"
-        )
-
-
-# ══ /position — One-click: live-позиции ══
-
-async def cmd_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """📋 /position — текущие позиции с PnL, SL, TP и кнопкой «Закрыть» (админ)."""
-    user_id = update.effective_user.id
-    is_admin = user_id == GRIDSIGNAL_ADMIN_ID
-
-    result = rpc_call('/positions', method='GET')
-
-    if 'error' in result:
-        await update.message.reply_text(f"❌ RPC ошибка: {result['error']}")
-        return
-
-    if not isinstance(result, list) or not result:
-        await update.message.reply_text("📭 Нет открытых позиций.")
-        return
-
-    lines = ["📋 **Текущие позиции:**\n"]
-    has_positions = False
-
-    for p in result:
-        if not isinstance(p, dict):
-            continue
-        sym = p.get('symbol', '?')
-        side = p.get('side', 'Buy')
-        entry = float(p.get('entry', 0))
-        mark = float(p.get('mark', 0))
-        size = float(p.get('size', 0))
-        sl = p.get('stopLoss', 0)
-        tp = p.get('takeProfit', 0)
-        upnl = float(p.get('upnl', 0))
-
-        if size <= 0:
-            continue
-        has_positions = True
-
-        pnl_pct = ((mark - entry) / entry * 100) if side == 'Buy' else ((entry - mark) / entry * 100)
-        side_emoji = '📈' if side == 'Buy' else '📉'
-        pnl_sign = '+' if upnl >= 0 else ''
-
-        lines.append(
-            f"{side_emoji} **{sym}** ×{size}\n"
-            f"   Entry: `${entry:.4f}` → Mark: `${mark:.4f}`\n"
-            f"   PnL: {pnl_sign}${upnl:.2f} ({pnl_sign}{pnl_pct:.1f}%)\n"
-            f"   🛡 SL: `${sl}` | 🎯 TP: `${tp}`\n"
-        )
-
-    if not has_positions:
-        await update.message.reply_text("📭 Нет открытых позиций.")
-        return
-
-    # Кнопки «Закрыть» для админа
-    keyboard = None
-    if is_admin:
-        buttons = []
-        for p in result:
-            if isinstance(p, dict) and float(p.get('size', 0)) > 0:
-                sym = p.get('symbol', '?')
-                buttons.append([InlineKeyboardButton(
-                    f"❌ Закрыть {sym.replace('USDT', '')}",
-                    callback_data=f"oc:close:{sym}"
-                )])
-        if buttons:
-            keyboard = InlineKeyboardMarkup(buttons)
-
-    await update.message.reply_text("\n".join(lines), reply_markup=keyboard)
+    margin = round(deposit * 0.02, 0)
+    await update.message.reply_text(t('deposit_set', lang, deposit, margin))
 
 
 # ══ #4 /history ══
@@ -1458,140 +1189,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await query.message.reply_text("❌ Платёж не найден. Оплати счёт в @CryptoBot и нажми кнопку снова.")
-
-
-# ══ One-Click Trading Callbacks ══
-
-async def oneclick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка one-click кнопок: oc:enter и oc:confirm."""
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    user_id = query.from_user.id
-
-    if user_id != GRIDSIGNAL_ADMIN_ID:
-        await query.message.reply_text("🔒 One-click trading — только для админа.")
-        return
-
-    conn = init_db()
-    risk = get_user_risk(conn, user_id)
-    user = get_user(conn, user_id)
-    conn.close()
-
-    # ── Шаг 1: «Взять» → запрос /calc_qty ──
-    if data.startswith('oc:enter:'):
-        parts = data.split(':')
-        if len(parts) < 4:
-            return
-        symbol = parts[2]
-        side = parts[3]
-
-        await query.message.reply_text(f"⏳ Рассчитываю размер позиции для **{symbol}**...")
-
-        result = rpc_call('/calc_qty', {
-            'symbol': symbol,
-            'risk_pct': risk['risk_pct'],
-            'leverage': risk['leverage'],
-        })
-
-        if 'error' in result:
-            await query.message.reply_text(f"❌ Ошибка RPC: {result['error']}")
-            return
-
-        qty = result.get('qty', 0)
-        entry_price = result.get('entry_price', 0)
-        risk_amount = result.get('risk_amount', 0)
-        message = result.get('message', '')
-        balance = result.get('balance', 0)
-
-        if qty <= 0 or entry_price <= 0:
-            await query.message.reply_text(f"❌ Не удалось рассчитать размер позиции: {message}")
-            return
-
-        # Превью входа
-        entry_val = entry_price
-        sl_val = round(entry_val * 0.93, 4) if side == 'Buy' else round(entry_val * 1.07, 4)
-        tp_val = round(entry_val * 1.10, 4) if side == 'Buy' else round(entry_val * 0.90, 4)
-        side_label = '📈 LONG' if side == 'Buy' else '📉 SHORT'
-
-        # Проверка что нет позиции
-        pos_check = rpc_call('/positions', method='GET')
-        existing = [p for p in (pos_check if isinstance(pos_check, list) else [])
-                    if isinstance(p, dict) and p.get('symbol') == symbol]
-        if existing:
-            await query.message.reply_text(f"⚠️ Уже есть позиция по **{symbol}**. Сначала закрой её.")
-            return
-
-        cb_data = f"oc:confirm:{symbol}:{side}:{qty}:{sl_val}:{tp_val}"
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Да, войти", callback_data=cb_data)],
-            [InlineKeyboardButton("❌ Отмена", callback_data="oc:cancel")],
-        ])
-
-        text = (
-            f"🎯 **Подтверждение входа**\n\n"
-            f"{side_label} **{symbol}**\n"
-            f"Цена: `${entry_price}`\n"
-            f"Размер: **{qty}** контрактов\n"
-            f"Риск: `${risk_amount}` ({risk['risk_pct']:.0f}% от ${balance:.0f})\n"
-            f"Плечо: **{risk['leverage']}x** · Маржа: **{risk['margin_mode']}**\n\n"
-            f"🛡 SL: `${sl_val}`\n"
-            f"🎯 TP: `${tp_val}`\n\n"
-            f"Войти?"
-        )
-        await query.message.reply_text(text, reply_markup=kb)
-
-    # ── Шаг 2: Подтверждение → /enter ──
-    elif data.startswith('oc:confirm:'):
-        parts = data.split(':')
-        if len(parts) < 7:
-            return
-        symbol = parts[2]
-        side = parts[3]
-        qty = parts[4]
-        sl = parts[5]
-        tp = parts[6]
-
-        await query.message.reply_text(f"⏳ Вхожу в **{symbol}** {side}...")
-
-        result = rpc_call('/enter', {
-            'symbol': symbol,
-            'side': side,
-            'qty': float(qty),
-            'sl': float(sl),
-            'tp': float(tp),
-            'confirm': True,
-        })
-
-        if 'error' in result:
-            await query.message.reply_text(f"❌ Ошибка входа: {result.get('error') or result.get('detail', 'Unknown')}")
-            return
-
-        side_label = '📈 LONG' if side == 'Buy' else '📉 SHORT'
-        await query.message.reply_text(
-            f"✅ **Позиция открыта!**\n\n"
-            f"{side_label} **{symbol}** ×{qty}\n"
-            f"🛡 SL: `${sl}` | 🎯 TP: `${tp}`\n\n"
-            f"SL подхвачен unified_sl — ведётся автоматически.\n"
-            f"📋 `/position` — следить за позицией."
-        )
-
-    elif data == 'oc:cancel':
-        await query.message.reply_text("🚫 Вход отменён.")
-
-    # ── Закрытие позиции ──
-    elif data.startswith('oc:close:'):
-        symbol = data.split(':')[2]
-        await query.message.reply_text(f"⏳ Закрываю **{symbol}**...")
-
-        result = rpc_call('/close', {'symbol': symbol})
-
-        if 'error' in result:
-            await query.message.reply_text(f"❌ Ошибка закрытия: {result.get('error') or result.get('detail', 'Unknown')}")
-            return
-
-        pnl = result.get('realizedPnl', '?')
-        await query.message.reply_text(f"✅ **{symbol}** закрыт. PnL: `${pnl}`")
 
 
 async def deprovision_expired(context: ContextTypes.DEFAULT_TYPE):
@@ -2893,7 +2490,6 @@ def main():
     app.add_handler(CommandHandler('subscribe', cmd_subscribe))
     app.add_handler(CommandHandler('pro', cmd_subscribe))
     app.add_handler(CommandHandler('status', cmd_status))
-    app.add_handler(CommandHandler('position', cmd_position))
     app.add_handler(CallbackQueryHandler(button_handler, pattern=r'^(pro_buy|pro_buy_ton|check_ton_\d+|scan|status)$'))
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
@@ -2907,7 +2503,6 @@ def main():
     app.add_handler(CommandHandler('dex', cmd_dex))
     app.add_handler(CallbackQueryHandler(lang_callback, pattern='^lang:'))
     app.add_handler(CallbackQueryHandler(delalert_callback, pattern='^delalert:'))
-    app.add_handler(CallbackQueryHandler(oneclick_handler, pattern='^oc:'))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
 
