@@ -690,7 +690,7 @@ async def async_main_loop():
             # BlackSwan v2: корреляционная паника
             if new_positions:
                 try:
-                    from .risk_manager import check_correlation_panic, emergency_close_all
+                    from .risk_manager import check_correlation_panic
                     panic_reason = check_correlation_panic(new_positions)
                     if panic_reason:
                         from .api import bybit
