@@ -617,6 +617,9 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
             scaler.var_ = np.array(scaler_data['var_'])
             scaler.n_features_in_ = scaler_data['n_features_in_']
         else:
+            # Регистрируем FeatureScaler в __main__ для совместимости с pickle
+            import sys as _sys
+            _sys.modules['__main__'].FeatureScaler = FeatureScaler
             with open(SCALER_PATH, 'rb') as f:
                 scaler = pickle.load(f)
 
