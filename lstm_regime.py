@@ -727,10 +727,10 @@ def get_regime_strategy(regime: str) -> dict:
     strategy_map = {
         'TRENDING_UP':    {'LONG_ENABLED': True,  'SHORT_ENABLED': False},
         'TRENDING_DOWN':  {'LONG_ENABLED': False, 'SHORT_ENABLED': True},
-        'RANGING':        {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
+        'RANGING':        {'LONG_ENABLED': False, 'SHORT_ENABLED': False},  # v8.1: боковик — не входим
         'HIGH_VOL':       {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
         'LOW_VOL':        {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
-        'CHOPPY':         {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
+        'CHOPPY':         {'LONG_ENABLED': False, 'SHORT_ENABLED': False},  # v8.1: чоп — тоже не входим
     }
     return strategy_map.get(regime, {'LONG_ENABLED': True, 'SHORT_ENABLED': True})
 
