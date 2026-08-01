@@ -892,13 +892,14 @@ class RPCHandler(BaseHTTPRequestHandler):
                 return _error(self, 'Balance API error', data.get('retMsg', ''), 502)
             coins = data.get('result', {}).get('list', [{}])[0].get('coin', [])
             usdt = next((c for c in coins if c.get('coin') == 'USDT'), {})
-            balance = float(usdt.get('walletBalance', 0))
-            available = float(usdt.get('availableToWithdraw', 0))
+            balance = float(usdt.get('walletBalance') or 0)
+            available = float(usdt.get('availableToWithdraw') or 0)
+            equity = float(usdt.get('equity') or balance)
             _json_response(self, {
                 'asset': 'USDT',
                 'balance': round(balance, 2),
                 'available': round(available, 2),
-                'equity': round(float(usdt.get('equity', balance)), 2),
+                'equity': round(equity, 2),
             })
         except Exception as e:
             _error(self, 'Balance fetch failed', str(e), 500)
