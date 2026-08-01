@@ -27,8 +27,29 @@ SPLIT_LOW_VOL = (0.15, 0.85)
 # ── ATR-based TP levels (28.06) ──
 ATR_TP_ENABLED = os.environ.get('BYBIT_ATR_TP_ENABLED', '1') == '1'
 # Множители ATR для TP уровней (LONG: entry + k×ATR, SHORT: entry - k×ATR)
-ATR_TP_LEVELS = [1.0, 2.0, 3.0]  # TP1, TP2, TP3
+ATR_TP_LEVELS = [1.0, 2.0, 3.0]  # TP1, TP2, TP3 (default)
 ATR_TP_SPLITS = [0.40, 0.35, 0.25]  # % объёма на каждый уровень
+
+# ── v9: LSTM-regime-adaptive TP multipliers ──
+REGIME_TP_MULTIPLIERS = {
+    'RANGING':    [0.7, 1.2, 1.8],   # ближе — быстро фиксируем в боковике
+    'CHOPPY':     [0.7, 1.2, 1.8],
+    'TRENDING_UP':   [1.5, 2.5, 3.5],   # дальше — даём тренду разогнаться
+    'TRENDING_DOWN': [1.5, 2.5, 3.5],
+    'HIGH_VOL':   [1.2, 2.0, 3.0],   # умеренно
+    'LOW_VOL':    [0.8, 1.5, 2.0],   # ближе
+    'NEUTRAL':    [1.0, 2.0, 3.0],   # default
+}
+
+def _get_regime_tp_levels():
+    """Получить ATR-множители TP под текущий LSTM-режим."""
+    try:
+        from .lstm_regime import predict_regime
+        regime_data = predict_regime()
+        regime = regime_data.get('regime', 'NEUTRAL')
+        return REGIME_TP_MULTIPLIERS.get(regime, ATR_TP_LEVELS), regime
+    except Exception:
+        return ATR_TP_LEVELS, 'NEUTRAL'
 
 # PERM_SKIP time-decay: 24 часа
 PERM_SKIP_TTL = 86400
@@ -227,7 +248,8 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 existing_qty = sum(q for q, _ in existing_tp.get(sym, []))
                 uncovered = pos_size - existing_qty
                 if uncovered >= 0.5:
-                    for k, split in zip(ATR_TP_LEVELS, ATR_TP_SPLITS):
+                    tp_levels, regime = _get_regime_tp_levels()
+                    for k, split in zip(tp_levels, ATR_TP_SPLITS):
                         qty = round(uncovered * split, rounding)
                         if qty < 0.5:
                             continue

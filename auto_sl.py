@@ -63,11 +63,12 @@ def _get_atr(symbol: str, period: int = 14, interval: str = '60') -> float | Non
 
 
 def _get_sl_multiplier(symbol: str) -> float:
-    """Определить множитель SL по ATR в зависимости от волатильности."""
+    """Определить множитель SL по ATR + LSTM-режим."""
     atr = _get_atr(symbol)
     if atr is None:
         return ATR_SL_DEFAULT
 
+    base_mult = ATR_SL_DEFAULT
     try:
         ticker = bybit('GET', f'/v5/market/tickers?category=linear&symbol={symbol}')
         if ticker and ticker.get('retCode') == 0:
@@ -75,15 +76,33 @@ def _get_sl_multiplier(symbol: str) -> float:
             atr_pct = atr / price if price > 0 else 0.03
 
             if atr_pct > 0.05:
-                return ATR_SL_MULTIPLIERS['high_vol']
+                base_mult = ATR_SL_MULTIPLIERS['high_vol']
             elif atr_pct > 0.03:
-                return ATR_SL_MULTIPLIERS['trending']
+                base_mult = ATR_SL_MULTIPLIERS['trending']
             elif atr_pct < 0.01:
-                return ATR_SL_MULTIPLIERS['low_vol']
+                base_mult = ATR_SL_MULTIPLIERS['low_vol']
     except Exception:
         pass
 
-    return ATR_SL_DEFAULT
+    # ── v9: LSTM-regime adjustment ──
+    try:
+        from .lstm_regime import predict_regime
+        regime_data = predict_regime()
+        regime = regime_data.get('regime', 'NEUTRAL')
+        regime_adj = {
+            'RANGING': 0.7,        # SL ближе — быстрее режем в боковике
+            'CHOPPY': 0.7,
+            'TRENDING_UP': 1.2,    # SL дальше — даём тренду пространство
+            'TRENDING_DOWN': 1.2,
+            'HIGH_VOL': 1.0,       # без изменений
+            'LOW_VOL': 0.85,        # чуть ближе
+            'NEUTRAL': 1.0,
+        }.get(regime, 1.0)
+        base_mult *= regime_adj
+    except Exception:
+        pass
+
+    return base_mult
 
 
 def _get_bb_ws(symbol, interval='D'):
