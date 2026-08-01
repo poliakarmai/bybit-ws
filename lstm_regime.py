@@ -608,7 +608,6 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
             if not _verify_lstm_file(SCALER_PATH):
                 print(f'⚠️ HMAC mismatch for {SCALER_PATH} — skipping LSTM', flush=True)
                 return None
-            import json
             with open(SCALER_PATH, 'r') as f:
                 scaler_data = json.load(f)
             from sklearn.preprocessing import StandardScaler
