@@ -51,33 +51,6 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
         if size <= 0 or entry <= 0 or mark <= 0:
             continue
 
-        # ── v8.1: Time-stop: закрыть если в минусе > 48ч ──
-        created_ms = p.get('createdTime', 0)
-        if created_ms and created_ms > 0:
-            upnl = float(p.get("unrealisedPnl", p.get("upnl", 0)))
-            hold_h = (time.time() * 1000 - created_ms) / (3600 * 1000)
-            if hold_h > 48 and upnl < 0:
-                from .alerts import log_event, send_high_alert
-                try:
-                    from .api import bybit
-                    close_side = "Sell" if side == "Buy" else "Buy"
-                    res = bybit("POST", "/v5/order/create", {
-                        "category": "linear", "symbol": sym, "side": close_side,
-                        "orderType": "Market", "qty": str(size),
-                        "positionIdx": idx, "reduceOnly": True,
-                    })
-                    if res and res.get("retCode") == 0:
-                        msg = f"⏰ TIME-STOP {sym}: {hold_h:.0f}h, -${abs(upnl):.2f} — closed"
-                        log_event(msg)
-                        send_high_alert(msg, level="CLOSE")
-                        alerts.append(msg)
-                    else:
-                        err = res.get("retMsg", "?") if res else "?"
-                        log_event(f"⚠️ TIME-STOP {sym}: close failed — {err}")
-                except Exception as e:
-                    log_event(f"⚠️ TIME-STOP {sym}: {e}")
-                continue  # skip SL for closed position
-
         # ── v8.1: Time-stop — закрыть если в минусе > 48ч ──
         created_ms = p.get('createdTime', 0)
         upnl = float(p.get('unrealisedPnl', p.get('upnl', 0)))
