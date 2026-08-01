@@ -693,22 +693,9 @@ async def async_main_loop():
                     from .risk_manager import check_correlation_panic
                     panic_reason = check_correlation_panic(new_positions)
                     if panic_reason:
-                        from .api import bybit
-                        log_event(f'🦢 BLACKSWAN: {panic_reason}')
-                        # Закрываем только красные позиции, не все
-                        red_syms = [s for s, p in new_positions.items() 
-                                   if float(p.get('unrealisedPnl', p.get('upnl', 0))) < 0]
-                        for sym in red_syms:
-                            try:
-                                close_side = 'Sell' if new_positions[sym].get('side', 'Buy') == 'Buy' else 'Buy'
-                                bybit('POST', '/v5/order/create', {
-                                    'category': 'linear', 'symbol': sym, 'side': close_side,
-                                    'orderType': 'Market', 'qty': str(new_positions[sym].get('size', 0)),
-                                    'positionIdx': new_positions[sym].get('positionIdx', 0), 'reduceOnly': True,
-                                })
-                            except Exception:
-                                pass
-                        send_high_alert(f'🦢 BLACKSWAN: {panic_reason} — закрыто {len(red_syms)} позиций', level='CRITICAL')
+                        log_event(f'🦢 BLACKSWAN ALERT: {panic_reason}')
+                        send_high_alert(f'🦢 BLACKSWAN: {panic_reason}\n\nЗакрыть красные позиции? Напиши «да»', level='CRITICAL')
+                        # v9.1: только алерт, без авто-закрытия. Ждём команду пользователя.
                 except Exception as e:
                     log_event(f'⚠️ blackswan check error: {e}')
             if new_positions:

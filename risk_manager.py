@@ -774,8 +774,8 @@ def get_risk_full(positions: Optional[dict] = None) -> dict:
 # BlackSwan v2 — корреляционная паника (v9, 01.08.2026)
 # ═══════════════════════════════════════════════════════════════════════════
 
-BLACKSWAN_MIN_RED_POSITIONS = 3   # мин. кол-во позиций в минусе для паники
-BLACKSWAN_TOTAL_UPNL_THRESHOLD = -50  # общий uPnL хуже этого → триггер
+BLACKSWAN_MIN_RED_POSITIONS = 5   # мин. кол-во позиций в минусе для алерта
+BLACKSWAN_TOTAL_UPNL_THRESHOLD = -150  # общий uPnL хуже этого → алерт (не закрытие!)
 
 def check_correlation_panic(positions: dict) -> Optional[str]:
     """BlackSwan v2: если 3+ позиций одновременно в минус — паника.
