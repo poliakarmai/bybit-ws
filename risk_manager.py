@@ -608,7 +608,25 @@ def check(
     if new_symbol is None:
         return True, ''
 
-    # ── 2. Проверка banned_symbols ──
+    # ── 2. Anti-ludomania: 3 убытка подряд за час → блок 30 мин ──
+    try:
+        from .state_db import StateDB
+        db = StateDB()
+        cutoff = int(time.time()) - 3600  # последний час
+        recent = db.conn.execute(
+            "SELECT pnl FROM trade_history WHERE closed_at > ? ORDER BY id DESC LIMIT 3",
+            (cutoff,)
+        ).fetchall()
+        if len(recent) >= 3 and all(r[0] is not None and r[0] < 0 for r in recent):
+            total_loss = sum(r[0] for r in recent)
+            return False, (
+                f'🛑 Anti-ludomania: 3 убытка подряд за час (${total_loss:.2f}). '
+                f'Пауза 30 минут.'
+            )
+    except Exception:
+        pass
+
+    # ── 3. Проверка banned_symbols ──
     cfg = config if config is not None else _get_config()
     banned = cfg.risk.get('banned_symbols', []) if hasattr(cfg, 'risk') else []
     if new_symbol in banned:
