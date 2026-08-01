@@ -147,6 +147,18 @@ def _import_bybit_trades(data_dir):
                     }) + '\n')
                     imported += 1
                     existing_keys.add(key)
+                    # ── SQLite: запись в trade_history для self-learn ──
+                    try:
+                        entry_ts_raw = int(item.get('createdTime', 0))
+                        sync_db.add_trade(
+                            symbol=sym, side='Buy' if side == 'buy' else 'Sell',
+                            strategy='auto', entry_price=float(item.get('avgEntryPrice', 0)),
+                            exit_price=price, size=qty, pnl=pnl,
+                            entry_at=int(entry_ts_raw / 1000) if entry_ts_raw else None,
+                            closed_at=int(ts_val),
+                        )
+                    except Exception:
+                        pass
                     # ── v4: Exit reason tracking + streak ──
                     entry_ts = int(item.get('createdTime', 0)) / 1000
                     try:
