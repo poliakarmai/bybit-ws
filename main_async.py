@@ -69,6 +69,8 @@ from .risk_manager import check as risk_check, is_circuit_breaker_active
 
 # ── Константы ──
 SHUTDOWN = False
+MEAN_REVERT_ENABLED = False  # отключено 01.08.2026
+MEAN_REVERT_ENABLED = False  # отключено 01.08.2026 — BB%=0-5% на падающем рынке не работает
 
 
 # ═══════════════════════════════════════════════════════════
@@ -404,30 +406,31 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             for r in (rotations or []):
                 add_alert('INFO', '🔄 Funding Rotation: ' + str(r.get('from', '?')) + ' → ' + str(r.get('to', '?')) + ' (' + str(r.get('reason', '')) + ')')
         except Exception as e:
-            log_event(f'⚠️ funding_rotation error: {e}\n' + traceback.format_exc())
+            log_event(f'⚠️ funding_rotation error: {e}\\n' + traceback.format_exc())
 
-        # ── Mean Reversion Extreme x10 ──
-        try:
-            mr_result = await run_in_thread(check_mean_revert, positions)
-            mean_alerts, mean_entries = mr_result[0] if isinstance(mr_result[0], tuple) else (mr_result[0] or [], [])
-            for msg in (mean_alerts or []):
-                add_alert('ENTRY', msg)
-            for entry_info in (mean_entries or []):
-                try:
-                    sym = entry_info['symbol']
-                    side = entry_info['side']
-                    entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
-                    if not entry_allowed:
-                        log_event(f'🛑 Risk blocked mean_revert {sym}: {risk_reason}')
-                        continue
-                    exec_result = await run_in_thread(execute_mean_revert, entry_info)
-                    ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
-                    if ok:
-                        log_event(f'📊 Mean Revert Entry: {entry_info}')
-                except Exception as e:
-                    log_event(f'⚠️ mean_revert execute error: {e}')
-        except Exception as e:
-            log_event(f'⚠️ mean_revert error: {e}\n' + traceback.format_exc())
+        # ── Mean Reversion Extreme x10 (ОТКЛЮЧЕНО 01.08.2026) ──
+        if MEAN_REVERT_ENABLED:
+            try:
+                mr_result = await run_in_thread(check_mean_revert, positions)
+                mean_alerts, mean_entries = mr_result[0] if isinstance(mr_result[0], tuple) else (mr_result[0] or [], [])
+                for msg in (mean_alerts or []):
+                    add_alert('ENTRY', msg)
+                for entry_info in (mean_entries or []):
+                    try:
+                        sym = entry_info['symbol']
+                        side = entry_info['side']
+                        entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
+                        if not entry_allowed:
+                            log_event(f'🛑 Risk blocked mean_revert {sym}: {risk_reason}')
+                            continue
+                        exec_result = await run_in_thread(execute_mean_revert, entry_info)
+                        ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
+                        if ok:
+                            log_event(f'📊 Mean Revert Entry: {entry_info}')
+                    except Exception as e:
+                        log_event(f'⚠️ mean_revert execute error: {e}')
+            except Exception as e:
+                log_event(f'⚠️ mean_revert error: {e}\n' + traceback.format_exc())
 
         # ── BB Scalping M5/M15 x10 ──
         try:
