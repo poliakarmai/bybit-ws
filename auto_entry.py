@@ -146,7 +146,9 @@ def _filter_by_mtf_confluence(scored: list, direction: str) -> list:
         sym = s['symbol']
         conf = check_confluence(sym, direction)
         if conf is None:
-            filtered.append(s)
+            # Нет данных D-TF → блокируем (не пускаем слепые входы)
+            from .alerts import log_event
+            log_event(f'🚫 MTF nodata: {sym} {direction} — нет данных D-TF, вход заблокирован')
             continue
         if conf['approved']:
             s['mtf'] = conf
