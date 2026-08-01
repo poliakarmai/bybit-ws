@@ -40,7 +40,14 @@ CREATE TABLE IF NOT EXISTS trade_history (
     pnl REAL,
     fees REAL DEFAULT 0,
     entry_at INTEGER,
-    closed_at INTEGER
+    closed_at INTEGER,
+    bb_pct REAL,
+    rsi REAL,
+    entry_reason TEXT,
+    dca_count INTEGER DEFAULT 0,
+    partial_tp_count INTEGER DEFAULT 0,
+    exit_reason TEXT,
+    hold_hours REAL
 );
 CREATE INDEX IF NOT EXISTS idx_trade_symbol ON trade_history(symbol);
 CREATE INDEX IF NOT EXISTS idx_trade_closed ON trade_history(closed_at);
