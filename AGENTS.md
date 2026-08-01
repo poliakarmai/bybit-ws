@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-07-12 (v7.9 — Unified SL)
+> Обновлено: 2026-08-01 (v8.0 — One-Click Trading + LSTM fix)
 
 ## Что это
 
@@ -12,18 +12,22 @@ Systemd-сервис `bybit-ws-async`, ~45 MB RAM, SQLite — SSOT.
 
 ```
 bybit-ws/
-├── main_async.py         ← Главный цикл (async, 30с)
+├── main_async.py         ← Главный цикл (async, 30с). Self-learn каждые 720 циклов (6ч)
 ├── unified_sl.py          ← Unified SL (5→1, приоритет: tight>simple>hard>BE>default)
 ├── auto_entry.py          ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
 ├── auto_sl.py             ← ATR-adaptive SL (legacy, заменён unified_sl)
 ├── auto_tp.py             ← ATR-based TP (1×/2×/3× ATR)
 ├── risk_manager.py       ← Risk + BlackSwan (3-tier) + emergency_close
 ├── entry_judge.py        ← Cross-model judge (Nemotron→DeepSeek, fail-closed)
-├── rpc.py                ← JSON-RPC (:8766) + /kill_switch + /metrics
+├── lstm_regime.py         ← LSTM-классификатор режима (82.3% точность, 5 классов)
+├── rpc.py                ← JSON-RPC (:8766) + /kill_switch + /metrics + one-click
 ├── state_db.py           ← SQLite SSOT (WAL, busy_timeout=5с)
 ├── journal/              ← Самообучение + Canary mode
-├── deploy.sh             ← Атомарный деплой
-└── test_smoke.py         ← 52 интеграционных тестов
+├── deploy.sh             ← Атомарный деплой (pre-deploy 6 checks + canary 8 checks)
+├── test_smoke.py         ← 52 интеграционных тестов
+└── docs/
+    ├── history.md         ← История фаз
+    └── PRD-one-click.md   ← One-click trading архитектура
 ```
 
 ## Запуск
@@ -31,7 +35,7 @@ bybit-ws/
 ```bash
 systemctl --user start bybit-ws-async     # старт
 systemctl --user status bybit-ws-async    # статус
-bash deploy.sh                             # деплой (smoke-тесты → атомарный swap)
+bash deploy.sh                             # деплой (smoke → logic → canary)
 python3 test_smoke.py                      # тесты
 ```
 
@@ -46,6 +50,8 @@ python3 test_smoke.py                      # тесты
 | RPC | `http://127.0.0.1:8766` |
 | Трейды | `~/.local/share/bybit-ws/trades.jsonl` |
 | Canary state | `~/.local/share/bybit-ws/canary_state.json` |
+| LSTM модель | `~/.local/share/bybit-ws/models/lstm_regime.pt` |
+| LSTM скейлер | `~/.local/share/bybit-ws/models/lstm_regime_scaler.pkl` |
 
 ## Аварийные ситуации
 
@@ -58,6 +64,41 @@ curl -X POST http://127.0.0.1:8766/emergency_close -H "Authorization: Bearer TOK
 
 # Сбросить LLM Circuit Breaker
 systemctl --user restart bybit-ws-async
+```
+
+## RPC-эндпоинты
+
+`/scan` → `/calc_qty` → `/enter` → `/positions`
+
+### GET
+
+| Эндпоинт | Назначение |
+|----------|-----------|
+| `/health` | Статус (alive, uptime, cycle_count) |
+| `/positions` | Открытые позиции + PnL |
+| `/balance` | USDT баланс (walletBalance, available, equity) |
+| `/metrics` | Prometheus-метрики |
+| `/risk` | Лимиты риска + circuit breaker |
+
+### POST (Bearer-токен обязателен)
+
+| Эндпоинт | Назначение | Параметры |
+|----------|-----------|-----------|
+| `/scan` | GridSignal-скан | `{mode, interval, symbol?}` |
+| `/enter` | Вход в позицию | `{symbol, side, qty, sl?, tp?, confirm}` |
+| `/close` | Закрыть позицию | `{symbol}` |
+| `/calc_qty` | Расчёт размера позиции | `{symbol, risk_pct, leverage}` |
+| `/move_sl` | Передвинуть SL | `{symbol, stop_loss}` |
+| `/kill_switch` | Закрыть всё + пауза | — |
+| `/emergency_close` | Закрыть всё без паузы | — |
+
+### Воркфлоу one-click (через Hermes-чат)
+
+```
+«просканируй SOL» → /scan → сигнал с BB%/RSI
+«бери SOL 5%»     → /calc_qty → qty + SL/TP
+                   → /enter confirm:true → позиция открыта
+«позиции»         → /positions → live PnL + кнопка закрыть
 ```
 
 ## MCP-инструменты
@@ -73,6 +114,14 @@ systemctl --user restart bybit-ws-async
 | `place_entry(symbol, side, qty)` | Вход |
 | `get_journal()` | Журнал (FIFO, bias) |
 
+## LSTM Market Regime
+
+- **Модель:** 82.3% точность (переобучена 01.08.2026)
+- **Классы:** TRENDING_UP, TRENDING_DOWN, RANGING, HIGH_VOL, LOW_VOL
+- **Feature flag:** `BYBIT_REGIME_AUTO=0` (default) — авто-переключение LONG/SHORT выключено
+- **CLI:** `python3 lstm_regime.py --predict` — текущий режим
+- **Обучение:** `python3 lstm_regime.py --train` (100 эпох, ~3 мин)
+
 ## Codebase-memory MCP — вместо grep
 
 Проект проиндексирован: 2686 узлов, 8640 рёбер.
@@ -87,7 +136,7 @@ systemctl --user restart bybit-ws-async
 
 ## Pre-deploy checklist
 
-- [ ] `python3 test_smoke.py` → PASS
+- [ ] `python3 test_smoke.py` → PASS (52/52)
 - [ ] `sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA integrity_check"` → ok
 - [ ] `curl -s http://127.0.0.1:8766/health` → alive
 - [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий

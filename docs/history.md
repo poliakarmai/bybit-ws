@@ -95,3 +95,26 @@ Walk-forward валидация ML.
 - `deploy.sh` упрощён: копирование → тесты → рестарт
 - bb_scalp + funding_rotation активированы
 - risk_check gate для mean_revert и funding_entry
+
+## Фаза 8: One-Click Trading + LSTM Fix (01.08.2026)
+
+### One-Click Trading Infrastructure
+- RPC: `POST /calc_qty` — расчёт размера позиции по % риска (balance × risk% × leverage / entry)
+- RPC: `GET /balance` — USDT баланс (walletBalance, available, equity)
+- Воркфлоу: «просканируй» → «бери X%» → `/calc_qty` → `/enter` → unified_sl подхватывает
+- Изоляция: one-click позиции = обычные, не manual, авто-стратегии не ломаются
+
+### SL Throttle Fix
+- Throttle (120с) теперь для ВСЕХ типов SL, включая tight_trail
+- `not modified` от Bybit больше не treated as error
+
+### LSTM Regime Classifier
+- Переобучен: 33.1% → 82.3% точность (100 эпох)
+- Починен `--predict` (import json в функции)
+- Текущий режим: RANGING (92% confidence)
+
+### Self-Learn
+- Интервал: 720 циклов (каждые 6 часов) — уменьшено с 2880
+
+### Gateway Stability
+- deprovision.py: `restart` → `reload` (больше не роняет gateway каждый час)
