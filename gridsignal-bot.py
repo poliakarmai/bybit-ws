@@ -1188,6 +1188,74 @@ async def cmd_setrisk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+# ══ /position — One-click: live-позиции ══
+
+async def cmd_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """📋 /position — текущие позиции с PnL, SL, TP и кнопкой «Закрыть» (админ)."""
+    user_id = update.effective_user.id
+    is_admin = user_id == GRIDSIGNAL_ADMIN_ID
+
+    result = rpc_call('/positions', method='GET')
+
+    if 'error' in result:
+        await update.message.reply_text(f"❌ RPC ошибка: {result['error']}")
+        return
+
+    if not isinstance(result, list) or not result:
+        await update.message.reply_text("📭 Нет открытых позиций.")
+        return
+
+    lines = ["📋 **Текущие позиции:**\n"]
+    has_positions = False
+
+    for p in result:
+        if not isinstance(p, dict):
+            continue
+        sym = p.get('symbol', '?')
+        side = p.get('side', 'Buy')
+        entry = float(p.get('entry', 0))
+        mark = float(p.get('mark', 0))
+        size = float(p.get('size', 0))
+        sl = p.get('stopLoss', 0)
+        tp = p.get('takeProfit', 0)
+        upnl = float(p.get('upnl', 0))
+
+        if size <= 0:
+            continue
+        has_positions = True
+
+        pnl_pct = ((mark - entry) / entry * 100) if side == 'Buy' else ((entry - mark) / entry * 100)
+        side_emoji = '📈' if side == 'Buy' else '📉'
+        pnl_sign = '+' if upnl >= 0 else ''
+
+        lines.append(
+            f"{side_emoji} **{sym}** ×{size}\n"
+            f"   Entry: `${entry:.4f}` → Mark: `${mark:.4f}`\n"
+            f"   PnL: {pnl_sign}${upnl:.2f} ({pnl_sign}{pnl_pct:.1f}%)\n"
+            f"   🛡 SL: `${sl}` | 🎯 TP: `${tp}`\n"
+        )
+
+    if not has_positions:
+        await update.message.reply_text("📭 Нет открытых позиций.")
+        return
+
+    # Кнопки «Закрыть» для админа
+    keyboard = None
+    if is_admin:
+        buttons = []
+        for p in result:
+            if isinstance(p, dict) and float(p.get('size', 0)) > 0:
+                sym = p.get('symbol', '?')
+                buttons.append([InlineKeyboardButton(
+                    f"❌ Закрыть {sym.replace('USDT', '')}",
+                    callback_data=f"oc:close:{sym}"
+                )])
+        if buttons:
+            keyboard = InlineKeyboardMarkup(buttons)
+
+    await update.message.reply_text("\n".join(lines), reply_markup=keyboard)
+
+
 # ══ #4 /history ══
 
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1510,6 +1578,20 @@ async def oneclick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == 'oc:cancel':
         await query.message.reply_text("🚫 Вход отменён.")
+
+    # ── Закрытие позиции ──
+    elif data.startswith('oc:close:'):
+        symbol = data.split(':')[2]
+        await query.message.reply_text(f"⏳ Закрываю **{symbol}**...")
+
+        result = rpc_call('/close', {'symbol': symbol})
+
+        if 'error' in result:
+            await query.message.reply_text(f"❌ Ошибка закрытия: {result.get('error') or result.get('detail', 'Unknown')}")
+            return
+
+        pnl = result.get('realizedPnl', '?')
+        await query.message.reply_text(f"✅ **{symbol}** закрыт. PnL: `${pnl}`")
 
 
 async def deprovision_expired(context: ContextTypes.DEFAULT_TYPE):
@@ -2811,6 +2893,7 @@ def main():
     app.add_handler(CommandHandler('subscribe', cmd_subscribe))
     app.add_handler(CommandHandler('pro', cmd_subscribe))
     app.add_handler(CommandHandler('status', cmd_status))
+    app.add_handler(CommandHandler('position', cmd_position))
     app.add_handler(CallbackQueryHandler(button_handler, pattern=r'^(pro_buy|pro_buy_ton|check_ton_\d+|scan|status)$'))
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
