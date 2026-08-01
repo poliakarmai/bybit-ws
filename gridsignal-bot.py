@@ -747,6 +747,45 @@ def share_keyboard(symbol: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def oneclick_keyboard(symbol: str, side: str = 'Buy') -> InlineKeyboardMarkup:
+    """Кнопки для one-click trading (только админ)."""
+    side_label = '📈 LONG' if side == 'Buy' else '📉 SHORT'
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🎯 Взять {side_label}", callback_data=f"oc:enter:{symbol}:{side}")],
+        [InlineKeyboardButton("📤 Поделиться", switch_inline_query=symbol.replace('USDT', ''))]
+    ])
+
+
+# ── RPC helper ──
+
+def rpc_call(endpoint: str, body: dict = None, method: str = 'POST') -> dict:
+    """Вызвать bybit-ws RPC и вернуть JSON или {'error': ...}."""
+    import urllib.request
+    try:
+        token = _load_rpc_token_sync()
+        url = f"http://localhost:8766{endpoint}"
+        data = json.dumps(body).encode() if body else None
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header('Authorization', f'Bearer {token}')
+        req.add_header('Content-Type', 'application/json')
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def _load_rpc_token_sync():
+    """Синхронная загрузка RPC токена (для вызовов из бота)."""
+    try:
+        db_path = os.path.expanduser("~/.local/share/bybit-ws/state.db")
+        db = sqlite3.connect(db_path)
+        row = db.execute("SELECT value FROM kv_store WHERE key='rpc_auth_token'").fetchone()
+        db.close()
+        return row[0] if row else ''
+    except Exception:
+        return ''
+
+
 # ═══════════════════════════════════════════════════════════════
 # Команды
 # ═══════════════════════════════════════════════════════════════
@@ -981,7 +1020,17 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(t('scan_remaining', lang, max(0, remaining), MAX_SCANS_PER_DAY))
     lines.append(t('scan_footer', lang))
 
-    await status_msg.edit_text("\n".join(lines), reply_markup=share_keyboard(signals[0]['symbol']))
+    # ── Клавиатура: админ → one-click, остальные → share ──
+    is_admin = user_id == GRIDSIGNAL_ADMIN_ID
+    if is_admin:
+        # Для LONG сигналов — кнопка Взять LONG; для SHORT — Взять SHORT
+        first_signal = signals[0]
+        sig_side = 'Sell' if first_signal.get('mode', '').startswith('SHORT') else 'Buy'
+        keyboard = oneclick_keyboard(first_signal['symbol'], sig_side)
+    else:
+        keyboard = share_keyboard(signals[0]['symbol'])
+
+    await status_msg.edit_text("\n".join(lines), reply_markup=keyboard)
     update_scan_count(conn, user_id)
     conn.close()
 
@@ -1341,6 +1390,126 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await query.message.reply_text("❌ Платёж не найден. Оплати счёт в @CryptoBot и нажми кнопку снова.")
+
+
+# ══ One-Click Trading Callbacks ══
+
+async def oneclick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка one-click кнопок: oc:enter и oc:confirm."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = query.from_user.id
+
+    if user_id != GRIDSIGNAL_ADMIN_ID:
+        await query.message.reply_text("🔒 One-click trading — только для админа.")
+        return
+
+    conn = init_db()
+    risk = get_user_risk(conn, user_id)
+    user = get_user(conn, user_id)
+    conn.close()
+
+    # ── Шаг 1: «Взять» → запрос /calc_qty ──
+    if data.startswith('oc:enter:'):
+        parts = data.split(':')
+        if len(parts) < 4:
+            return
+        symbol = parts[2]
+        side = parts[3]
+
+        await query.message.reply_text(f"⏳ Рассчитываю размер позиции для **{symbol}**...")
+
+        result = rpc_call('/calc_qty', {
+            'symbol': symbol,
+            'risk_pct': risk['risk_pct'],
+            'leverage': risk['leverage'],
+        })
+
+        if 'error' in result:
+            await query.message.reply_text(f"❌ Ошибка RPC: {result['error']}")
+            return
+
+        qty = result.get('qty', 0)
+        entry_price = result.get('entry_price', 0)
+        risk_amount = result.get('risk_amount', 0)
+        message = result.get('message', '')
+        balance = result.get('balance', 0)
+
+        if qty <= 0 or entry_price <= 0:
+            await query.message.reply_text(f"❌ Не удалось рассчитать размер позиции: {message}")
+            return
+
+        # Превью входа
+        entry_val = entry_price
+        sl_val = round(entry_val * 0.93, 4) if side == 'Buy' else round(entry_val * 1.07, 4)
+        tp_val = round(entry_val * 1.10, 4) if side == 'Buy' else round(entry_val * 0.90, 4)
+        side_label = '📈 LONG' if side == 'Buy' else '📉 SHORT'
+
+        # Проверка что нет позиции
+        pos_check = rpc_call('/positions', method='GET')
+        existing = [p for p in (pos_check if isinstance(pos_check, list) else [])
+                    if isinstance(p, dict) and p.get('symbol') == symbol]
+        if existing:
+            await query.message.reply_text(f"⚠️ Уже есть позиция по **{symbol}**. Сначала закрой её.")
+            return
+
+        cb_data = f"oc:confirm:{symbol}:{side}:{qty}:{sl_val}:{tp_val}"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Да, войти", callback_data=cb_data)],
+            [InlineKeyboardButton("❌ Отмена", callback_data="oc:cancel")],
+        ])
+
+        text = (
+            f"🎯 **Подтверждение входа**\n\n"
+            f"{side_label} **{symbol}**\n"
+            f"Цена: `${entry_price}`\n"
+            f"Размер: **{qty}** контрактов\n"
+            f"Риск: `${risk_amount}` ({risk['risk_pct']:.0f}% от ${balance:.0f})\n"
+            f"Плечо: **{risk['leverage']}x** · Маржа: **{risk['margin_mode']}**\n\n"
+            f"🛡 SL: `${sl_val}`\n"
+            f"🎯 TP: `${tp_val}`\n\n"
+            f"Войти?"
+        )
+        await query.message.reply_text(text, reply_markup=kb)
+
+    # ── Шаг 2: Подтверждение → /enter ──
+    elif data.startswith('oc:confirm:'):
+        parts = data.split(':')
+        if len(parts) < 7:
+            return
+        symbol = parts[2]
+        side = parts[3]
+        qty = parts[4]
+        sl = parts[5]
+        tp = parts[6]
+
+        await query.message.reply_text(f"⏳ Вхожу в **{symbol}** {side}...")
+
+        result = rpc_call('/enter', {
+            'symbol': symbol,
+            'side': side,
+            'qty': float(qty),
+            'sl': float(sl),
+            'tp': float(tp),
+            'confirm': True,
+        })
+
+        if 'error' in result:
+            await query.message.reply_text(f"❌ Ошибка входа: {result.get('error') or result.get('detail', 'Unknown')}")
+            return
+
+        side_label = '📈 LONG' if side == 'Buy' else '📉 SHORT'
+        await query.message.reply_text(
+            f"✅ **Позиция открыта!**\n\n"
+            f"{side_label} **{symbol}** ×{qty}\n"
+            f"🛡 SL: `${sl}` | 🎯 TP: `${tp}`\n\n"
+            f"SL подхвачен unified_sl — ведётся автоматически.\n"
+            f"📋 `/position` — следить за позицией."
+        )
+
+    elif data == 'oc:cancel':
+        await query.message.reply_text("🚫 Вход отменён.")
 
 
 async def deprovision_expired(context: ContextTypes.DEFAULT_TYPE):
@@ -2655,6 +2824,7 @@ def main():
     app.add_handler(CommandHandler('dex', cmd_dex))
     app.add_handler(CallbackQueryHandler(lang_callback, pattern='^lang:'))
     app.add_handler(CallbackQueryHandler(delalert_callback, pattern='^delalert:'))
+    app.add_handler(CallbackQueryHandler(oneclick_handler, pattern='^oc:'))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
 
