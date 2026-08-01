@@ -2281,6 +2281,8 @@ async def handle_dex_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return  # стикер, фото, edit — игнорируем
     text = update.message.text
 
     # DEX-режим: пользователь вводит тикер после нажатия 🔍 DEX
