@@ -151,12 +151,61 @@ class StateDB:
         return dict(zip(cols, row))
 
     def add_trade(self, symbol, side, strategy, entry_price, exit_price,
-                  size, pnl, fees=0, entry_at=None, closed_at=None):
+                  size, pnl, fees=0, entry_at=None, closed_at=None,
+                  bb_pct=None, rsi=None, entry_reason=None,
+                  dca_count=0, partial_tp_count=0, exit_reason=None, hold_hours=None):
         self.conn.execute("""INSERT INTO trade_history
-            (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at,
+             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, side, strategy, entry_price, exit_price, size, pnl,
-             fees, entry_at or int(time.time()), closed_at or int(time.time())))
+             fees, entry_at or int(time.time()), closed_at or int(time.time()),
+             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours))
+        self.conn.commit()
+        return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    def record_entry(self, symbol, side, strategy, entry_price, size,
+                     bb_pct=None, rsi=None, entry_reason=None):
+        """Записать контекст входа (без exit_price/pnl — позиция открыта)."""
+        return self.add_trade(
+            symbol=symbol, side=side, strategy=strategy,
+            entry_price=entry_price, exit_price=0, size=size, pnl=0,
+            bb_pct=bb_pct, rsi=rsi, entry_reason=entry_reason,
+            closed_at=None,  # ещё не закрыта
+        )
+
+    def update_trade_exit(self, trade_id, exit_price, pnl, exit_reason=None, hold_hours=None):
+        """Обновить сделку при закрытии."""
+        self.conn.execute("""UPDATE trade_history
+            SET exit_price=?, pnl=?, exit_reason=?, hold_hours=?, closed_at=?
+            WHERE id=?""",
+            (exit_price, pnl, exit_reason, hold_hours, int(time.time()), trade_id))
+        self.conn.commit()
+
+    def update_trade_dca(self, trade_id):
+        """Инкрементировать счётчик DCA."""
+        self.conn.execute(
+            "UPDATE trade_history SET dca_count = dca_count + 1 WHERE id=?", (trade_id,))
+        self.conn.commit()
+
+    def update_trade_partial_tp(self, trade_id):
+        """Инкрементировать счётчик partial TP."""
+        self.conn.execute(
+            "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 WHERE id=?", (trade_id,))
+        self.conn.commit()
+
+    def inc_dca_for_symbol(self, symbol):
+        """Инкрементировать DCA для последней незакрытой сделки по символу."""
+        self.conn.execute(
+            "UPDATE trade_history SET dca_count = dca_count + 1 "
+            "WHERE symbol=? AND closed_at IS NULL ORDER BY id DESC LIMIT 1", (symbol,))
+        self.conn.commit()
+
+    def inc_partial_tp_for_symbol(self, symbol):
+        """Инкрементировать partial TP для последней незакрытой сделки по символу."""
+        self.conn.execute(
+            "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 "
+            "WHERE symbol=? AND closed_at IS NULL ORDER BY id DESC LIMIT 1", (symbol,))
         self.conn.commit()
 
     def get_trades(self, symbol=None, since=None, limit=100):

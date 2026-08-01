@@ -150,12 +150,23 @@ def _import_bybit_trades(data_dir):
                     # ── SQLite: запись в trade_history для self-learn ──
                     try:
                         entry_ts_raw = int(item.get('createdTime', 0))
+                        hold_h = (ts_val - entry_ts_raw/1000) / 3600 if entry_ts_raw else None
+                        exit_reason = 'Unknown'
+                        sl_price = item.get('stopLoss', '')
+                        tp_price = item.get('takeProfit', '')
+                        if sl_price and float(sl_price) > 0:
+                            exit_reason = 'SL'
+                        elif tp_price and float(tp_price) > 0:
+                            exit_reason = 'TP'
+                        elif hold_h and hold_h > 48:
+                            exit_reason = 'Time'
                         sync_db.add_trade(
                             symbol=sym, side='Buy' if side == 'buy' else 'Sell',
                             strategy='auto', entry_price=float(item.get('avgEntryPrice', 0)),
                             exit_price=price, size=qty, pnl=pnl,
                             entry_at=int(entry_ts_raw / 1000) if entry_ts_raw else None,
                             closed_at=int(ts_val),
+                            exit_reason=exit_reason, hold_hours=hold_h,
                         )
                     except Exception:
                         pass
@@ -473,6 +484,13 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         for msg in (dca_msgs[0] or []):
             add_alert('ENTRY', msg)
             send_high_alert(msg, level='ENTRY')  # Push: ⚡ на телефон
+            # ── v8.1: DCA counter ──
+            try:
+                sym = msg.split()[0] if msg else ''
+                if sym:
+                    sync_db.inc_dca_for_symbol(sym)
+            except Exception:
+                pass
 
     # Partial TP (каждые 4 цикла)
     if cycle_count % 4 == 0:
@@ -480,6 +498,13 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         for msg in (ptp_msgs[0] or []):
             add_alert('TP', msg)
             send_high_alert(msg, level='TP')  # Push: ⚡ на телефон
+            # ── v8.1: partial TP counter ──
+            try:
+                sym = msg.split()[0] if msg else ''
+                if sym:
+                    sync_db.inc_partial_tp_for_symbol(sym)
+            except Exception:
+                pass
 
     # Ждём параллельные задачи
     if tasks:

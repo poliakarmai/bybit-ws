@@ -706,6 +706,24 @@ def auto_entry_scan(positions):
                     f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
+                # ── v8.1: запись контекста входа в trade_history ──
+                try:
+                    from bybit_ws.state_db import sync_db
+                    entry_reason = f'score={s.get("score")}/{s.get("max_score")} BB={s.get("bb_pos"):.0f}%'
+                    if 'mtf' in s:
+                        entry_reason += f' MTF={s["mtf"]["confluence"]}/3'
+                    if regime_name != 'NEUTRAL':
+                        entry_reason += f' regime={regime_name}'
+                    if ensemble_decision:
+                        entry_reason += f' RL={ensemble_decision}'
+                    sync_db.record_entry(
+                        symbol=sym, side='Buy', strategy='bollinger_grid',
+                        entry_price=price, size=qty,
+                        bb_pct=s.get('bb_pos'), rsi=s.get('rsi'),
+                        entry_reason=entry_reason,
+                    )
+                except Exception:
+                    pass
                 # ── Canary: маркируем вход для последующего матчинга при закрытии ──
                 try:
                     from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
