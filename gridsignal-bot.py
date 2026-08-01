@@ -241,9 +241,50 @@ def init_db():
         conn.execute('ALTER TABLE alerts ADD COLUMN bb_zone REAL DEFAULT 100')
     except Exception:
         pass  # already exists
+    # ── One-click trading: риск-профиль ──
+    conn.execute('''CREATE TABLE IF NOT EXISTS user_risk (
+        user_id INTEGER PRIMARY KEY,
+        risk_pct REAL DEFAULT 5.0,
+        leverage INTEGER DEFAULT 3,
+        margin_mode TEXT DEFAULT 'isolated',
+        max_positions INTEGER DEFAULT 5,
+        updated_at TEXT
+    )''')
     conn.commit()
     return conn
 
+
+# ── One-click trading helpers ──
+
+def get_user_risk(conn, user_id: int) -> dict:
+    """Получить риск-профиль пользователя."""
+    row = conn.execute('SELECT risk_pct, leverage, margin_mode, max_positions FROM user_risk WHERE user_id=?',
+                       (user_id,)).fetchone()
+    if not row:
+        conn.execute('INSERT OR IGNORE INTO user_risk(user_id) VALUES(?)', (user_id,))
+        conn.commit()
+        return {'risk_pct': 5.0, 'leverage': 3, 'margin_mode': 'isolated', 'max_positions': 5}
+    return {'risk_pct': row[0], 'leverage': row[1], 'margin_mode': row[2], 'max_positions': row[3]}
+
+
+def set_user_risk(conn, user_id: int, **kwargs):
+    """Обновить риск-профиль. kwargs: risk_pct, leverage, margin_mode, max_positions."""
+    fields = []
+    values = []
+    for k in ('risk_pct', 'leverage', 'max_positions'):
+        if k in kwargs:
+            fields.append(f'{k}=?')
+            values.append(kwargs[k])
+    if 'margin_mode' in kwargs:
+        fields.append('margin_mode=?')
+        values.append(kwargs['margin_mode'])
+    if fields:
+        fields.append("updated_at=?")
+        values.append(_now())
+        values.append(user_id)
+        conn.execute('INSERT OR IGNORE INTO user_risk(user_id) VALUES(?)', (user_id,))
+        conn.execute(f"UPDATE user_risk SET {', '.join(fields)} WHERE user_id=?", values)
+        conn.commit()
 
 def get_user(conn, user_id: int) -> dict:
     row = conn.execute('SELECT user_id, username, first_name, scans_today, last_scan_ts, deposit, subscribed FROM users WHERE user_id = ?', (user_id,)).fetchone()
@@ -948,43 +989,154 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ══ #5 /setrisk ══
 
 async def cmd_setrisk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """💰 /setrisk — риск-профиль для one-click trading.
+    Использование:
+      /setrisk                    — показать текущие настройки
+      /setrisk depo 500           — депозит $500
+      /setrisk risk 5             — 5% риска на сделку
+      /setrisk lev 3              — плечо 3x
+      /setrisk mode isolated      — isolated margin
+      /setrisk all 500 5 3 iso    — всё сразу: депо 500, риск 5%, плечо 3x, isolated
+    """
     user_id = update.effective_user.id
     args = context.args
-    if not args:
-        conn = init_db()
-        user = get_user(conn, user_id)
-        lang = get_lang(conn, user_id)
-        d = user.get('deposit', 0)
-        conn.close()
-        if d > 0:
-            await update.message.reply_text(f"💰 Текущий депозит: **${d:,.0f}**\n2% риска = ${d*0.02:.0f} на сигнал")
-        else:
-            await update.message.reply_text(t('deposit_none', lang))
-        return
-    try:
-        deposit = float(args[0])
-        if deposit < 10:
-            conn = init_db()
-            lang = get_lang(conn, user_id)
-            conn.close()
-            await update.message.reply_text(t('deposit_min', lang))
-            return
-    except ValueError:
-        conn = init_db()
-        lang = get_lang(conn, user_id)
-        conn.close()
-        await update.message.reply_text(t('deposit_usage', lang))
-        return
-
     conn = init_db()
     lang = get_lang(conn, user_id)
-    get_user(conn, user_id)
-    conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
-    log_event(conn, user_id, 'setrisk', update)
-    conn.commit()
+    user = get_user(conn, user_id)
+    risk = get_user_risk(conn, user_id)
+
+    if not args:
+        d = user.get('deposit', 0)
+        risk_amount = d * (risk['risk_pct'] / 100) if d > 0 else 0
+        text = (
+            f"💰 **Риск-профиль**\n"
+            f"Депозит: **${d:,.0f}**\n"
+            f"Риск на сделку: **{risk['risk_pct']:.0f}%** (${risk_amount:.0f})\n"
+            f"Плечо: **{risk['leverage']}x**\n"
+            f"Маржа: **{risk['margin_mode']}**\n"
+            f"Макс. позиций: **{risk['max_positions']}**\n"
+            f"\\n/setrisk risk 5 — изменить % риска\n"
+            f"/setrisk lev 3 — изменить плечо"
+        )
+        conn.close()
+        await update.message.reply_text(text)
+        return
+
+    # ── Парсинг аргументов ──
+    mode = args[0].lower() if args else ''
+    changed = False
+
+    if mode == 'all' and len(args) >= 5:
+        # /setrisk all 500 5 3 iso
+        try:
+            deposit = float(args[1])
+            risk_pct = float(args[2])
+            leverage = int(args[3])
+            margin_mode = args[4].lower()
+            if margin_mode not in ('isolated', 'cross'):
+                conn.close()
+                await update.message.reply_text('❌ margin_mode: isolated или cross')
+                return
+            conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
+            get_user(conn, user_id)
+            set_user_risk(conn, user_id, risk_pct=risk_pct, leverage=leverage, margin_mode=margin_mode)
+            log_event(conn, user_id, 'setrisk', update)
+            conn.commit()
+            changed = True
+        except (ValueError, IndexError):
+            conn.close()
+            await update.message.reply_text('❌ /setrisk all <депозит> <риск%> <плечо> <isolated|cross>')
+            return
+    elif mode == 'depo' and len(args) >= 2:
+        try:
+            deposit = float(args[1])
+            if deposit < 10:
+                conn.close()
+                await update.message.reply_text('❌ Минимальный депозит: $10')
+                return
+            conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
+            get_user(conn, user_id)
+            log_event(conn, user_id, 'setrisk', update)
+            conn.commit()
+            changed = True
+        except ValueError:
+            conn.close()
+            await update.message.reply_text('❌ /setrisk depo <число>')
+            return
+    elif mode == 'risk' and len(args) >= 2:
+        try:
+            rp = float(args[1])
+            if rp < 1 or rp > 100:
+                conn.close()
+                await update.message.reply_text('❌ Риск: 1-100%')
+                return
+            set_user_risk(conn, user_id, risk_pct=rp)
+            changed = True
+        except ValueError:
+            conn.close()
+            await update.message.reply_text('❌ /setrisk risk <1-100>')
+            return
+    elif mode == 'lev' and len(args) >= 2:
+        try:
+            lev = int(args[1])
+            if lev < 1 or lev > 100:
+                conn.close()
+                await update.message.reply_text('❌ Плечо: 1-100x')
+                return
+            set_user_risk(conn, user_id, leverage=lev)
+            changed = True
+        except ValueError:
+            conn.close()
+            await update.message.reply_text('❌ /setrisk lev <1-100>')
+            return
+    elif mode == 'mode' and len(args) >= 2:
+        mm = args[1].lower()
+        if mm not in ('isolated', 'cross'):
+            conn.close()
+            await update.message.reply_text('❌ Режим: isolated или cross')
+            return
+        set_user_risk(conn, user_id, margin_mode=mm)
+        changed = True
+    else:
+        # Старая совместимость: /setrisk 500 = /setrisk depo 500
+        try:
+            deposit = float(args[0])
+            if deposit < 10:
+                conn.close()
+                await update.message.reply_text(t('deposit_min', lang))
+                return
+            conn.execute('UPDATE users SET deposit=? WHERE user_id=?', (deposit, user_id))
+            get_user(conn, user_id)
+            log_event(conn, user_id, 'setrisk', update)
+            conn.commit()
+            changed = True
+        except ValueError:
+            conn.close()
+            await update.message.reply_text(
+                '❌ Использование:\\n'
+                '/setrisk — показать настройки\\n'
+                '/setrisk depo 500 — депозит\\n'
+                '/setrisk risk 5 — % риска\\n'
+                '/setrisk lev 3 — плечо\\n'
+                '/setrisk mode isolated — тип маржи'
+            )
+            return
+
     conn.close()
-    margin = round(deposit * 0.02, 0)
-    await update.message.reply_text(t('deposit_set', lang, deposit, margin))
+    if changed:
+        # Показать что получилось
+        conn2 = init_db()
+        user2 = get_user(conn2, user_id)
+        risk2 = get_user_risk(conn2, user_id)
+        d = user2.get('deposit', 0)
+        ra = d * (risk2['risk_pct'] / 100) if d > 0 else 0
+        await update.message.reply_text(
+            f"✅ **Настройки обновлены**\n"
+            f"💰 Депозит: ${d:,.0f}\n"
+            f"📊 Риск: {risk2['risk_pct']:.0f}% (${ra:.0f})\n"
+            f"⚡ Плечо: {risk2['leverage']}x\n"
+            f"🔒 Маржа: {risk2['margin_mode']}"
+        )
 
 
 # ══ #4 /history ══

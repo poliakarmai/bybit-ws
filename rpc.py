@@ -574,6 +574,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_enter(body)
         elif path == "/close":
             self._handle_close(body)
+        elif path == "/calc_qty":
+            self._handle_calc_qty(body)
         elif path == "/move_sl":
             self._handle_move_sl(body)
         elif path == "/emergency_close":
@@ -620,7 +622,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 "/rpc/signals", "/rpc/config", "/rpc/paths", "/rpc/ab_test_report", "/rpc/ab_status",
                 "/rpc/risk_full", "/rpc/circuit_breaker",
                 "/health", "/positions", "/orders", "/metrics", "/risk", "/signals", "/config",
-                "POST /scan", "POST /enter", "POST /close", "POST /move_sl", "POST /reset-token",
+                "POST /scan", "POST /enter", "POST /close", "POST /calc_qty", "POST /move_sl", "POST /reset-token",
                 "POST /reload-config", "POST /pause", "POST /resume", "POST /logs",
             ]
         })
@@ -881,6 +883,25 @@ class RPCHandler(BaseHTTPRequestHandler):
                         o["symbol"] = oid.split("_")[0] if "_" in oid else "???"
                 result.append(o)
         _json_response(self, result)
+
+    def _handle_balance(self):
+        """GET /balance — USDT баланс для linear фьючерсов."""
+        try:
+            data = _bybit_api('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
+            if data.get('retCode') != 0:
+                return _error(self, 'Balance API error', data.get('retMsg', ''), 502)
+            coins = data.get('result', {}).get('list', [{}])[0].get('coin', [])
+            usdt = next((c for c in coins if c.get('coin') == 'USDT'), {})
+            balance = float(usdt.get('walletBalance', 0))
+            available = float(usdt.get('availableToWithdraw', 0))
+            _json_response(self, {
+                'asset': 'USDT',
+                'balance': round(balance, 2),
+                'available': round(available, 2),
+                'equity': round(float(usdt.get('equity', balance)), 2),
+            })
+        except Exception as e:
+            _error(self, 'Balance fetch failed', str(e), 500)
 
     def _handle_health(self):
         alive = False
@@ -1452,6 +1473,82 @@ class RPCHandler(BaseHTTPRequestHandler):
             _idem_cache[idem_key] = {'ts': time.time(), 'response': result}
 
         return _json_response(self, result, 200)
+
+    def _handle_calc_qty(self, body: dict):
+        """POST /calc_qty — рассчитать размер позиции по % риска.
+
+        Принимает: {symbol, risk_pct, leverage, entry?}
+        Возвращает: {qty, min_qty, max_qty, entry_price, message}
+        """
+        symbol = body.get('symbol', '').strip().upper()
+        if not symbol or not symbol.endswith('USDT'):
+            return _error(self, 'Invalid symbol', 'symbol must be like XRPUSDT', 400)
+
+        try:
+            risk_pct = float(body.get('risk_pct', 5.0))
+            leverage = int(body.get('leverage', 3))
+        except (ValueError, TypeError):
+            return _error(self, 'Invalid params', 'risk_pct and leverage must be numbers', 400)
+
+        if risk_pct <= 0 or risk_pct > 100:
+            return _error(self, 'Invalid risk_pct', 'Must be 1-100', 400)
+        if leverage < 1 or leverage > 100:
+            return _error(self, 'Invalid leverage', 'Must be 1-100', 400)
+
+        # ── Баланс ──
+        try:
+            bal_data = _bybit_api('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
+            coins = bal_data.get('result', {}).get('list', [{}])[0].get('coin', [])
+            usdt = next((c for c in coins if c.get('coin') == 'USDT'), {})
+            balance = float(usdt.get('walletBalance', 0))
+        except Exception:
+            balance = 0
+
+        if balance <= 0:
+            return _error(self, 'No balance', 'Wallet balance is zero', 402)
+
+        # ── Цена входа ──
+        entry = body.get('entry')
+        if not entry:
+            ticker_data = _bybit_api('GET', f'/v5/market/tickers?category=linear&symbol={symbol}')
+            tickers = ticker_data.get('result', {}).get('list', [])
+            entry = float(tickers[0].get('lastPrice', 0)) if tickers else 0
+        else:
+            entry = float(entry)
+
+        if entry <= 0:
+            return _error(self, 'No price', 'Cannot determine entry price', 400)
+
+        # ── Мин. лот ──
+        try:
+            info_data = _bybit_api('GET', f'/v5/market/instruments-info?category=linear&symbol={symbol}')
+            instruments = info_data.get('result', {}).get('list', [])
+            min_qty = float(instruments[0].get('lotSizeFilter', {}).get('minOrderQty', 1)) if instruments else 1
+            qty_step = float(instruments[0].get('lotSizeFilter', {}).get('qtyStep', 1)) if instruments else 1
+        except Exception:
+            min_qty, qty_step = 1, 1
+
+        # ── Расчёт ──
+        risk_amount = balance * (risk_pct / 100)
+        position_value = risk_amount * leverage
+        qty = position_value / entry
+
+        # Округление до шага лота
+        qty = max(min_qty, round(qty / qty_step) * qty_step)
+        qty = round(qty, 6)
+
+        _json_response(self, {
+            'symbol': symbol,
+            'entry_price': round(entry, 6),
+            'qty': qty,
+            'min_qty': min_qty,
+            'risk_amount': round(risk_amount, 2),
+            'position_value': round(position_value, 2),
+            'balance': round(balance, 2),
+            'risk_pct': risk_pct,
+            'leverage': leverage,
+            'message': f'{risk_pct}% от ${balance:.0f} = ${risk_amount:.0f} ×{leverage} → {qty} {symbol}',
+        })
 
     def _handle_close(self, body: dict):
         """POST /close — закрыть позицию рынком.
