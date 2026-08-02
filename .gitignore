@@ -1,0 +1,44 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment & secrets
+.env
+*.pem
+*.key
+*.keystore
+*.jks
+credentials.json
+secrets.yaml
+config.yaml
+data/*.db
+
+# Logs & data
+*.log
+*.bak
+*.bak2
+*.tmp
+*.orig
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+bybit_ws.egg-info/
+.venv2/
+build/
+
+# Graphify knowledge graph
+graphify-out/
+.understand-anything/
+.venv/
+state.db

@@ -1,0 +1,17 @@
+[Unit]
+Description=bybit-ws trading engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+ExecStart=/home/openclaw/bybit-ws/.venv2/bin/python -c "from bybit_ws.main import run_cli; run_cli()"
+WorkingDirectory=/home/openclaw/bybit-ws
+Restart=always
+RestartSec=10
+Environment="PATH=/home/openclaw/bybit-ws/.venv2/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/openclaw/bybit-ws"
+
+[Install]
+WantedBy=default.target

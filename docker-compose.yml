@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  bybit-ws:
+    build: .
+    container_name: bybit-ws
+    restart: unless-stopped
+    ports:
+      - "8766:8766"
+    volumes:
+      # Конфиг (создать перед запуском: cp config.example.yaml config.yaml)
+      - ./config.yaml:/root/.config/bybit-ws/config.yaml:ro
+      # Данные (логи, журнал сделок)
+      - bybit_data:/root/.local/share/bybit-ws
+    environment:
+      - BYBIT_API_KEY=${BYBIT_API_KEY}
+      - BYBIT_API_SECRET=${BYBIT_API_SECRET}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8766/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  bybit_data:
