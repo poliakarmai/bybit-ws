@@ -25,6 +25,7 @@ bybit-ws/
 ├── journal/              ← Самообучение + Canary mode
 ├── deploy.sh             ← Атомарный деплой (pre-deploy 6 checks + canary 8 checks)
 ├── test_smoke.py         ← 52 интеграционных тестов
+├── paper_trade.py        ← 🆕 Бэктестинг на исторических данных
 └── docs/
     ├── history.md         ← История фаз
     └── PRD-one-click.md   ← One-click trading архитектура
@@ -141,6 +142,17 @@ systemctl --user restart bybit-ws-async
 - [ ] `curl -s http://127.0.0.1:8766/health` → alive
 - [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий
 - [ ] `bash deploy.sh`
+
+## Paper Trading
+
+```bash
+# Бэктест на истории (без реальных сделок)
+python3 -m bybit_ws.paper_trade SOLUSDT --days 30
+python3 -m bybit_ws.paper_trade SOLUSDT --days 90 --interval 240 --json
+python3 -m bybit_ws.paper_trade BTCUSDT --days 180 --risk 3 --rr 1.5
+```
+
+Файл: `bybit_ws/paper_trade.py` (506 строк).
 
 ## Детали
 
