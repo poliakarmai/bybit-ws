@@ -118,13 +118,13 @@ def test_entry_judge_in_package():
 
 
 def test_sl_floor_exists():
-    """В auto_sl.py должен быть SL floor (min -2%/+2%)."""
+    """В auto_sl.py должен быть SL floor (min -5%)."""
     auto_sl = PROJECT_ROOT / 'auto_sl.py'
     with open(auto_sl) as f:
         code = f.read()
 
-    assert 'min_sl_2pct' in code or '0.98' in code, (
-        "❌ SL floor (-2%) отсутствует в auto_sl.py! "
+    assert 'min_sl_5pct' in code or '0.95' in code, (
+        "❌ SL floor (-5%) отсутствует в auto_sl.py! "
         "Для микрокапов SL будет почти на входе → выбивает шумом."
     )
     assert 'mark * 0.95' in code or 'mark*0.95' in code, (
