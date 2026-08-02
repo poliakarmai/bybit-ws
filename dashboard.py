@@ -43,8 +43,8 @@ def load_trades(path: str) -> list[dict]:
                 t = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            # Ключ дедупликации: symbol + entry (round 6) + exit (round 6) + pnl (round 4)
-            key = (t["symbol"], round(float(t["entry"]), 6), round(float(t["exit"]), 6), round(float(t["pnl"]), 4))
+            # Ключ дедупликации: symbol + ts + pnl (формат v9)
+            key = (t["symbol"], t.get("ts", 0), round(float(t["pnl"]), 4))
             if key in seen:
                 continue
             seen.add(key)
@@ -880,7 +880,7 @@ def generate_dashboard():
 
     os.makedirs(os.path.dirname(OUTPUT_SVG), exist_ok=True)
     with open(OUTPUT_SVG, "w") as f:
-        f.write(svg)
+        f.write(svg.encode("utf-8", errors="replace").decode("utf-8"))
 
     print(f"✅ Дашборд сохранён: {OUTPUT_SVG}")
     regime_label = regime_data.get("regime", "UNKNOWN") if regime_data else "UNKNOWN"

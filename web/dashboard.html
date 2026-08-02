@@ -121,7 +121,8 @@ body { background:var(--bg); color:var(--text); font:13px/1.5 'SF Mono',monospac
 </div>
 
 <script>
-const RPC = '';
+const RPC = window.location.pathname.replace(/\/dashboard$/, '');
+// RPC base = parent path (e.g. /dash from /dash/dashboard)
 const WS_URL = 'ws://127.0.0.1:8767/ws';
 let chart = null;
 let equityHistory = [];
@@ -235,7 +236,7 @@ function applyPositions(data) {
 // ── Полный поллинг (метрики, ордера, сигналы, алерты, риск) — раз в 60с ──
 async function refreshFull() {
   try {
-    const r = await fetch(RPC + '/rpc/all');
+    const r = await fetch(RPC + '/rpc/dash/all');
     const data = await r.json();
 
     // ── Positions & Monitor (fallback for mobile/no-WebSocket) ──
@@ -265,7 +266,7 @@ async function refreshFull() {
 
     // Risk (daily PnL)
     try {
-      const rr = await fetch(RPC + '/risk');
+      const rr = await fetch(RPC + '/rpc/dash/risk');
       const risk = await rr.json();
       const dailyLoss = parseFloat(risk.daily_loss || 0);
       const maxLoss = parseFloat(risk.max_daily_loss || 50);
@@ -285,7 +286,7 @@ async function refreshFull() {
 
     // Signals
     try {
-      const sr = await fetch(RPC + '/signals');
+      const sr = await fetch(RPC + '/rpc/dash/signals');
       const sig = await sr.json();
       const longs = sig.long || [];
       const shorts = sig.short || [];

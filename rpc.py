@@ -476,11 +476,21 @@ class RPCHandler(BaseHTTPRequestHandler):
         path = path.split("?")[0]  # strip query string
 
         # Публичные эндпоинты — без авторизации
-        if path in ("/health", "/rpc/paths"):
+        PUBLIC_PATHS = ("/health", "/rpc/paths", "/dashboard",
+                        "/rpc/dash/all", "/rpc/dash/risk", "/rpc/dash/signals")
+        if path in PUBLIC_PATHS:
             if path == "/health":
                 return self._handle_health()
             if path == "/rpc/paths":
                 return self._handle_paths()
+            if path == "/dashboard":
+                return self._handle_dashboard()
+            if path == "/rpc/dash/all":
+                return self._handle_all()
+            if path == "/rpc/dash/risk":
+                return self._handle_risk()
+            if path == "/rpc/dash/signals":
+                return self._handle_signals()
 
         if not self._check_auth():
             return _error(self, 'Unauthorized', 'Invalid or missing Bearer token', 401)
@@ -923,6 +933,21 @@ class RPCHandler(BaseHTTPRequestHandler):
             "cycle_duration": rpc_state["cycle_duration"],
             "paused": rpc_state["paused"],
         })
+
+    def _handle_dashboard(self):
+        """Serve the web dashboard HTML."""
+        import os as _os
+        dash_file = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "web", "dashboard.html")
+        if not _os.path.exists(dash_file):
+            _error(self, "Not found", "Dashboard file missing", 404)
+            return
+        with open(dash_file) as f:
+            html = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(html.encode())
 
     def _handle_trades(self):
         trades = []
