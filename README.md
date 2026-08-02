@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen)](./test_smoke.py)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
 [![Phase 8.0](https://img.shields.io/badge/phase-8.0-blue)](./CHANGELOG.md)
 
 ---
@@ -207,7 +207,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 
 ## Лицензия
 
-MIT
+AGPL-3.0
 
 ---
 

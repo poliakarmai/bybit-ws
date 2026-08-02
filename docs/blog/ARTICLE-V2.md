@@ -1,6 +1,6 @@
 # I Built an AI-Native Trading Engine in Python. 5 Months Later, Here's What Changed
 
-> 9 strategies → 12. ML scoring, backtesting, partial take-profit, Telegram bot that survived a 3-echelon audit. Open source, MIT, trading real money.
+> 9 strategies → 12. ML scoring, backtesting, partial take-profit, Telegram bot that survived a 3-echelon audit. Open source, AGPL-3.0, trading real money.
 
 ---
 
@@ -266,7 +266,7 @@ sudo systemctl enable --now bybit-ws
 
 **GitHub:** [poliakarmai/bybit-ws](https://github.com/poliakarmai/bybit-ws)  
 **Bot:** [@Gridbolbot](https://t.me/Gridbolbot)  
-**License:** MIT
+**License:** AGPL-3.0
 
 ---
 

@@ -7,7 +7,7 @@ name = "bybit-ws"
 version = "3.10.1"
 description = "AI-Native Trading Engine — Bollinger Grid × 8 strategies, REST API + MCP"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "AGPL-3.0"}
 requires-python = ">=3.11"
 authors = [
     {name = "Alexey Poliakov", email = "poliakarm@gmail.com"},
@@ -15,7 +15,7 @@ authors = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Financial and Insurance Industry",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Office/Business :: Financial :: Investment",

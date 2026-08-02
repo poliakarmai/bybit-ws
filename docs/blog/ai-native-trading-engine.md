@@ -1,6 +1,6 @@
 # Я построил AI-native торговый движок на Python. Вот как он устроен
 
-> 8 стратегий, Bollinger Grid, AI-скоринг и полная оркестрация через Hermes-агента. Open source, MIT.
+> 8 стратегий, Bollinger Grid, AI-скоринг и полная оркестрация через Hermes-агента. Open source, AGPL-3.0.
 
 ---
 
@@ -133,7 +133,7 @@ systemctl --user enable --now bybit-ws
 
 **GitHub:** [poliakarmai/bybit-ws](https://github.com/poliakarmai/bybit-ws)
 **Бот:** [@Gridbolbot](https://t.me/Gridbolbot)
-**Лицензия:** MIT
+**Лицензия:** AGPL-3.0
 
 💰 **Trade on Bybit with $30 bonus:** [bybit.com/invite?ref=DQ0EAQ](https://www.bybit.com/invite?ref=DQ0EAQ&medium=referral&utm_campaign=evergreen)
 
