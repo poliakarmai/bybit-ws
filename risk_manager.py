@@ -83,7 +83,7 @@ def _get_wallet_balance() -> Optional[dict]:
     return None
 
 # ── Константы ─────────────────────────────────────────────────────────────
-CORRELATION_THRESHOLD = 0.80       # порог корреляции для блокировки входа
+from .correlation import CORRELATION_THRESHOLD  # дедупликация: источник в correlation.py
 CIRCUIT_BREAKER_PCT = 0.80         # 80% от дневного лимита → circuit breaker
 DEFAULT_MAX_POSITIONS = 12          # базовый лимит позиций
 HIGH_VOLATILITY_MAX_POSITIONS = 5   # лимит при высокой волатильности

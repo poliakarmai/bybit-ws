@@ -1,1 +1,0 @@
-../test_scanner_smoke.py

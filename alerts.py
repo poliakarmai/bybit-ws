@@ -12,8 +12,8 @@ import hashlib
 import subprocess
 import time
 from datetime import datetime
-from . import ALERTS, EVENTS_LOG, ALERTS_LOG, HERMES_BIN, ALERT_DEDUP_FILE, ALERT_DEDUP_TTL
-from . import safe_run
+from .constants import ALERTS, EVENTS_LOG, ALERTS_LOG, HERMES_BIN, ALERT_DEDUP_FILE, ALERT_DEDUP_TTL
+from .constants import safe_run
 from .state_db import db  # SQLite-дедупликация (persistent)
 
 # Минимальный интервал между алертами одного типа на один символ
