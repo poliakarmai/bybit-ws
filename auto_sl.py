@@ -249,14 +249,13 @@ def check_and_fix_sl(positions=None):
                     sl_price = max_sl
                     sl_desc += f' (capped +50%)'
 
-            # ── SL floor: не ближе 2% (LONG) / 5% (SHORT) от входа ──
+            # ── SL floor: не ближе 5% от входа (v9.1) ──
             if side == 'Buy':
-                min_sl_2pct = round(entry * 0.98, 4)
-                if sl_price > min_sl_2pct:
-                    sl_price = min_sl_2pct
-                    sl_desc += ' (min -2%)'
+                min_sl_5pct = round(entry * 0.95, 4)
+                if sl_price > min_sl_5pct:
+                    sl_price = min_sl_5pct
+                    sl_desc += ' (min -5%)'
             else:
-                # SHORT: SL не ближе +5% — иначе выбивает шумом на волатильных альткоинах
                 max_sl_5pct = round(entry * 1.05, 4)
                 if sl_price < max_sl_5pct:
                     sl_price = max_sl_5pct
