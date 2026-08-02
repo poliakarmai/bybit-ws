@@ -2,6 +2,7 @@
 Bybit WS Monitor v3.10.1 — модульный монитор позиций и ордеров Bybit.
 
 Модули:
+  constants  — общие константы и safe_run (разрыв цикла импортов)
   api        — запросы к Bybit API
   alerts     — система алертов + дедупликация
   snapshot   — снепшоты и сравнение
@@ -25,35 +26,17 @@ Bybit WS Monitor v3.10.1 — модульный монитор позиций и
 
 import os
 
-HOME = os.path.expanduser('~')
-DATA_DIR = os.path.join(HOME, '.local', 'share', 'bybit-ws')
-os.makedirs(DATA_DIR, exist_ok=True)
-
-EVENTS_LOG = os.path.join(DATA_DIR, 'events.log')
-ALERTS_LOG = os.path.join(DATA_DIR, 'alerts.log')
-POSITIONS_SNAPSHOT = os.path.join(DATA_DIR, 'positions.json')
-ORDERS_SNAPSHOT = os.path.join(DATA_DIR, 'orders.json')
-ORDERS_METADATA = os.path.join(DATA_DIR, 'orders_metadata.json')
-BYBIT_CLI = os.path.join(HOME, '.local', 'bin', 'bybit')
-HERMES_BIN = os.path.join(HOME, '.local', 'bin', 'hermes')
-
-import signal, subprocess
-def safe_run(cmd, timeout=15):
-    """subprocess.run без зомби: Popen + start_new_session + killpg при таймауте."""
-    proc = None
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, start_new_session=True)
-        stdout, stderr = proc.communicate(timeout=timeout)
-        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
-    except subprocess.TimeoutExpired:
-        if proc:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except Exception:
-                proc.kill()
-            proc.wait(timeout=5)
-        raise
+# ── Реэкспорт из constants.py для обратной совместимости ──
+from .constants import (
+    HOME, DATA_DIR,
+    EVENTS_LOG, ALERTS_LOG,
+    POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT, ORDERS_METADATA,
+    BYBIT_CLI, HERMES_BIN,
+    ALERTS, ALERT_DEDUP_FILE, ALERT_DEDUP_TTL,
+    WATCHDOG_LAST, COVERAGE_CHECK_INTERVAL,
+    METRICS_FILE, WATCHLIST_UPDATED_FILE,
+    safe_run,
+)
 
 # Таймауты
 GRID_TIMEOUTS = {'M5': 7200, 'M3': 1800, 'OTHER': 7200}
@@ -78,7 +61,7 @@ def _load_short_alerts():
             with open(SHORT_ALERT_FILE) as f:
                 SHORT_ALERT_LAST = _json.load(f)
     except Exception:
-        pass  # файла нет или битый — ок, начинаем с пустого
+        pass
 
 def _save_short_alerts():
     """Сохранить SHORT_ALERT_LAST в файл (вызывается из overbought.py)."""
@@ -90,51 +73,29 @@ def _save_short_alerts():
     except Exception:
         pass
 
-# Загружаем при импорте
 _load_short_alerts()
 
 # Auto-TP failure tracker → retry с backoff
 TP_FAIL_COUNT = {}
-TP_FAIL_BACKOFF = {}       # {sym: next_retry_timestamp}
-TP_FAIL_DELAYS = [30, 60, 120, 300]  # backoff: 30с, 1мин, 2мин, 5мин
-TP_PERM_SKIP = set()        # перманентный скип — монеты где qty < мин. лота
-TP_PERM_SKIP_SIZES = {}     # {sym: size} — размер позиции на момент скипа
-TP_SKIP_FILE = os.path.join(DATA_DIR, 'tp_skip.json')  # персистентность PERM_SKIP
+TP_FAIL_BACKOFF = {}
+TP_FAIL_DELAYS = [30, 60, 120, 300]
+TP_PERM_SKIP = set()
+TP_PERM_SKIP_SIZES = {}
+TP_SKIP_FILE = os.path.join(DATA_DIR, 'tp_skip.json')
 TP_MAX_FAILS = len(TP_FAIL_DELAYS)
 
-# Дедупликация алертов
-ALERT_DEDUP_FILE = os.path.join(DATA_DIR, 'last_alerts.json')
-ALERT_DEDUP_TTL = 300  # 5 минут
-
-# Фаза 5.4: Режимные флаги LONG/SHORT (устанавливаются из main_async.py)
+# Фаза 5.4: Режимные флаги LONG/SHORT
 REGIME_LONG_ENABLED = True
 REGIME_SHORT_ENABLED = True
-
-# Watchdog
-WATCHDOG_LAST = 0.0
 
 # Глобальные
 DAILY_START_EQUITY = None
 SHUTDOWN_REQUESTED = False
-ALERTS = []
-
-# Watchlist rotation — обновлять раз в 24ч
-WATCHLIST_UPDATED_FILE = os.path.join(DATA_DIR, 'watchlist_updated.txt')
-
-# TP/SL coverage summary interval (каждые 480 циклов = 4 часа)
-COVERAGE_CHECK_INTERVAL = 480
-
-# Метрики
-METRICS_FILE = os.path.join(DATA_DIR, 'metrics.json')
 
 # ── Безопасные операции с логированием ──
 
 def safe_op(fn, *args, default=None, desc='', **kwargs):
-    """Выполнить fn(*args, **kwargs), логируя исключения в events.log.
-    
-    Возвращает результат fn или default при ошибке.
-    Не роняет вызывающий код.
-    """
+    """Выполнить fn(*args, **kwargs), логируя исключения в events.log."""
     try:
         return fn(*args, **kwargs)
     except Exception as e:
@@ -148,16 +109,12 @@ def safe_op(fn, *args, default=None, desc='', **kwargs):
         except Exception:
             pass
 
-# ── Position mode detection (hedge vs one-way) ──
+# ── Position mode detection ──
 
-# Позиции используют разные idx в зависимости от режима счёта:
-#   Hedge mode:  LONG=idx 0, SHORT=idx 1
-#   One-way:     всё на idx 0
-# Определяется при старте по существующим позициям (есть idx=1 → hedge).
-POSITION_IDX = {'Buy': 0, 'Sell': 0}  # default: one-way
+POSITION_IDX = {'Buy': 0, 'Sell': 0}
 
 def _detect_position_mode():
-    """Определить режим позиций по существующим ордерам на счету."""
+    """Определить режим позиций (hedge vs one-way)."""
     global POSITION_IDX
     try:
         from .api import bybit
@@ -165,9 +122,9 @@ def _detect_position_mode():
         if resp.get('retCode') == 0:
             for p in resp['result']['list']:
                 if float(p.get('size', 0)) > 0 and int(p.get('positionIdx', 0)) == 1:
-                    POSITION_IDX = {'Buy': 0, 'Sell': 1}  # hedge mode
+                    POSITION_IDX = {'Buy': 0, 'Sell': 1}
                     break
     except Exception:
-        pass  # fallback к one-way (безопасный дефолт)
+        pass
 
 _detect_position_mode()
