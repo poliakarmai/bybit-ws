@@ -374,24 +374,41 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     # Корреляции
     tasks.append(run_in_thread(check_correlation, positions))
 
-    # Пампы, перекупленность — последовательно (не CPU-heavy)
+    # Пампы, перекупленность, funding — параллельно (независимые API-вызовы)
     if positions:
-        overbought_msgs, _ = await run_in_thread(check_overbought, positions)
-        if isinstance(overbought_msgs, list):
-            for msg in overbought_msgs:
-                add_alert('INFO', msg)
+        # Запускаем все независимые проверки параллельно
+        pump_tasks = [
+            run_in_thread(check_overbought, positions),
+            run_in_thread(check_pumps, positions),
+            run_in_thread(check_weekly_pumps),
+            run_in_thread(check_funding_signals, positions),
+            run_in_thread(check_funding_rotation, positions),
+        ]
+        pump_results = await asyncio.gather(*pump_tasks, return_exceptions=True)
 
-        pump_msgs, _ = await run_in_thread(check_pumps, positions)
-        if isinstance(pump_msgs, list):
-            for msg in pump_msgs:
-                add_alert('STOP', msg)
-                send_critical_alert(msg)  # Push: 🚨 на телефон
+        # Разбираем результаты
+        overbought_result = pump_results[0]
+        if not isinstance(overbought_result, Exception) and overbought_result:
+            overbought_msgs, _ = overbought_result if isinstance(overbought_result, tuple) else (overbought_result, None)
+            if isinstance(overbought_msgs, list):
+                for msg in overbought_msgs:
+                    add_alert('INFO', msg)
 
-        weekly_msgs, _ = await run_in_thread(check_weekly_pumps)
-        if isinstance(weekly_msgs, list):
-            for msg in weekly_msgs:
-                add_alert('STOP', msg)
-                send_critical_alert(msg)  # Push: 🚨 на телефон
+        pump_result = pump_results[1]
+        if not isinstance(pump_result, Exception) and pump_result:
+            pump_msgs, _ = pump_result if isinstance(pump_result, tuple) else (pump_result, None)
+            if isinstance(pump_msgs, list):
+                for msg in pump_msgs:
+                    add_alert('STOP', msg)
+                    send_critical_alert(msg)  # Push: 🚨 на телефон
+
+        weekly_result = pump_results[2]
+        if not isinstance(weekly_result, Exception) and weekly_result:
+            weekly_msgs, _ = weekly_result if isinstance(weekly_result, tuple) else (weekly_result, None)
+            if isinstance(weekly_msgs, list):
+                for msg in weekly_msgs:
+                    add_alert('STOP', msg)
+                    send_critical_alert(msg)  # Push: 🚨 на телефон
 
         # ── Авто-очистка pump_state для закрытых позиций ──
         try:
@@ -400,36 +417,38 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             pass
 
         # ── Funding Rate Momentum x10 ──
-        try:
-            result = await run_in_thread(check_funding_signals, positions)
-            fund_alerts, fund_entries = result[0] if isinstance(result[0], tuple) else (result[0] or [], [])
-            for msg in (fund_alerts or []):
-                add_alert('ENTRY', msg)
-            for entry_info in (fund_entries or []):
-                try:
-                    sym = entry_info['symbol']
-                    side = entry_info['side']
-                    entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
-                    if not entry_allowed:
-                        log_event(f'🛑 Risk blocked funding {sym}: {risk_reason}')
-                        continue
-                    exec_result = await run_in_thread(execute_funding_entry, entry_info)
-                    ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
-                    if ok:
-                        log_event(f'💰 Funding Entry: {entry_info}')
-                except Exception as e:
-                    log_event(f'⚠️ funding execute error: {e}')
-        except Exception as e:
-            log_event(f'⚠️ funding_entry error: {e}\n' + traceback.format_exc())
+        funding_result = pump_results[3]
+        if not isinstance(funding_result, Exception) and funding_result:
+            try:
+                fund_alerts, fund_entries = funding_result[0] if isinstance(funding_result[0], tuple) else (funding_result[0] or [], [])
+                for msg in (fund_alerts or []):
+                    add_alert('ENTRY', msg)
+                for entry_info in (fund_entries or []):
+                    try:
+                        sym = entry_info['symbol']
+                        side = entry_info['side']
+                        entry_allowed, risk_reason = risk_check(positions or {}, new_symbol=sym, new_side=side)
+                        if not entry_allowed:
+                            log_event(f'🛑 Risk blocked funding {sym}: {risk_reason}')
+                            continue
+                        exec_result = await run_in_thread(execute_funding_entry, entry_info)
+                        ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
+                        if ok:
+                            log_event(f'💰 Funding Entry: {entry_info}')
+                    except Exception as e:
+                        log_event(f'⚠️ funding execute error: {e}')
+            except Exception as e:
+                log_event(f'⚠️ funding_entry error: {e}\\n' + traceback.format_exc())
 
         # ── Funding Rotation (информационные алерты) ──
-        try:
-            rot_result = await run_in_thread(check_funding_rotation, positions)
-            rotations = rot_result[0] if isinstance(rot_result[0], list) else (rot_result[0] or [])
-            for r in (rotations or []):
-                add_alert('INFO', '🔄 Funding Rotation: ' + str(r.get('from', '?')) + ' → ' + str(r.get('to', '?')) + ' (' + str(r.get('reason', '')) + ')')
-        except Exception as e:
-            log_event(f'⚠️ funding_rotation error: {e}\\n' + traceback.format_exc())
+        rot_result = pump_results[4]
+        if not isinstance(rot_result, Exception) and rot_result:
+            try:
+                rotations = rot_result[0] if isinstance(rot_result[0], list) else (rot_result[0] or [])
+                for r in (rotations or []):
+                    add_alert('INFO', '🔄 Funding Rotation: ' + str(r.get('from', '?')) + ' → ' + str(r.get('to', '?')) + ' (' + str(r.get('reason', '')) + ')')
+            except Exception as e:
+                log_event(f'⚠️ funding_rotation error: {e}\\n' + traceback.format_exc())
 
         # ── Mean Reversion Extreme x10 (ОТКЛЮЧЕНО 01.08.2026) ──
         if MEAN_REVERT_ENABLED:
