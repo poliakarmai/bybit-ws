@@ -353,9 +353,9 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         try:
             from .lstm_regime import get_current_regime_strategy
             reg_strat = get_current_regime_strategy()
-            from . import __init__ as _pkg
-            _pkg.REGIME_LONG_ENABLED = reg_strat['LONG_ENABLED']
-            _pkg.REGIME_SHORT_ENABLED = reg_strat['SHORT_ENABLED']
+            import bybit_ws
+            bybit_ws.REGIME_LONG_ENABLED = reg_strat['LONG_ENABLED']
+            bybit_ws.REGIME_SHORT_ENABLED = reg_strat['SHORT_ENABLED']
             if cycle_count % 10 == 0:  # логируем раз в 10 тяжёлых циклов
                 long_icon = 'OK' if reg_strat['LONG_ENABLED'] else 'OFF'
                 short_icon = 'OK' if reg_strat['SHORT_ENABLED'] else 'OFF'
