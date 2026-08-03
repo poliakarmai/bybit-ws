@@ -376,13 +376,13 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
     # Пампы, перекупленность, funding — параллельно (независимые API-вызовы)
     if positions:
-        # Запускаем все независимые проверки параллельно
+        # Запускаем все независимые проверки параллельно (timeout 10s вместо 25s)
         pump_tasks = [
-            run_in_thread(check_overbought, positions),
-            run_in_thread(check_pumps, positions),
-            run_in_thread(check_weekly_pumps),
-            run_in_thread(check_funding_signals, positions),
-            run_in_thread(check_funding_rotation, positions),
+            run_in_thread(check_overbought, positions, timeout=10),
+            run_in_thread(check_pumps, positions, timeout=10),
+            run_in_thread(check_weekly_pumps, timeout=10),
+            run_in_thread(check_funding_signals, positions, timeout=10),
+            run_in_thread(check_funding_rotation, positions, timeout=10),
         ]
         pump_results = await asyncio.gather(*pump_tasks, return_exceptions=True)
 
