@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-08-01 (v8.0 — One-Click Trading + LSTM fix)
+> Обновлено: 2026-08-04 (v8.1 — LSTM World Model: multi-task OHLCV prediction + entry scoring)
 
 ## Что это
 
@@ -114,6 +114,17 @@ systemctl --user restart bybit-ws-async
 | `get_risk_status()` | Лимиты + CB |
 | `place_entry(symbol, side, qty)` | Вход |
 | `get_journal()` | Журнал (FIFO, bias) |
+
+## LSTM World Model (v8.1)
+
+- **Файл:** `lstm_world_model.py`
+- **Архитектура:** Multi-task LSTM — regime classification + OHLCV prediction на t+1
+- **Идея:** ECHO (Anthropic, 2026) — каждая свеча = training sample через world modeling
+- **Датасет:** 5 символов × 2 года (~3,445 сэмплов)
+- **World MSE:** ~0.045 (≈2% ошибка дневных Δ)
+- **Feature flag:** `BYBIT_WORLD_MODEL=1` — добавляет World Model score (0-5) в entry scoring
+- **Кеш:** `get_cached_world_prediction(symbol)` — 1-часовой TTL, batch-запрос для всех AUTO_ENTRY_WATCH
+- **CLI:** `python3 lstm_world_model.py --train` / `--predict BTCUSDT`
 
 ## LSTM Market Regime
 

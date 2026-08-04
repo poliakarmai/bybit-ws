@@ -307,7 +307,28 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     elif quality <= 5.0:     qscore = 2
     else:                    qscore = 1
 
-    total = bb_score + vol_score + down_score + fund_score + vola_score + qscore
+    # 7. World Model score (0-5) — предсказание close на t+1 (кешированное)
+    world_model_score = 0
+    world_predicted_return = None
+    wm_regime = None
+    if os.environ.get('BYBIT_WORLD_MODEL', '0') == '1':
+        try:
+            from .lstm_world_model import get_cached_world_prediction as _get_wm
+            wm_cache = _get_wm(sym)
+            if wm_cache:
+                world_predicted_return = wm_cache.get('predicted_return_pct')
+                wm_regime = wm_cache.get('regime')
+                if world_predicted_return is not None:
+                    if world_predicted_return > 0.5:
+                        world_model_score = 5
+                    elif world_predicted_return >= -0.5:
+                        world_model_score = 3
+                    else:
+                        world_model_score = 1
+        except Exception as e:
+            log_event(f'⚠️ world_model({sym}): {e}')
+
+    total = bb_score + vol_score + down_score + fund_score + vola_score + qscore + world_model_score
 
     # ── Фаза 5.1: ML Gate — фильтр вместо бленда ──
     # ── Фаза 5.3: A/B-тестирование — группа B пропускает ML Gate ──
@@ -382,14 +403,16 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     return {
         'symbol': sym,
         'score': total,
-        'max_score': 50,
+        'max_score': 55,
         'bb_pos': bb_pos,
         'bb_width': bb_width,
         'cur': cur,
         'signal_id': signal_id,
         'ab_group': ab_group,
         'ml_prob': ml_prob,
-        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore}{ml_info}{ab_info}',
+        'world_model_score': world_model_score,
+        'world_predicted_return': world_predicted_return,
+        'breakdown': f'BB={bb_score} Vol={vol_score} Down={down_score} Fund={fund_score} Vola={vola_score} Q={qscore} WM={world_model_score}{ml_info}{ab_info}',
     }
 
 
