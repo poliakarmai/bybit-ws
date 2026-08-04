@@ -1,12 +1,27 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-08-04 (v10 — Self-learn: 20+ механик, Dynamic Bandit, Pareto MC, Drift Detector, Ensemble)
+> Обновлено: 2026-08-04 (v10 — 123 закрытых сделок, PF=0.75, WR=57%. SHORT avg_loss=$12.58 — требуется доработка)
 
 ## Что это
 
 Трейдинг-монитор Bybit фьючерсов. Стратегия: **Bollinger Grid** (LONG/SHORT).  
 Systemd-сервис `bybit-ws-async`, ~45 MB RAM, SQLite — SSOT.
+
+## Текущее состояние (04.08.2026)
+
+| Метрика | Значение | Примечание |
+|---------|----------|-----------|
+| Закрытых сделок | 123 | (всего 246 с открытыми) |
+| Win Rate | 56.9% | |
+| Profit Factor | 0.75 | ⚠️ <1.0 — avg_loss 1.75× avg_win |
+| Sharpe | -0.045 | |
+| Max Drawdown | $284 | |
+| LONG WR / avg_loss | 41% / $5.67 | |
+| SHORT WR / avg_loss | 70% / **$12.58** | ⚠️ Редкие крупные убытки |
+| Режим | TRENDING_DOWN | LSTM 82.3% точность |
+
+> **Корневая проблема:** SHORT-стратегия даёт 70% винрейт но убивает редкими крупными убытками ($12.58 vs $5.11 avg_win). Self-learning корректирует min_score/sl_pct/tp_mult, но не может исправить фундаментальный дисбаланс risk/reward в SHORT. Требуется доработка стратегии, не параметров.
 
 ## Структура (core)
 
@@ -40,11 +55,13 @@ bybit-ws/
 
 Модуль автономно адаптирует стратегию без участия человека. 20+ механик:
 
+> **Feature flags:** v10 self-learn работает независимо от `BYBIT_AB_ENABLED`, `BYBIT_REGIME_AUTO`, `BYBIT_OPTUNA_ENABLED`. Эти флаги управляют внешними фичами (A/B в auto_entry, авто-переключение LONG/SHORT, Optuna-тюнинг). Self-learn использует собственные внутренние механизмы (Thompson Sampling, regime detection через LSTM-кеш, composite score).
+
 | Группа | Механики |
 |--------|----------|
 | **Подбор параметров** | Thompson Sampling, Dynamic Bandit (auto-prune), Uncertainty-aware selection |
 | **Режимы рынка** | Per-regime params, Ensemble (6 bandits), Coordinated transition handover |
-| **Защита** | Drift Detector (per-regime), Stress test (4 hist + 1000 Pareto MC), Causal inference |
+| **Защита** | Drift Detector (per-regime), Stress test (4 исторических backtest-сценария + 1000 Pareto MC симуляций), Causal inference |
 | **Метрики** | Composite Score (WR+PF+Sharpe+DD+Hold), Exponential decay, Adaptive weights |
 | **Качество данных** | Anomaly detection (IQR), Robust updates (>3σ outlier skip) |
 | **Обучение** | Micro-updates (per trade), Canary (Bayesian A/B), Walk-forward validation |

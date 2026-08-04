@@ -53,8 +53,9 @@ CANARY_MATCH_WINDOW = 3600
 CANARY_IDLE_TIMEOUT_HOURS = 3  # NEW: авто-откат без сделок
 
 # ── Self-learn timing ───────────────────────────────
-SELF_LEARN_INTERVAL_SEC = 6 * 3600  # NEW: wall-clock interval (6 часов)
-SELF_LEARN_STATE = DATA_DIR / "self_learn_state.json"  # NEW: последний запуск
+SELF_LEARN_INTERVAL_SEC = 24 * 3600  # v10: 24ч cooldown (было 6ч)
+SELF_LEARN_HYSTERESIS = 0.10  # v10: изменение только если composite +10%
+SELF_LEARN_STATE = DATA_DIR / "self_learn_state.json"  # последний запуск
 
 # ── Session zones ───────────────────────────────────
 def _session_hour() -> int:
@@ -1516,10 +1517,6 @@ DEFAULT_REGIME_PARAMS = {
         "min_score": 30, "sl_pct": 5.0, "tp_mult": 1.0,
         "max_positions": 8, "direction": "BOTH",
     },
-    "CHOPPY": {
-        "min_score": 40, "sl_pct": 4.0, "tp_mult": 0.7,
-        "max_positions": 3, "direction": "NONE",
-    },
     "HIGH_VOL": {
         "min_score": 22, "sl_pct": 6.0, "tp_mult": 1.3,
         "max_positions": 12, "direction": "BOTH",
@@ -1527,6 +1524,10 @@ DEFAULT_REGIME_PARAMS = {
     "LOW_VOL": {
         "min_score": 28, "sl_pct": 4.0, "tp_mult": 0.9,
         "max_positions": 6, "direction": "BOTH",
+    },
+    "CHOPPY": {
+        "min_score": 40, "sl_pct": 4.0, "tp_mult": 0.7,
+        "max_positions": 3, "direction": "NONE",
     },
 }
 
@@ -2689,8 +2690,9 @@ def robust_bandit_update(bandit, arm_idx: int, pnl: float,
 # V10: EXPONENTIAL DECAY (old trades → lower weight)
 # ══════════════════════════════════════════════════════
 
-def weighted_wr(trades: list, decay_rate: float = 0.01) -> float:
-    """WR с экспоненциальным затуханием: старые сделки весят меньше."""
+def weighted_wr(trades: list, decay_rate: float = 0.005) -> float:
+    """WR с экспоненциальным затуханием: старые сделки весят меньше.
+    decay_rate=0.005 → через 200 дней вес = 37%."""
     if not trades:
         return 0.0
     now = datetime.now()
