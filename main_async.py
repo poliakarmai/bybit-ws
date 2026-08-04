@@ -856,6 +856,26 @@ async def async_main_loop():
                                 log_event(f'🔍 Filters: useful={useful}, weak={useless}')
                     except Exception:
                         pass
+
+                    # ── NEW v7: composite score + stress test ──
+                    try:
+                        from .journal.self_learn import composite_score, stress_test_params, get_params_for_regime
+                        if journal and 'error' not in journal:
+                            trades_list = journal.get('roundtrips', journal.get('roundtrips_sample', []))
+                            if trades_list:
+                                cs = composite_score(trades_list)
+                                log_event(f'📊 Composite: score={cs["score"]:.2f} '
+                                          f'WR={cs["wr"]:.0%} PF={cs["pf"]} Sharpe={cs["sharpe"]} '
+                                          f'DD=${cs["max_dd"]:.0f} Hold={cs["avg_hold"]:.0f}h')
+
+                                # Stress test текущих параметров
+                                current_regime_params = get_params_for_regime()
+                                st = stress_test_params(current_regime_params, trades_list)
+                                if not st["passed"]:
+                                    failed = [s["name"] for s in st["scenarios"] if not s["would_survive"]]
+                                    log_event(f'⚠️ Stress test FAILED: {failed}')
+                    except Exception:
+                        pass
                 except Exception as e:
                     log_event(f'⚠️ self_learn error: {e}')
 

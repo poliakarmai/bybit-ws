@@ -1,16 +1,13 @@
 """
-Self-learning module v6 — Bayesian canary + shrinkage + walk-forward + feature importance.
+Self-learning module v7 — composite score + regime params + stress testing + drawdown-aware.
 
-Новое в v6:
-  1. Bayesian A/B testing — замена простого WR-сравнения в canary
-  2. Bayesian shrinkage — per-symbol параметры сдвигаются к среднему кластера
-  3. SL exit time analysis — различает quick vs slow SL
-  4. Event-driven trigger — ≥10 сделок или 24ч fallback
-  5. Global rollback — откат при падении WR >15%
-  6. Feature importance — трекинг вклада каждого фильтра
-  7. Confidence intervals — Wilson score для WR
-  8. Walk-forward validation — проверка параметров на истории
-  9. Human-readable explanations — почему изменён параметр
+Новое в v7:
+  1. Composite score — WR + Profit Factor + Sharpe + MaxDD + Avg Hold
+  2. Regime-specific parameters — раздельные params per LSTM regime
+  3. Stress testing — 4 исторических crash-сценария
+  4. Drawdown-based learning — адаптивные params от текущей просадки
+  5. Adaptive canary % — динамический от стабильности WR
+  6. Интегрировано: Bayesian A/B, shrinkage, SL time, walk-forward, feature importance
   2. Exit reason tracking — понимаем ПОЧЕМУ закрылись (SL/TP/Manual/Time)
   3. Session/time-based — разные параметры для Азии/Европы/US
   4. Consecutive loss protection — серии лосей → cooldown + уменьшение размера
@@ -1423,3 +1420,362 @@ def generate_explanation(change: dict) -> str:
         reasons.append(f"⚠️ PnL warning: {change['pnl_guard'].get('reason', 'negative')}")
 
     return " | ".join(reasons) if reasons else "no explanation generated"
+
+
+# ══════════════════════════════════════════════════════
+# V7: COMPOSITE SCORE (multi-objective optimization)
+# ══════════════════════════════════════════════════════
+
+def composite_score(trades: list) -> dict:
+    """Многофакторная оценка: WR + Profit Factor + Sharpe + MaxDD + Avg Hold.
+
+    Возвращает {score, wr, pf, sharpe, max_dd, avg_hold}.
+    score: 0..1, выше = лучше.
+    """
+    if not trades:
+        return {"score": 0.5, "wr": 0, "pf": 0, "sharpe": 0, "max_dd": 0, "avg_hold": 0}
+
+    wins = [t for t in trades if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) > 0]
+    losses = [t for t in trades if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) <= 0]
+
+    n = len(trades)
+    wr = len(wins) / n if n > 0 else 0
+
+    # Profit Factor
+    gross_profit = sum(abs(t.get("pnl", 0)) if isinstance(t, dict) else abs(getattr(t, "pnl", 0))
+                        for t in wins)
+    gross_loss = sum(abs(t.get("pnl", 0)) if isinstance(t, dict) else abs(getattr(t, "pnl", 0))
+                     for t in losses)
+    pf = gross_profit / gross_loss if gross_loss > 0 else (2.0 if gross_profit > 0 else 0.5)
+
+    # Sharpe ratio (упрощённый: mean/std возвратов)
+    returns = [(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) for t in trades]
+    mean_ret = sum(returns) / n if n > 0 else 0
+    variance = sum((r - mean_ret) ** 2 for r in returns) / n if n > 1 else 1
+    std_ret = variance ** 0.5
+    sharpe = mean_ret / std_ret if std_ret > 0 else 0
+
+    # Max Drawdown (кумулятивный)
+    cumulative = 0
+    peak = 0
+    max_dd = 0
+    for r in returns:
+        cumulative += r
+        if cumulative > peak:
+            peak = cumulative
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+
+    # Avg hold
+    holds = [(t.get("hold_hours", 0) if isinstance(t, dict) else getattr(t, "hold_hours", 0))
+             for t in trades]
+    avg_hold = sum(holds) / n if n > 0 else 0
+
+    # Нормализация и взвешивание
+    pf_norm = min(pf / 3.0, 1.0) if pf < 3.0 else 1.0
+    sharpe_norm = min(max(sharpe, -1) / 2.5 + 0.4, 1.0)  # маппим -1..1.5 → 0..1
+    # MaxDD: <$15 = 1.0, >$100 = 0
+    dd_norm = max(0, 1.0 - max_dd / 100.0) if max_dd > 0 else 1.0
+    # Hold: <4ч = 1.0, >48ч = 0
+    hold_norm = max(0, 1.0 - avg_hold / 48.0)
+
+    score = (
+        0.30 * wr +
+        0.25 * pf_norm +
+        0.20 * sharpe_norm +
+        0.15 * dd_norm +
+        0.10 * hold_norm
+    )
+
+    return {
+        "score": round(score, 3),
+        "wr": round(wr, 3),
+        "pf": round(pf, 2),
+        "sharpe": round(sharpe, 3),
+        "max_dd": round(max_dd, 2),
+        "avg_hold": round(avg_hold, 1),
+    }
+
+
+# ══════════════════════════════════════════════════════
+# V7: REGIME-SPECIFIC PARAMETERS
+# ══════════════════════════════════════════════════════
+
+REGIME_PARAMS_PATH = DATA_DIR / "regime_params.json"
+
+DEFAULT_REGIME_PARAMS = {
+    "TRENDING_UP": {
+        "min_score": 25, "sl_pct": 5.0, "tp_mult": 1.5,
+        "max_positions": 10, "direction": "LONG_only",
+    },
+    "TRENDING_DOWN": {
+        "min_score": 35, "sl_pct": 5.0, "tp_mult": 0.8,
+        "max_positions": 5, "direction": "SHORT_only",
+    },
+    "RANGING": {
+        "min_score": 30, "sl_pct": 5.0, "tp_mult": 1.0,
+        "max_positions": 8, "direction": "BOTH",
+    },
+    "CHOPPY": {
+        "min_score": 40, "sl_pct": 4.0, "tp_mult": 0.7,
+        "max_positions": 3, "direction": "NONE",
+    },
+    "HIGH_VOL": {
+        "min_score": 22, "sl_pct": 6.0, "tp_mult": 1.3,
+        "max_positions": 12, "direction": "BOTH",
+    },
+    "LOW_VOL": {
+        "min_score": 28, "sl_pct": 4.0, "tp_mult": 0.9,
+        "max_positions": 6, "direction": "BOTH",
+    },
+}
+
+
+def load_regime_params() -> dict:
+    """Загрузить regime-specific параметры."""
+    if REGIME_PARAMS_PATH.exists():
+        try:
+            return json.loads(REGIME_PARAMS_PATH.read_text())
+        except Exception:
+            pass
+    return dict(DEFAULT_REGIME_PARAMS)
+
+
+def save_regime_params(params: dict):
+    """Сохранить regime-specific параметры."""
+    REGIME_PARAMS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REGIME_PARAMS_PATH.write_text(json.dumps(params, indent=2))
+
+
+def get_params_for_regime(regime: str = None) -> dict:
+    """Получить параметры для текущего (или указанного) режима."""
+    if regime is None:
+        # Авто-определение из LSTM кеша
+        cache = DATA_DIR / "lstm_regime_cache.json"
+        if cache.exists():
+            try:
+                data = json.loads(cache.read_text())
+                regime = data.get("regime", "RANGING")
+            except Exception:
+                regime = "RANGING"
+        else:
+            regime = "RANGING"
+
+    params = load_regime_params()
+    return params.get(regime, DEFAULT_REGIME_PARAMS.get(regime, {}))
+
+
+def update_regime_params(regime: str, updates: dict, reason: str = ""):
+    """Обновить параметры для конкретного режима (canary-promoted changes)."""
+    params = load_regime_params()
+    if regime not in params:
+        params[regime] = dict(DEFAULT_REGIME_PARAMS.get(regime, {}))
+    params[regime].update(updates)
+    params[regime]["_updated"] = datetime.now().isoformat()
+    if reason:
+        params[regime]["_reason"] = reason
+    save_regime_params(params)
+
+
+# ══════════════════════════════════════════════════════
+# V7: STRESS TESTING (historical crash scenarios)
+# ══════════════════════════════════════════════════════
+
+STRESS_SCENARIOS = [
+    {
+        "name": "COVID Crash (Mar 2020)",
+        "description": "BTC -50% за неделю, все альты -60-80%",
+        "btc_drop_pct": 50,
+        "alt_drop_pct": 70,
+        "volatility_mult": 5.0,
+        "funding_rate": -0.05,  # extreme negative
+    },
+    {
+        "name": "FTX Collapse (Nov 2022)",
+        "description": "Паника, BTC -25%, SOL -60%, массовые ликвидации",
+        "btc_drop_pct": 25,
+        "alt_drop_pct": 40,
+        "volatility_mult": 3.0,
+        "funding_rate": -0.03,
+    },
+    {
+        "name": "China Ban (May 2021)",
+        "description": "BTC -35% за день, восстановление за 2 недели",
+        "btc_drop_pct": 35,
+        "alt_drop_pct": 50,
+        "volatility_mult": 4.0,
+        "funding_rate": -0.04,
+    },
+    {
+        "name": "Luna Collapse (May 2022)",
+        "description": "UST depeg → каскад ликвидаций, BTC -30%",
+        "btc_drop_pct": 30,
+        "alt_drop_pct": 55,
+        "volatility_mult": 4.5,
+        "funding_rate": -0.06,
+    },
+]
+
+
+def stress_test_params(params: dict, trades: list = None) -> dict:
+    """Проверить параметры на стресс-сценариях.
+
+    Симулирует: что было бы с текущими позициями и параметрами в каждом кризисе.
+    Возвращает: {passed: bool, scenarios: [{name, max_dd_sim, would_survive}]}
+    """
+    results = []
+    all_pass = True
+
+    # Текущие позиции (если есть)
+    current_positions = []
+    if trades:
+        current_positions = [
+            {"symbol": t.get("symbol", "UNKNOWN"), "pnl": t.get("pnl", 0),
+             "side": t.get("side", "Buy")}
+            for t in trades[-7:]  # последние 7 сделок
+        ]
+
+    for scenario in STRESS_SCENARIOS:
+        # Симулируем влияние на позиции
+        simulated_dd = 0
+        pos_count = len(current_positions) if current_positions else 7
+
+        if current_positions:
+            for pos in current_positions:
+                if pos["side"] == "Buy":  # LONG
+                    simulated_dd += abs(float(pos.get("pnl", 0))) * scenario["alt_drop_pct"] / 15
+                else:  # SHORT — профит в кризис
+                    simulated_dd -= abs(float(pos.get("pnl", 0))) * scenario["alt_drop_pct"] / 30
+        else:
+            # Без данных: оцениваем по параметрам
+            sl_pct = params.get("sl_pct", 5)
+            max_pos = params.get("max_positions", 7)
+            pos_size = 10  # ~$10 на позицию
+            simulated_dd = max_pos * pos_size * (sl_pct / 100) * scenario["volatility_mult"] / 3
+
+        sl_coverage = params.get("sl_pct", 5) >= scenario["btc_drop_pct"] / 5
+        max_pos_ok = params.get("max_positions", 7) <= 8
+
+        scenario_result = {
+            "name": scenario["name"],
+            "btc_drop": f"-{scenario['btc_drop_pct']}%",
+            "simulated_dd": round(simulated_dd, 2),
+            "sl_adequate": sl_coverage,
+            "position_limit_ok": max_pos_ok,
+            "would_survive": simulated_dd < 50 and sl_coverage,
+        }
+
+        if not scenario_result["would_survive"]:
+            all_pass = False
+
+        results.append(scenario_result)
+
+    return {
+        "passed": all_pass,
+        "scenarios": results,
+    }
+
+
+# ══════════════════════════════════════════════════════
+# V7: DRAWDOWN-BASED LEARNING
+# ══════════════════════════════════════════════════════
+
+def drawdown_adjustment(current_dd_pct: float = None) -> dict:
+    """Адаптивные параметры в зависимости от текущей просадки.
+
+    current_dd_pct: 0.05 = 5% drawdown, -0.05 = 5% profit.
+    """
+    if current_dd_pct is None:
+        # Авто-расчёт из последних сделок
+        try:
+            import sqlite3 as _sql
+            db = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+            conn = _sql.connect(str(db))
+            rows = conn.execute(
+                "SELECT pnl FROM trade_history WHERE closed_at IS NOT NULL "
+                "ORDER BY closed_at DESC LIMIT 50"
+            ).fetchall()
+            conn.close()
+            pnls = [float(r[0] or 0) for r in rows]
+            peak = 0
+            cumulative = 0
+            for p in reversed(pnls):
+                cumulative += p
+                peak = max(peak, cumulative)
+            total_pnl = sum(pnls)
+            current_dd_pct = (peak - cumulative) / abs(peak) if peak > 0 else 0
+        except Exception:
+            current_dd_pct = 0
+
+    if current_dd_pct > 0.10:
+        return {
+            "min_score_mult": 1.3,
+            "sl_pct_mult": 0.8,
+            "position_size_mult": 0.5,
+            "max_positions_mult": 0.6,
+            "mode": "conservative",
+        }
+    elif current_dd_pct < 0 and abs(current_dd_pct) > 0.05:
+        # В profit >5%: агрессивнее
+        return {
+            "min_score_mult": 0.85,
+            "position_size_mult": 1.2,
+            "mode": "normal",
+        }
+    else:
+        # Нейтрально
+        if abs(current_dd_pct) > 0.05:
+            return {
+                "min_score_mult": 0.9,
+                "mode": "recovery",
+            }
+    return {"mode": "normal"}
+
+
+# ══════════════════════════════════════════════════════
+# V7: ADAPTIVE CANARY %
+# ══════════════════════════════════════════════════════
+
+def adaptive_canary_pct() -> float:
+    """Динамический canary % на основе стабильности WR и волатильности."""
+    try:
+        import sqlite3 as _sql
+        db = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+        conn = _sql.connect(str(db))
+        rows = conn.execute(
+            "SELECT pnl FROM trade_history WHERE closed_at IS NOT NULL "
+            "ORDER BY closed_at DESC LIMIT 100"
+        ).fetchall()
+        conn.close()
+
+        if len(rows) < 30:
+            return CANARY_ENTRY_PCT  # default
+
+        pnls = [float(r[0] or 0) for r in rows]
+        recent_wr = sum(1 for p in pnls if p > 0) / len(pnls)
+
+        # Волатильность WR: считаем WR по sliding windows
+        wr_readings = []
+        window = min(15, len(pnls) // 3)
+        for i in range(0, len(pnls) - window, window):
+            chunk = pnls[i:i + window]
+            chunk_wr = sum(1 for p in chunk if p > 0) / len(chunk)
+            wr_readings.append(chunk_wr)
+
+        if len(wr_readings) >= 3:
+            mean_wr = sum(wr_readings) / len(wr_readings)
+            wr_volatility = (
+                sum((w - mean_wr) ** 2 for w in wr_readings) / len(wr_readings)
+            ) ** 0.5
+        else:
+            wr_volatility = 0.05
+
+        if wr_volatility < 0.03 and recent_wr > 0.50:
+            return 0.20  # стабильно → больше экспериментов
+        elif wr_volatility > 0.10 or recent_wr < 0.40:
+            return 0.05  # нестабильно → меньше риска
+        else:
+            return 0.10  # default
+    except Exception:
+        return CANARY_ENTRY_PCT
