@@ -54,10 +54,14 @@ def log_event(msg):
     try:
         _rotate_if_needed(EVENTS_LOG)
     except Exception as e:
-        print(f'⚠️ log rotation error: {e}', file=__import__('sys').stderr)
+        print(f'⚠️ log rotation error: {e}', file=__import__('sys').stderr, flush=True)
 
-    with open(EVENTS_LOG, 'a') as f:
-        f.write(line)
+    try:
+        with open(EVENTS_LOG, 'a') as f:
+            f.write(line)
+    except Exception as e:
+        print(f'⚠️ log_event write error: {e} | msg={msg[:80]}', file=__import__('sys').stderr, flush=True)
+        print(line, end='', file=__import__('sys').stderr, flush=True)
 
 
 def _rotate_if_needed(log_path: str):
