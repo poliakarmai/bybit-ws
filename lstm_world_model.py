@@ -430,18 +430,22 @@ def train_world_model(lambda_world=0.03, epochs=200, force=False):
                   f"Val_acc={val_acc.item():.3f}")
 
     print(f"\n✅ Обучение завершено. Best val acc={best_val_acc:.3f}, "
-          f"world MSE={best_world_mse:.4f}")
+          f"world MSE={best_world_mse:.4f} (epoch {best_epoch})")
 
-    # Сохранить модель
+    # Save BEST model to WORLD_MODEL_PATH (already saved during training on each improvement)
+    # Also save last-epoch model to a separate path for reference (but BEST is the canonical one)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    latest_path = MODEL_DIR / 'lstm_world_model_latest.pt'
     torch.save({
         'model_state': model.state_dict(),
         'config': {'lambda_world': lambda_world},
-        'val_acc': best_val_acc,
-        'world_mse': best_world_mse,
+        'val_acc': val_acc.item(),
+        'world_mse': val_world_loss.item(),
+        'epoch': epochs,
         'timestamp': datetime.now().isoformat(),
-    }, WORLD_MODEL_PATH)
-    print(f"💾 Модель сохранена: {WORLD_MODEL_PATH}")
+    }, latest_path)
+    print(f"💾 Best модель сохранена: {WORLD_MODEL_PATH}")
+    print(f"   Latest модель (epoch {epochs}): {latest_path}")
 
     # Сохранить скейлер
     import pickle
@@ -476,8 +480,9 @@ def predict_world(symbol='BTCUSDT', days=30):
     except Exception:
         return None
 
-    # Загрузить последние данные
-    data = fetch_training_data([symbol], days=max(days, SEQUENCE_LENGTH))
+    # Загрузить последние данные — need extra history for feature calc
+    fetch_days = max(days, SEQUENCE_LENGTH + 20)  # at least 50 days for stable features
+    data = fetch_training_data([symbol], days=fetch_days)
     if not data:
         return None
 
