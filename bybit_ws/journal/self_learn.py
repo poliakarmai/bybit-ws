@@ -46,6 +46,11 @@ CANARY_ENTRY_PCT = 0.10
 CANARY_WINDOW_HOURS = 6
 CANARY_WR_DROP_THRESHOLD = 0.10
 CANARY_MATCH_WINDOW = 3600
+CANARY_IDLE_TIMEOUT_HOURS = 3  # NEW: авто-откат без сделок
+
+# ── Self-learn timing ───────────────────────────────
+SELF_LEARN_INTERVAL_SEC = 6 * 3600  # NEW: wall-clock interval (6 часов)
+SELF_LEARN_STATE = DATA_DIR / "self_learn_state.json"  # NEW: последний запуск
 
 # ── Session zones ───────────────────────────────────
 def _session_hour() -> int:
@@ -353,12 +358,34 @@ def is_canary_active() -> bool:
         try:
             started_ts = datetime.fromisoformat(started)
             hours_elapsed = (datetime.now() - started_ts).total_seconds() / 3600
+            # ── NEW: idle timeout — нет сделок > CANARY_IDLE_TIMEOUT_HOURS → авто-откат ──
+            canary_trades = state.get("canary_trades", 0)
+            if canary_trades == 0 and hours_elapsed > CANARY_IDLE_TIMEOUT_HOURS:
+                _auto_rollback_idle_canary(state, hours_elapsed)
+                return False
             if hours_elapsed > CANARY_WINDOW_HOURS:
                 _finalize_canary(state)
                 return False
         except Exception:
             pass
     return True
+
+
+def _auto_rollback_idle_canary(state: dict, hours_elapsed: float):
+    """Авто-откат canary если 0 сделок за IDLE_TIMEOUT часов."""
+    state["active"] = False
+    state["rolled_back"] = True
+    state["history"].append({
+        "ts": datetime.now().isoformat(), "action": "rollback",
+        "reason": f"idle timeout: 0 trades in {hours_elapsed:.1f}h"
+    })
+    _save_canary_state(state)
+    _log_adjustment({
+        "event": "canary_idle_rollback",
+        "hours_elapsed": round(hours_elapsed, 1),
+        "detail": "canary had 0 trades — reset to allow new self-learn cycle"
+    })
+    logger.warning(f"🧪 Canary idle rollback: 0 trades in {hours_elapsed:.1f}h — reset")
 
 def should_use_canary() -> bool:
     if not is_canary_active():
@@ -556,7 +583,7 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
         sym_pnl = stats.get("total_pnl", 0)
         sym_hold = stats.get("avg_hold_hours", 24)
 
-        if sym_trades < 8:
+        if sym_trades < 5:  # NEW: снижен порог с 8 до 5
             continue
 
         sym_updates = {}
@@ -573,6 +600,33 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
         if sym_updates:
             symbol_params[sym] = sym_updates
             applied[f"symbol_{sym}"] = sym_updates
+
+    # ── 2b. CLUSTER-AWARE: если per-symbol < 5 сделок — учимся на кластере ──
+    try:
+        cluster_stats = get_cluster_stats()
+        for sym, stats in per_symbol.items():
+            sym_trades = stats.get("total_trades", 0)  # per-symbol в этом контексте
+            if sym_trades >= 5:
+                continue  # уже обработан выше
+            cluster = _get_symbol_cluster(sym)
+            if cluster == "unknown":
+                continue
+            cs = cluster_stats.get(cluster, {})
+            if cs.get("trades", 0) < 10:
+                continue
+            cluster_wr = cs.get("win_rate", 0.5)
+            cluster_hold = cs.get("avg_hold_hours", 24)
+            current_profile = _load_symbol_profiles().get(sym, {})
+            sym_updates = {}
+            if cluster_wr < 0.35:
+                sym_updates["min_score"] = min(current_profile.get("min_score", min_score) + 3, 35)
+            if cluster_hold < 2:
+                sym_updates["sl_pct"] = max(current_profile.get("sl_pct", 5) - 1, 2)
+            if sym_updates:
+                symbol_params[sym] = sym_updates
+                applied[f"cluster_{sym}"] = sym_updates
+    except Exception:
+        pass
 
     # ── 3. EXIT ANALYSIS: adjust based on WHY ──
     exit_stats = get_exit_stats(days=30)
@@ -654,3 +708,187 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
         log_base["adjustments"] = applied
     _log_adjustment(log_base)
     return applied
+
+
+# ══════════════════════════════════════════════════════
+# 5. WALL-CLOCK SELF-LEARN TRIGGER (v5)
+# ══════════════════════════════════════════════════════
+
+def should_run_self_learn() -> bool:
+    """Проверить, пора ли запускать self-learn (по wall clock, не по cycle count).
+
+    Сохраняет время последнего запуска в self_learn_state.json.
+    """
+    now = time.time()
+    try:
+        if SELF_LEARN_STATE.exists():
+            state = json.loads(SELF_LEARN_STATE.read_text())
+            last_run = state.get("last_run_ts", 0)
+            if now - last_run < SELF_LEARN_INTERVAL_SEC:
+                return False
+    except Exception:
+        pass
+    return True
+
+
+def mark_self_learn_run():
+    """Записать время запуска self-learn."""
+    SELF_LEARN_STATE.parent.mkdir(parents=True, exist_ok=True)
+    SELF_LEARN_STATE.write_text(json.dumps({
+        "last_run_ts": time.time(),
+        "last_run_iso": datetime.now().isoformat(),
+    }))
+
+
+# ══════════════════════════════════════════════════════
+# 6. REGIME-AWARE ANALYSIS (v5)
+# ══════════════════════════════════════════════════════
+
+def get_regime_aware_stats(db_path: str = None) -> dict:
+    """Статистика сделок с разбивкой по рыночному режиму на момент входа.
+
+    Читает trade_history и LSTM-кеш чтобы понять в каком режиме были входы.
+    Возвращает: {regime: {trades, wr, total_pnl}, ...}
+    """
+    import sqlite3 as _sqlite3
+    from pathlib import Path as _Path
+    db = _Path(db_path) if db_path else _Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+    if not db.exists():
+        return {}
+
+    # Загружаем кеш режимов (если есть)
+    regime_log = {}
+    regime_cache_path = DATA_DIR / "lstm_regime_cache.json"
+    # Пытаемся загрузить историю режимов из self_learn лога
+    try:
+        if LEARN_LOG.exists():
+            for line in LEARN_LOG.read_text().strip().split("\n"):
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                if entry.get("event") == "regime_snapshot":
+                    regime_log[entry.get("ts", "").split("T")[0]] = entry.get("regime", "unknown")
+    except Exception:
+        pass
+
+    # Текущий режим как fallback
+    current_regime = "unknown"
+    if regime_cache_path.exists():
+        try:
+            cache = json.loads(regime_cache_path.read_text())
+            current_regime = cache.get("regime", "unknown")
+        except Exception:
+            pass
+
+    conn = _sqlite3.connect(str(db))
+    conn.row_factory = _sqlite3.Row
+    rows = conn.execute(
+        "SELECT symbol, side, pnl, entry_at, closed_at, exit_reason, hold_hours "
+        "FROM trade_history WHERE closed_at IS NOT NULL ORDER BY entry_at"
+    ).fetchall()
+    conn.close()
+
+    by_regime = {}
+    for r in rows:
+        # Приблизительно определяем режим по дате входа
+        entry_date = datetime.fromtimestamp(r["entry_at"]).strftime("%Y-%m-%d")
+        regime = regime_log.get(entry_date, current_regime)
+
+        if regime not in by_regime:
+            by_regime[regime] = {"trades": 0, "wins": 0, "total_pnl": 0.0,
+                                "symbols": {}, "side": {"Buy": 0, "Sell": 0}}
+
+        stats = by_regime[regime]
+        stats["trades"] += 1
+        pnl = float(r["pnl"] or 0)
+        stats["total_pnl"] += pnl
+        if pnl > 0:
+            stats["wins"] += 1
+        stats["side"][r["side"]] = stats["side"].get(r["side"], 0) + 1
+
+        sym = r["symbol"]
+        if sym not in stats["symbols"]:
+            stats["symbols"][sym] = 0
+        stats["symbols"][sym] += 1
+
+    # Добавляем WR
+    for regime, stats in by_regime.items():
+        stats["win_rate"] = round(stats["wins"] / stats["trades"], 3) if stats["trades"] > 0 else 0
+
+    return by_regime
+
+
+# ══════════════════════════════════════════════════════
+# 7. SYMBOL CLUSTERING (v5)
+# ══════════════════════════════════════════════════════
+
+# Pre-defined volatility buckets based on typical Bybit pairs
+VOLATILITY_CLUSTERS = {
+    "high_vol": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],        # >3% daily moves
+    "mid_vol": ["AVAXUSDT", "LINKUSDT", "ADAUSDT", "DOTUSDT", "MATICUSDT"],
+    "low_vol": ["XRPUSDT", "LTCUSDT", "BNBUSDT", "TRXUSDT"],
+}
+
+_cluster_cache = None
+_cluster_cache_ts = 0
+
+
+def _get_symbol_cluster(symbol: str) -> str:
+    """Определить кластер волатильности для символа."""
+    for cluster, symbols in VOLATILITY_CLUSTERS.items():
+        if symbol in symbols:
+            return cluster
+    # По BB width из кеша WS
+    return "unknown"
+
+
+def get_cluster_stats(db_path: str = None) -> dict:
+    """Статистика сделок с группировкой по кластерам волатильности.
+
+    Когда на отдельный символ < 5 сделок — агрегируем по кластеру.
+    """
+    import sqlite3 as _sqlite3
+    global _cluster_cache, _cluster_cache_ts
+
+    # Кеш на 1 час
+    if _cluster_cache and time.time() - _cluster_cache_ts < 3600:
+        return _cluster_cache
+
+    from pathlib import Path as _Path2
+    db = _Path2(db_path) if db_path else _Path2.home() / ".local" / "share" / "bybit-ws" / "state.db"
+    if not db.exists():
+        return {}
+
+    conn = _sqlite3.connect(str(db))
+    conn.row_factory = _sqlite3.Row
+    rows = conn.execute(
+        "SELECT symbol, side, pnl, hold_hours, exit_reason "
+        "FROM trade_history WHERE closed_at IS NOT NULL ORDER BY entry_at"
+    ).fetchall()
+    conn.close()
+
+    by_cluster = {}
+    for r in rows:
+        cluster = _get_symbol_cluster(r["symbol"])
+        if cluster not in by_cluster:
+            by_cluster[cluster] = {"trades": 0, "wins": 0, "total_pnl": 0.0,
+                                   "total_hold": 0.0, "symbols": {}}
+
+        stats = by_cluster[cluster]
+        stats["trades"] += 1
+        pnl = float(r["pnl"] or 0)
+        stats["total_pnl"] += pnl
+        stats["total_hold"] += float(r["hold_hours"] or 0)
+        if pnl > 0:
+            stats["wins"] += 1
+
+        sym = r["symbol"]
+        stats["symbols"][sym] = stats["symbols"].get(sym, 0) + 1
+
+    for cluster, stats in by_cluster.items():
+        stats["win_rate"] = round(stats["wins"] / stats["trades"], 3) if stats["trades"] > 0 else 0
+        stats["avg_hold_hours"] = round(stats["total_hold"] / stats["trades"], 1) if stats["trades"] > 0 else 0
+
+    _cluster_cache = by_cluster
+    _cluster_cache_ts = time.time()
+    return by_cluster

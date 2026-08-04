@@ -794,11 +794,22 @@ async def async_main_loop():
                 except Exception as e:
                     log_event(f'⚠️ ab_status log: {e}')
 
-            # ── Self-learning + Post-trade анализ (раз в сутки) ──
-            if cycle % 720 == 1:
+            # ── Self-learning + Post-trade анализ (каждые 6ч по wall clock) ──
+            try:
+                from .journal.self_learn import (
+                    apply_journal_insights as _apply_insights,
+                    should_run_self_learn as _should_learn,
+                    mark_self_learn_run as _mark_learn,
+                )
+            except ImportError:
+                _should_learn = lambda: cycle % 720 == 1
+                _mark_learn = lambda: None
+                _apply_insights = None
+
+            if _should_learn():
+                _mark_learn()
                 try:
                     from .journal.adapter import load_from_sqlite
-                    from .journal.self_learn import apply_journal_insights as _apply_insights
                     from .post_trade import analyze_clusters as _cluster_analysis
 
                     # Загружаем из SQLite (SSOT) — адаптер создаёт парные entry+close сделки
@@ -820,6 +831,19 @@ async def async_main_loop():
                         blocked = clusters.get('blocked', [])
                         if blocked:
                             log_event(f'🚫 Post-trade блок: {len(blocked)} кластеров')
+
+                    # ── NEW v5: regime-aware stats ──
+                    try:
+                        from .journal.self_learn import get_regime_aware_stats
+                        regime_stats = await run_in_thread(get_regime_aware_stats)
+                        if regime_stats:
+                            summary = ', '.join(
+                                f'{r}:{s["trades"]}t/{s["win_rate"]:.0%}WR'
+                                for r, s in sorted(regime_stats.items())
+                            )
+                            log_event(f'📊 Regime stats: {summary}')
+                    except Exception:
+                        pass
                 except Exception as e:
                     log_event(f'⚠️ self_learn error: {e}')
 
