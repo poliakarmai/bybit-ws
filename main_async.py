@@ -871,7 +871,8 @@ async def async_main_loop():
                             save_params_version, get_drift_detector,
                         )
                         if journal and 'error' not in journal:
-                            trades_list = journal.get('roundtrips', journal.get('roundtrips_sample', []))
+                            trades_list = journal.get('roundtrips', journal.get('roundtrips_sample',
+                                journal.get('profile', {}).get('roundtrips_sample', [])))
                             if trades_list:
                                 # V8: фильтруем аномалии
                                 anomaly_result = detect_anomalous_trades(trades_list)
