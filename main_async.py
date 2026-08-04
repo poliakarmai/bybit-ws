@@ -863,56 +863,69 @@ async def async_main_loop():
                     except Exception:
                         pass
 
-                    # ── NEW v7: composite score + stress test ──
+                    # ── NEW v7-10: composite score + stress test + v10 features ──
                     try:
                         from .journal.self_learn import (
-                            composite_score_v8, stress_test_params, get_params_for_regime,
-                            monte_carlo_stress_test, detect_anomalous_trades,
-                            save_params_version, get_drift_detector,
+                            composite_score_v8, weighted_composite_score, causal_analysis,
+                            stress_test_params, get_params_for_regime,
+                            monte_carlo_stress_test, monte_carlo_stress_test_v9,
+                            detect_anomalous_trades, save_params_version,
                         )
-                        if journal and 'error' not in journal:
-                            trades_list = journal.get('roundtrips', journal.get('roundtrips_sample',
-                                journal.get('profile', {}).get('roundtrips_sample', [])))
-                            if trades_list:
-                                # V8: фильтруем аномалии
-                                anomaly_result = detect_anomalous_trades(trades_list)
-                                clean_trades = anomaly_result["normal"]
-                                if anomaly_result["anomalous_count"] > 0:
-                                    log_event(f'🔍 Anomaly filter: {anomaly_result["anomalous_count"]} outliers excluded '
-                                              f'(threshold=${anomaly_result["iqr_threshold"]})')
+                        # Загружаем сырые трейды из SQLite (с pnl!)
+                        import sqlite3 as _sql_raw
+                        raw_db = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+                        raw_trades = []
+                        if raw_db.exists():
+                            conn = _sql_raw.connect(str(raw_db))
+                            conn.row_factory = _sql_raw.Row
+                            raw_trades = [
+                                {"pnl": float(r["pnl"] or 0), "hold_hours": float(r["hold_hours"] or 0),
+                                 "closed_at": r["closed_at"], "entry_at": r["entry_at"]}
+                                for r in conn.execute(
+                                    "SELECT pnl, hold_hours, closed_at, entry_at FROM trade_history "
+                                    "WHERE closed_at IS NOT NULL ORDER BY entry_at"
+                                ).fetchall()
+                            ]
+                            conn.close()
 
-                                # V8: adaptive weights composite score
-                                cs = composite_score_v8(clean_trades if clean_trades else trades_list)
-                                log_event(f'📊 Composite[{cs["regime"]}]: score={cs["score"]:.2f} '
-                                          f'WR={cs["wr"]:.0%} PF={cs["pf"]} Sharpe={cs["sharpe"]} '
-                                          f'DD=${cs["max_dd"]:.0f} Hold={cs["avg_hold"]:.0f}h')
+                        if raw_trades:
+                            # V10: exponential decay composite
+                            wcs = weighted_composite_score(raw_trades)
+                            log_event(f'📊 Decay-Composite: score={wcs["score"]:.2f} WR={wcs["wr"]:.0%} '
+                                      f'PF={wcs["pf"]} Sharpe={wcs["sharpe"]} DD=${wcs["max_dd"]:.0f} Hold={wcs["avg_hold"]:.0f}h')
 
-                                # V7: stress test
-                                current_regime_params = get_params_for_regime()
-                                st = stress_test_params(current_regime_params, trades_list)
-                                if not st["passed"]:
-                                    failed = [s["name"] for s in st["scenarios"] if not s["would_survive"]]
-                                    log_event(f'⚠️ Stress test FAILED: {failed}')
+                            # V8: adaptive weights composite
+                            cs = composite_score_v8(raw_trades)
+                            log_event(f'📊 Composite[{cs["regime"]}]: score={cs["score"]:.2f} '
+                                      f'WR={cs["wr"]:.0%} PF={cs["pf"]} Sharpe={cs["sharpe"]} '
+                                      f'DD=${cs["max_dd"]:.0f} Hold={cs["avg_hold"]:.0f}h')
 
-                                # V8: Monte Carlo stress test
-                                mc = monte_carlo_stress_test(current_regime_params, n_simulations=1000)
-                                if mc["prob_ruin"] > 0.05:
-                                    log_event(f'⚠️ Monte Carlo: prob_ruin={mc["prob_ruin"]:.1%} '
-                                              f'CVaR=${mc["cvar_5"]} median=${mc["median_loss"]}')
+                            # V10: causal
+                            cause = causal_analysis(raw_trades)
+                            if cause != "STABLE":
+                                log_event(f'🔬 Causal: {cause} (WR drop analysis)')
 
-                                # V9: Pareto-calibrated MC
-                                try:
-                                    from .journal.self_learn import monte_carlo_stress_test_v9
-                                    mc9 = monte_carlo_stress_test_v9(current_regime_params, 500)
-                                    log_event(f'📉 MC-v9 Pareto: prob_ruin={mc9["prob_ruin"]:.1%} '
-                                              f'p5=${mc9["p5_loss"]} median=${mc9["median_loss"]}')
-                                except Exception:
-                                    pass
+                            # V8: anomaly filter
+                            anomaly_result = detect_anomalous_trades(raw_trades)
+                            if anomaly_result["anomalous_count"] > 0:
+                                log_event(f'🔍 Anomaly: {anomaly_result["anomalous_count"]} outliers '
+                                          f'(threshold=${anomaly_result["iqr_threshold"]})')
 
-                                # V8: parameter versioning
-                                if adjustments:
-                                    ver = save_params_version(adjustments, "self_learn")
-                                    log_event(f'📝 Params version: {ver}')
+                            # V7-9: stress tests
+                            current_regime_params = get_params_for_regime()
+                            st = stress_test_params(current_regime_params, raw_trades)
+                            if not st["passed"]:
+                                log_event(f'⚠️ Stress test FAILED: '
+                                          f'{[s["name"] for s in st["scenarios"] if not s["would_survive"]]}')
+
+                            mc9 = monte_carlo_stress_test_v9(current_regime_params, 500)
+                            log_event(f'📉 MC-v9: prob_ruin={mc9["prob_ruin"]:.1%} '
+                                      f'p5=${mc9["p5_loss"]} median=${mc9["median_loss"]}')
+
+                            # V8: parameter versioning
+                            if adjustments:
+                                ver = save_params_version(adjustments, "self_learn")
+                                log_event(f'📝 v{ver}')
                     except Exception:
                         pass
 
