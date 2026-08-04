@@ -859,21 +859,56 @@ async def async_main_loop():
 
                     # ── NEW v7: composite score + stress test ──
                     try:
-                        from .journal.self_learn import composite_score, stress_test_params, get_params_for_regime
+                        from .journal.self_learn import (
+                            composite_score_v8, stress_test_params, get_params_for_regime,
+                            monte_carlo_stress_test, detect_anomalous_trades,
+                            save_params_version, get_drift_detector,
+                        )
                         if journal and 'error' not in journal:
                             trades_list = journal.get('roundtrips', journal.get('roundtrips_sample', []))
                             if trades_list:
-                                cs = composite_score(trades_list)
-                                log_event(f'📊 Composite: score={cs["score"]:.2f} '
+                                # V8: фильтруем аномалии
+                                anomaly_result = detect_anomalous_trades(trades_list)
+                                clean_trades = anomaly_result["normal"]
+                                if anomaly_result["anomalous_count"] > 0:
+                                    log_event(f'🔍 Anomaly filter: {anomaly_result["anomalous_count"]} outliers excluded '
+                                              f'(threshold=${anomaly_result["iqr_threshold"]})')
+
+                                # V8: adaptive weights composite score
+                                cs = composite_score_v8(clean_trades if clean_trades else trades_list)
+                                log_event(f'📊 Composite[{cs["regime"]}]: score={cs["score"]:.2f} '
                                           f'WR={cs["wr"]:.0%} PF={cs["pf"]} Sharpe={cs["sharpe"]} '
                                           f'DD=${cs["max_dd"]:.0f} Hold={cs["avg_hold"]:.0f}h')
 
-                                # Stress test текущих параметров
+                                # V7: stress test
                                 current_regime_params = get_params_for_regime()
                                 st = stress_test_params(current_regime_params, trades_list)
                                 if not st["passed"]:
                                     failed = [s["name"] for s in st["scenarios"] if not s["would_survive"]]
                                     log_event(f'⚠️ Stress test FAILED: {failed}')
+
+                                # V8: Monte Carlo stress test
+                                mc = monte_carlo_stress_test(current_regime_params, n_simulations=1000)
+                                if mc["prob_ruin"] > 0.05:
+                                    log_event(f'⚠️ Monte Carlo: prob_ruin={mc["prob_ruin"]:.1%} '
+                                              f'CVaR=${mc["cvar_5"]} median=${mc["median_loss"]}')
+
+                                # V8: parameter versioning
+                                if adjustments:
+                                    ver = save_params_version(adjustments, "self_learn")
+                                    log_event(f'📝 Params version: {ver}')
+                    except Exception:
+                        pass
+
+                    # ── NEW v8: drift detector ──
+                    try:
+                        from .journal.self_learn import get_drift_detector as _get_dd
+                        dd = _get_dd()
+                        status = dd.get_status()
+                        if status["drift_detected"]:
+                            log_event(f'🚨 DRIFT DETECTED: WR={status["current_wr"]:.1%} '
+                                      f'vs baseline={status["baseline_wr"]:.1%} '
+                                      f'delta={status["drift_delta"]:.1%}')
                     except Exception:
                         pass
                 except Exception as e:

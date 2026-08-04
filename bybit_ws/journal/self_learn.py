@@ -1779,3 +1779,438 @@ def adaptive_canary_pct() -> float:
             return 0.10  # default
     except Exception:
         return CANARY_ENTRY_PCT
+
+
+# ══════════════════════════════════════════════════════
+# V8: THOMPSON SAMPLING (замена фиксированного canary %)
+# ══════════════════════════════════════════════════════
+
+class ParameterBandit:
+    """Multi-armed bandit: каждый набор параметров = 'рука'.
+
+    Thompson Sampling: выбирает руку с max sampled reward из Beta posterior.
+    Автоматически балансирует exploration vs exploitation.
+    """
+
+    def __init__(self, param_sets: list = None):
+        """
+        Args:
+            param_sets: [{min_score: 25, sl_pct: 5}, {min_score: 30, sl_pct: 4}, ...]
+        """
+        if param_sets is None:
+            param_sets = [
+                {"min_score": 25, "sl_pct": 5.0, "tp_mult": 1.5},
+                {"min_score": 30, "sl_pct": 5.0, "tp_mult": 1.2},
+                {"min_score": 35, "sl_pct": 4.0, "tp_mult": 1.0},
+            ]
+        self.arms = [
+            {"params": p, "alpha": 1.0, "beta": 1.0, "trades": 0, "wins": 0}
+            for p in param_sets
+        ]
+
+    def select_arm(self) -> dict:
+        """Thompson Sampling: выбрать руку с max sampled Beta."""
+        import random as _random
+        samples = [
+            _random.betavariate(arm["alpha"], arm["beta"])
+            for arm in self.arms
+        ]
+        best_idx = max(range(len(samples)), key=lambda i: samples[i])
+        return self.arms[best_idx]["params"], best_idx
+
+    def update(self, arm_idx: int, win: bool):
+        """Обновить Beta posterior после сделки."""
+        if 0 <= arm_idx < len(self.arms):
+            self.arms[arm_idx]["trades"] += 1
+            if win:
+                self.arms[arm_idx]["alpha"] += 1
+                self.arms[arm_idx]["wins"] += 1
+            else:
+                self.arms[arm_idx]["beta"] += 1
+
+    def get_best_arm(self) -> dict:
+        """Текущая лучшая рука по mean posterior."""
+        means = [(a["alpha"] / (a["alpha"] + a["beta"]), i)
+                 for i, a in enumerate(self.arms)]
+        best_idx = max(means, key=lambda x: x[0])[1]
+        arm = self.arms[best_idx]
+        return {
+            "params": arm["params"],
+            "wr": round(arm["alpha"] / (arm["alpha"] + arm["beta"]), 3),
+            "trades": arm["trades"],
+            "confidence": round(max(means)[0], 3),
+        }
+
+    def to_dict(self) -> dict:
+        """Сериализация для сохранения."""
+        return {"arms": self.arms}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ParameterBandit":
+        """Восстановление из сохранённого состояния."""
+        bandit = cls(param_sets=[])
+        bandit.arms = data.get("arms", [])
+        return bandit
+
+
+BANDIT_PATH = DATA_DIR / "parameter_bandit.json"
+
+
+def save_bandit(bandit: ParameterBandit):
+    """Сохранить состояние bandit."""
+    BANDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    BANDIT_PATH.write_text(json.dumps(bandit.to_dict(), indent=2))
+
+
+def load_bandit() -> ParameterBandit:
+    """Загрузить состояние bandit."""
+    if BANDIT_PATH.exists():
+        try:
+            return ParameterBandit.from_dict(json.loads(BANDIT_PATH.read_text()))
+        except Exception:
+            pass
+    return ParameterBandit()
+
+
+# ══════════════════════════════════════════════════════
+# V8: MONTE CARLO STRESS TEST (1000 random crash sims)
+# ══════════════════════════════════════════════════════
+
+def monte_carlo_stress_test(params: dict, n_simulations: int = 1000,
+                             capital: float = 200) -> dict:
+    """Генерация синтетических crash-сценариев.
+
+    Симулирует 1000 случайных кризисов и оценивает устойчивость параметров.
+    """
+    import random as _random
+    results = []
+
+    sl_pct = params.get("sl_pct", 5)
+    max_pos = params.get("max_positions", 7)
+    tp_mult = params.get("tp_mult", 1.0)
+
+    for _ in range(n_simulations):
+        # Случайный crash-профиль
+        btc_drop = _random.uniform(0.20, 0.60)       # BTC: -20% to -60%
+        alt_drop = btc_drop * _random.uniform(1.2, 2.0)  # Alts: 1.2x-2x BTC
+        duration_h = _random.uniform(1, 72)            # 1-72ч
+        vol_spike = _random.uniform(2.0, 8.0)          # 2x-8x волатильность
+
+        # Симуляция: каждая позиция теряет min(SL%, alt_drop * vol_factor)
+        # При vol_spike=5, alt_drop=50%: позиция может потерять до SL%
+        position_losses = []
+        pos_size = capital * 0.05  # 5% на позицию
+
+        for _ in range(max_pos):
+            effective_drop = min(alt_drop / 100, sl_pct / 100) * vol_spike / 3
+            loss = pos_size * effective_drop
+            # Часть позиций в SHORT — профит в crash
+            if _random.random() < 0.3:  # 30% SHORT
+                loss = -loss * 0.5
+            position_losses.append(loss)
+
+        total_pnl = -sum(position_losses)
+        # SL срабатывает и ограничивает убыток
+        sl_capped = min(total_pnl, max_pos * pos_size * (sl_pct / 100))
+        results.append(sl_capped)
+
+    # Статистика
+    results_sorted = sorted(results)
+    p5 = results_sorted[int(n_simulations * 0.05)]
+    p25 = results_sorted[int(n_simulations * 0.25)]
+    median = results_sorted[n_simulations // 2]
+    p95 = results_sorted[int(n_simulations * 0.95)]
+
+    cvar_5 = sum(r for r in results if r <= p5) / max(1, sum(1 for r in results if r <= p5))
+    prob_ruin = sum(1 for r in results if r < -capital * 0.5) / n_simulations  # потеря >50%
+
+    return {
+        "p5_loss": round(p5, 2),
+        "p25_loss": round(p25, 2),
+        "median_loss": round(median, 2),
+        "p95_loss": round(p95, 2),
+        "cvar_5": round(cvar_5, 2),
+        "max_loss": round(min(results), 2),
+        "prob_ruin": round(prob_ruin, 4),
+        "passed": prob_ruin < 0.05,  # <5% вероятность разорения
+        "n_simulations": n_simulations,
+    }
+
+
+# ══════════════════════════════════════════════════════
+# V8: CONCEPT DRIFT DETECTOR (ADWIN-based simplified)
+# ══════════════════════════════════════════════════════
+
+class ConceptDriftDetector:
+    """Обнаружение дрейфа: стратегия перестала работать.
+
+    Упрощённый ADWIN: скользящее окно + сравнение с baseline.
+    """
+
+    def __init__(self, window_size: int = 100, threshold: float = 0.05,
+                 min_samples: int = 30, confirm_window: int = 20):
+        self.window_size = window_size
+        self.threshold = threshold
+        self.min_samples = min_samples
+        self.confirm_window = confirm_window
+        self.recent_outcomes = []  # 1.0=win, 0.0=loss
+        self.baseline_wr = None
+        self.drift_detected = False
+        self.drift_since = None
+
+    def update(self, win: bool) -> bool:
+        """Добавить исход сделки. Возвращает True если дрейф обнаружен."""
+        self.recent_outcomes.append(1.0 if win else 0.0)
+        if len(self.recent_outcomes) > self.window_size:
+            self.recent_outcomes = self.recent_outcomes[-self.window_size:]
+
+        if len(self.recent_outcomes) < self.min_samples:
+            return False
+
+        current_wr = sum(self.recent_outcomes) / len(self.recent_outcomes)
+
+        if self.baseline_wr is None:
+            self.baseline_wr = current_wr
+            return False
+
+        drift = self.baseline_wr - current_wr
+
+        if drift > self.threshold and not self.drift_detected:
+            # Подтверждение: последние N сделок
+            if len(self.recent_outcomes) >= self.confirm_window:
+                recent_wr = sum(self.recent_outcomes[-self.confirm_window:]) / self.confirm_window
+                if recent_wr < 0.30:
+                    self.drift_detected = True
+                    self.drift_since = datetime.now()
+                    return True
+
+        # Сброс если восстановились
+        if self.drift_detected and drift < self.threshold * 0.5:
+            self.drift_detected = False
+            self.drift_since = None
+            self.baseline_wr = current_wr  # новый baseline
+
+        return False
+
+    def get_status(self) -> dict:
+        """Текущий статус детектора."""
+        current_wr = sum(self.recent_outcomes) / max(1, len(self.recent_outcomes))
+        return {
+            "drift_detected": self.drift_detected,
+            "drift_since": self.drift_since.isoformat() if self.drift_since else None,
+            "current_wr": round(current_wr, 3),
+            "baseline_wr": round(self.baseline_wr, 3) if self.baseline_wr else None,
+            "drift_delta": round((self.baseline_wr or 0) - current_wr, 3),
+            "recent_trades": len(self.recent_outcomes),
+        }
+
+    def on_drift_detected(self) -> dict:
+        """Рекомендации при обнаружении дрейфа."""
+        return {
+            "action": "conservative",
+            "min_score_mult": 1.5,
+            "position_size_mult": 0.5,
+            "canary_pct": 0.0,  # отключить эксперименты
+            "alert": "Strategy drift detected — auto-conservative mode",
+            "auto_reset_hours": 48,
+        }
+
+
+DRIFT_STATE_PATH = DATA_DIR / "drift_detector.json"
+
+# Глобальный экземпляр
+_drift_detector: ConceptDriftDetector = None
+
+
+def get_drift_detector() -> ConceptDriftDetector:
+    global _drift_detector
+    if _drift_detector is None:
+        _drift_detector = ConceptDriftDetector()
+    return _drift_detector
+
+
+# ══════════════════════════════════════════════════════
+# V8: ANOMALY DETECTION (Isolation Forest для трейдов)
+# ══════════════════════════════════════════════════════
+
+def detect_anomalous_trades(trades: list) -> dict:
+    """Исключить аномальные сделки из self-learning.
+
+    Использует Isolation Forest на features: pnl, hold_time, entry_score.
+    Без внешних зависимостей — упрощённая версия через IQR.
+    """
+    if len(trades) < 20:
+        return {"normal": trades, "anomalous": [], "normal_count": len(trades),
+                "anomalous_count": 0}
+
+    # Извлекаем pnl для outlier detection (IQR метод)
+    pnls = [
+        abs(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0))
+        for t in trades
+    ]
+
+    # IQR-based outlier detection
+    pnls_sorted = sorted(pnls)
+    q1 = pnls_sorted[len(pnls) // 4]
+    q3 = pnls_sorted[3 * len(pnls) // 4]
+    iqr = q3 - q1
+    upper_bound = q3 + 3.0 * iqr  # 3× IQR (консервативно)
+
+    normal = []
+    anomalous = []
+    for i, t in enumerate(trades):
+        pnl = abs(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0))
+        hold = t.get("hold_hours", 0) if isinstance(t, dict) else getattr(t, "hold_hours", 0)
+
+        # Аномалия: экстремальный PnL ИЛИ слишком долгий hold (>100h)
+        if pnl > upper_bound or hold > 100:
+            anomalous.append(t)
+        else:
+            normal.append(t)
+
+    return {
+        "normal": normal,
+        "anomalous": anomalous,
+        "normal_count": len(normal),
+        "anomalous_count": len(anomalous),
+        "iqr_threshold": round(upper_bound, 2),
+    }
+
+
+# ══════════════════════════════════════════════════════
+# V8: ADAPTIVE COMPOSITE WEIGHTS (per-regime)
+# ══════════════════════════════════════════════════════
+
+COMPOSITE_WEIGHTS = {
+    "TRENDING_UP":   {"wr": 0.35, "pf": 0.20, "sharpe": 0.20, "dd": 0.15, "hold": 0.10},
+    "TRENDING_DOWN": {"wr": 0.20, "pf": 0.25, "sharpe": 0.15, "dd": 0.30, "hold": 0.10},
+    "RANGING":       {"wr": 0.25, "pf": 0.30, "sharpe": 0.20, "dd": 0.15, "hold": 0.10},
+    "HIGH_VOL":      {"wr": 0.15, "pf": 0.20, "sharpe": 0.15, "dd": 0.40, "hold": 0.10},
+    "LOW_VOL":       {"wr": 0.30, "pf": 0.25, "sharpe": 0.25, "dd": 0.10, "hold": 0.10},
+    "CHOPPY":        {"wr": 0.20, "pf": 0.20, "sharpe": 0.15, "dd": 0.35, "hold": 0.10},
+}
+
+
+def composite_score_v8(trades: list, regime: str = None) -> dict:
+    """Composite score с адаптивными весами по режиму рынка."""
+    if regime is None:
+        regime = "RANGING"
+        cache = DATA_DIR / "lstm_regime_cache.json"
+        if cache.exists():
+            try:
+                regime = json.loads(cache.read_text()).get("regime", "RANGING")
+            except Exception:
+                pass
+
+    weights = COMPOSITE_WEIGHTS.get(regime, COMPOSITE_WEIGHTS["RANGING"])
+
+    if not trades:
+        return {"score": 0.5, "wr": 0, "pf": 0, "sharpe": 0, "max_dd": 0,
+                "avg_hold": 0, "regime": regime, "weights": weights}
+
+    n = len(trades)
+    pnls = [(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) for t in trades]
+    holds = [(t.get("hold_hours", 0) if isinstance(t, dict) else getattr(t, "hold_hours", 0))
+             for t in trades]
+
+    wr = sum(1 for p in pnls if p > 0) / n
+
+    # Profit Factor
+    gross_profit = sum(p for p in pnls if p > 0)
+    gross_loss = sum(abs(p) for p in pnls if p < 0)
+    pf = gross_profit / gross_loss if gross_loss > 0 else (2.0 if gross_profit > 0 else 0.5)
+    pf_norm = min(pf / 3.0, 1.0)
+
+    # Sharpe
+    mean_pnl = sum(pnls) / n
+    variance = sum((p - mean_pnl) ** 2 for p in pnls) / max(1, n - 1)
+    std_pnl = variance ** 0.5
+    sharpe = mean_pnl / std_pnl if std_pnl > 0 else 0
+    sharpe_norm = min(max(sharpe + 1, 0) / 2.5, 1.0)
+
+    # MaxDD
+    cumulative = 0
+    peak = 0
+    max_dd = 0
+    for p in pnls:
+        cumulative += p
+        peak = max(peak, cumulative)
+        max_dd = max(max_dd, peak - cumulative)
+    dd_norm = max(0, 1.0 - max_dd / 100.0)
+
+    # AvgHold
+    avg_hold = sum(holds) / n
+    hold_norm = max(0, 1.0 - avg_hold / 48.0)
+
+    score = (
+        weights["wr"] * wr +
+        weights["pf"] * pf_norm +
+        weights["sharpe"] * sharpe_norm +
+        weights["dd"] * dd_norm +
+        weights["hold"] * hold_norm
+    )
+
+    return {
+        "score": round(score, 3),
+        "wr": round(wr, 3),
+        "pf": round(pf, 2),
+        "sharpe": round(sharpe, 3),
+        "max_dd": round(max_dd, 2),
+        "avg_hold": round(avg_hold, 1),
+        "regime": regime,
+        "weights": weights,
+    }
+
+
+# ══════════════════════════════════════════════════════
+# V8: PARAMETER VERSIONING (Git-like)
+# ══════════════════════════════════════════════════════
+
+PARAMS_HISTORY_DIR = DATA_DIR / "params_history"
+
+
+def save_params_version(params: dict, reason: str, parent_version: str = None) -> str:
+    """Сохранить снепшот параметров как версию."""
+    PARAMS_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Определяем номер версии
+    existing = sorted(PARAMS_HISTORY_DIR.glob("v*.json"))
+    next_num = len(existing) + 1
+    version_id = f"v{next_num:03d}"
+
+    snapshot = {
+        "version": version_id,
+        "parent": parent_version,
+        "timestamp": datetime.now().isoformat(),
+        "params": params,
+        "reason": reason,
+    }
+
+    (PARAMS_HISTORY_DIR / f"{version_id}.json").write_text(json.dumps(snapshot, indent=2))
+
+    # HEAD
+    (PARAMS_HISTORY_DIR / "HEAD.json").write_text(json.dumps(
+        {"version": version_id, "timestamp": snapshot["timestamp"]}, indent=2
+    ))
+
+    return version_id
+
+
+def get_params_history(limit: int = 20) -> list:
+    """Список последних версий параметров."""
+    if not PARAMS_HISTORY_DIR.exists():
+        return []
+    files = sorted(PARAMS_HISTORY_DIR.glob("v*.json"), reverse=True)[:limit]
+    history = []
+    for f in files:
+        try:
+            snap = json.loads(f.read_text())
+            history.append({
+                "version": snap["version"],
+                "timestamp": snap["timestamp"],
+                "reason": snap.get("reason", ""),
+                "params": snap.get("params", {}),
+            })
+        except Exception:
+            pass
+    return history
