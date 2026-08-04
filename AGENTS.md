@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-08-04 (v8.2 — Systemd pitfalls: MemoryDenyWriteExecute, HMAC, TimeoutStopSec, symlink)
+> Обновлено: 2026-08-04 (v10 — Self-learn: 20+ механик, Dynamic Bandit, Pareto MC, Drift Detector, Ensemble)
 
 ## Что это
 
@@ -12,24 +12,45 @@ Systemd-сервис `bybit-ws-async`, ~45 MB RAM, SQLite — SSOT.
 
 ```
 bybit-ws/
-├── main_async.py         ← Главный цикл (async, 30с). Self-learn каждые 720 циклов (6ч)
+├── main_async.py         ← Главный цикл (async, 30с). Self-learn: event-driven (≥10 сделок / 6ч)
 ├── unified_sl.py          ← Unified SL (5→1, приоритет: tight>simple>hard>BE>default)
 ├── auto_entry.py          ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
 ├── auto_sl.py             ← ATR-adaptive SL (legacy, заменён unified_sl)
 ├── auto_tp.py             ← ATR-based TP (1×/2×/3× ATR)
-├── risk_manager.py       ← Risk + BlackSwan (3-tier) + emergency_close
-├── entry_judge.py        ← Cross-model judge (Nemotron→DeepSeek, fail-closed)
+├── risk_manager.py       ← Risk + BlackSwan (v2: alert only) + emergency_close
+├── entry_judge.py        ← Cross-model judge (DeepSeek, fail-closed)
 ├── lstm_regime.py         ← LSTM-классификатор режима (82.3% точность, 5 классов)
+├── lstm_world_model.py    ← Multi-task OHLCV prediction + entry scoring
 ├── rpc.py                ← JSON-RPC (:8766) + /kill_switch + /metrics + one-click
 ├── state_db.py           ← SQLite SSOT (WAL, busy_timeout=5с)
-├── journal/              ← Самообучение + Canary mode
-├── deploy.sh             ← Атомарный деплой (pre-deploy 6 checks + canary 8 checks)
+├── journal/              ← Самообучение v10 (20+ механик)
+│   ├── self_learn.py      ← Dynamic Bandit, Pareto MC, Drift, Ensemble, Causal
+│   ├── analyzer.py        ← Профиль + 4 bias-диагностики
+│   └── adapter.py         ← SQLite → нормализованные сделки
+├── deploy.sh             ← Атомарный деплой (smoke 52 + canary 8)
 ├── test_smoke.py         ← 52 интеграционных тестов
-├── paper_trade.py        ← 🆕 Бэктестинг на исторических данных
+├── paper_trade.py        ← Бэктестинг на исторических данных
 └── docs/
-    ├── history.md         ← История фаз
-    └── PRD-one-click.md   ← One-click trading архитектура
+    ├── SELF_LEARN.md       ← Документация модуля самообучения (v10)
+    ├── history.md          ← История фаз
+    └── PRD-one-click.md    ← One-click trading архитектура
 ```
+
+## Self-Learning v10 (ключевое)
+
+Модуль автономно адаптирует стратегию без участия человека. 20+ механик:
+
+| Группа | Механики |
+|--------|----------|
+| **Подбор параметров** | Thompson Sampling, Dynamic Bandit (auto-prune), Uncertainty-aware selection |
+| **Режимы рынка** | Per-regime params, Ensemble (6 bandits), Coordinated transition handover |
+| **Защита** | Drift Detector (per-regime), Stress test (4 hist + 1000 Pareto MC), Causal inference |
+| **Метрики** | Composite Score (WR+PF+Sharpe+DD+Hold), Exponential decay, Adaptive weights |
+| **Качество данных** | Anomaly detection (IQR), Robust updates (>3σ outlier skip) |
+| **Обучение** | Micro-updates (per trade), Canary (Bayesian A/B), Walk-forward validation |
+| **Инфраструктура** | Git-like param versioning, Self-learn JSONL лог, Symbol profiles |
+
+Детали: `docs/SELF_LEARN.md`.
 
 ## Запуск
 
@@ -49,10 +70,9 @@ python3 test_smoke.py                      # тесты
 | Конфиг | `~/.config/bybit-ws/config.yaml` |
 | Креды | `~/.config/bybit-ws/env` (chmod 600) |
 | RPC | `http://127.0.0.1:8766` |
-| Трейды | `~/.local/share/bybit-ws/trades.jsonl` |
-| Canary state | `~/.local/share/bybit-ws/canary_state.json` |
+| Self-learn state | `~/.local/share/bybit-ws/{canary_state,parameter_ensemble,self_learn_state,regime_params}.json` |
+| Param versions | `~/.local/share/bybit-ws/params_history/v*.json` |
 | LSTM модель | `~/.local/share/bybit-ws/models/lstm_regime.pt` |
-| LSTM скейлер | `~/.local/share/bybit-ws/models/lstm_regime_scaler.pkl` |
 
 ## Аварийные ситуации
 
@@ -119,32 +139,15 @@ systemctl --user restart bybit-ws-async
 
 - **Файл:** `lstm_world_model.py`
 - **Архитектура:** Multi-task LSTM — regime classification + OHLCV prediction на t+1
-- **Идея:** ECHO (Anthropic, 2026) — каждая свеча = training sample через world modeling
-- **Датасет:** 5 символов × 2 года (~3,445 сэмплов)
-- **World MSE:** ~0.045 (≈2% ошибка дневных Δ)
 - **Feature flag:** `BYBIT_WORLD_MODEL=1` — добавляет World Model score (0-5) в entry scoring
-- **Кеш:** `get_cached_world_prediction(symbol)` — 1-часовой TTL, batch-запрос для всех AUTO_ENTRY_WATCH
 - **CLI:** `python3 lstm_world_model.py --train` / `--predict BTCUSDT`
 
 ## LSTM Market Regime
 
 - **Модель:** 82.3% точность (переобучена 01.08.2026)
 - **Классы:** TRENDING_UP, TRENDING_DOWN, RANGING, HIGH_VOL, LOW_VOL
-- **Feature flag:** `BYBIT_REGIME_AUTO=0` (default) — авто-переключение LONG/SHORT выключено
-- **CLI:** `python3 lstm_regime.py --predict` — текущий режим
-- **Обучение:** `python3 lstm_regime.py --train` (100 эпох, ~3 мин)
-
-## Codebase-memory MCP — вместо grep
-
-Проект проиндексирован: 2686 узлов, 8640 рёбер.
-
-| Задача | Инструмент |
-|--------|-----------|
-| Найти определение | `search_graph(query="canary")` |
-| Граф вызовов | `trace_path(function_name="auto_entry_scan")` |
-| Хотспоты/O(n²) | `query_graph` → `transitive_loop_depth >= 3` |
-| Фрагмент кода | `get_code_snippet(qualified_name="...")` |
-| Что сломал коммит | `detect_changes(since="HEAD~1")` |
+- **Feature flag:** `BYBIT_REGIME_AUTO=1` — авто-переключение LONG/SHORT
+- **CLI:** `python3 -m bybit_ws.lstm_regime --predict`
 
 ## Pre-deploy checklist
 
@@ -165,8 +168,7 @@ systemctl --user restart bybit-ws-async
 
 ### LSTM HMAC mismatch после переобучения
 
-После `python3 lstm_regime.py --train` модель подписывается fallback-ключом. Сервис использует ключ из `BYBIT_HMAC_SECRET` → mismatch.
-**Решение:** переподписать модель явно:
+**Решение:** переподписать модель:
 ```bash
 cd ~/bybit-ws && python3 -c "
 import os, hmac, hashlib
@@ -177,36 +179,24 @@ with open(os.path.expanduser('~/.config/bybit-ws/env')) as f:
             break
 for fname in ['lstm_regime.pt', 'lstm_regime_scaler.pkl']:
     path = f'/home/openclaw/.local/share/bybit-ws/models/{fname}'
-    with open(path, 'rb') as fh:
-        sha = hashlib.sha256(fh.read()).hexdigest()
+    with open(path, 'rb') as fh: sha = hashlib.sha256(fh.read()).hexdigest()
     sig = hmac.new(key, sha.encode(), hashlib.sha256).hexdigest()
-    with open(path + '.hmac', 'w') as fh:
-        fh.write(sig)
+    with open(path + '.hmac', 'w') as fh: fh.write(sig)
 "
 ```
 
 ### TimeoutStopSec — зависание на SIGTERM
 
-main_async не обрабатывает SIGTERM — systemd restart зависает на 90с.
 **Решение:** `TimeoutStopSec=10` в unit-файле.
 
 ### lstm_world_model — симлинк
 
-Файл `lstm_world_model.py` в корне репо, а импорт `from bybit_ws.lstm_world_model`.
-**Решение:** симлинк `bybit_ws/lstm_world_model.py -> ../lstm_world_model.py` (закоммичен в git).
+**Решение:** симлинк `bybit_ws/lstm_world_model.py -> ../lstm_world_model.py`.
 
 ## Paper Trading
 
 ```bash
-# Бэктест на истории (без реальных сделок)
 python3 -m bybit_ws.paper_trade SOLUSDT --days 30
 python3 -m bybit_ws.paper_trade SOLUSDT --days 90 --interval 240 --json
 python3 -m bybit_ws.paper_trade BTCUSDT --days 180 --risk 3 --rr 1.5
 ```
-
-Файл: `bybit_ws/paper_trade.py` (506 строк).
-
-## Детали
-
-Архитектура цикла, параметры стратегий, фильтры входа, Black Swan, сессии,
-runbook инцидентов, схема БД, диагностика по логам → [OpenWiki](openwiki/quickstart.md).
