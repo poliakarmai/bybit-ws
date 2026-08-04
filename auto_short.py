@@ -34,6 +34,7 @@ import time
 from .api import bybit, get_bb_data, fetch_orders
 from .alerts import log_event, add_alert
 from .config import Config
+from . import DATA_DIR
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -120,18 +121,33 @@ def _check_short_mtf(sym: str):
     """Фаза 4.3.1: проверить D/W/M конфлюенс для SHORT-сигнала.
     
     Возвращает dict с confluence info или None если нет данных (не фильтруем).
-    Возвращает False если конфлюенс < 2/3 (фильтруем).
+    Возвращает False если конфлюенс < min_tfs (фильтруем).
+    min_tfs = 1 при TRENDING_DOWN (режимная скидка), иначе 2.
     """
     from .mtf_confirmation import check_confluence
+    
+    # ── Режимная скидка: TRENDING_DOWN → 1/3 достаточно ──
+    min_tfs = 2
+    try:
+        import json as _json
+        cache_file = DATA_DIR / 'lstm_regime_cache.json'
+        if cache_file.exists():
+            regime_data = _json.loads(cache_file.read_text())
+            regime = regime_data.get('regime', '')
+            confidence = regime_data.get('confidence', 0)
+            if regime == 'TRENDING_DOWN' and confidence >= 25:
+                min_tfs = 1
+    except Exception:
+        pass
     
     try:
         conf = check_confluence(sym, 'SHORT')
         if conf is None:
             return None  # нет данных — не фильтруем
-        if not conf['approved']:
+        if conf['confluence'] < min_tfs:
             log_event(
                 f'🚫 MTF filter SHORT: {sym} confluence={conf["confluence"]}/3 '
-                f'({conf["filter_reason"]})'
+                f'(min={min_tfs}/3, {conf["filter_reason"]})'
             )
             return False
         
