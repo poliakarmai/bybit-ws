@@ -130,9 +130,10 @@ def _check_short_mtf(sym: str):
     min_tfs = 2
     try:
         import json as _json
-        cache_file = DATA_DIR / 'lstm_regime_cache.json'
-        if cache_file.exists():
-            regime_data = _json.loads(cache_file.read_text())
+        cache_file = os.path.join(DATA_DIR, 'lstm_regime_cache.json')
+        if os.path.exists(cache_file):
+            with open(cache_file) as f:
+                regime_data = _json.load(f)
             regime = regime_data.get('regime', '')
             confidence = regime_data.get('confidence', 0)
             if regime == 'TRENDING_DOWN' and confidence >= 25:
