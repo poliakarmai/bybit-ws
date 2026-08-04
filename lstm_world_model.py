@@ -528,6 +528,145 @@ def predict_world(symbol='BTCUSDT', days=30):
     }
 
 
+# ── Cached World Model Prediction ───────────────────────────────────────
+
+_world_model_instance = None
+_world_scaler_params = None
+_world_cache = {}           # {symbol: {regime, predicted_return_pct, predicted_close_t1, current_close, timestamp}}
+_world_cache_ts = {}        # {symbol: float (time.time())}
+
+# Default watch list — mirrors AUTO_ENTRY_WATCH in auto_entry.py
+_WORLD_CACHE_SYMBOLS = [
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'LTCUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT',
+    'HYPEUSDT', 'NEARUSDT', 'SUIUSDT', 'TONUSDT', 'WLDUSDT', 'LINKUSDT',
+]
+_CACHE_TTL = 3600  # 1 hour
+
+
+def _ensure_world_model():
+    """Lazy-load the world model and scaler once per process lifetime."""
+    global _world_model_instance, _world_scaler_params
+
+    if _world_model_instance is not None and _world_scaler_params is not None:
+        return _world_model_instance, _world_scaler_params
+
+    if not HAS_TORCH:
+        raise RuntimeError("PyTorch not installed — cannot load world model")
+
+    if not WORLD_MODEL_PATH.exists():
+        raise FileNotFoundError(f"World model not found: {WORLD_MODEL_PATH}")
+
+    model = LSTMWorldModel()
+    model.eval()
+    ckpt = torch.load(WORLD_MODEL_PATH, map_location='cpu')
+    model.load_state_dict(ckpt['model_state'])
+
+    import pickle
+    with open(WORLD_SCALER_PATH, 'rb') as f:
+        scaler_params = pickle.load(f)
+
+    _world_model_instance = model
+    _world_scaler_params = scaler_params
+
+    return model, scaler_params
+
+
+def get_cached_world_prediction(symbol: str, force_refresh: bool = False):
+    """
+    Return cached world model prediction for a symbol. 1-hour TTL.
+
+    On first call or expired cache, fetches data for all _WORLD_CACHE_SYMBOLS
+    at once and caches predictions.
+
+    Returns:
+        dict or None: {
+            'regime': str,
+            'predicted_return_pct': float,    # Δ_close% for t+1
+            'predicted_close_t1': float,
+            'current_close': float,
+            'timestamp': str (ISO),
+        }
+    """
+    now = time.time()
+
+    # Return cached if fresh
+    if not force_refresh and symbol in _world_cache:
+        if _world_cache_ts.get(symbol, 0) > now - _CACHE_TTL:
+            return _world_cache[symbol]
+
+    try:
+        model, scaler_params = _ensure_world_model()
+    except Exception:
+        return None
+
+    # Fetch data for ALL watch symbols at once
+    try:
+        all_data = fetch_training_data(
+            tuple(_WORLD_CACHE_SYMBOLS),
+            days=SEQUENCE_LENGTH + 5,
+        )
+    except Exception:
+        return None
+
+    if not all_data:
+        return None
+
+    min_ = scaler_params['min_']
+    max_ = scaler_params['max_']
+    macro = _get_macro_features()
+
+    for d in all_data:
+        sym = d['symbol']
+        closes = d['closes']
+        highs = d['highs']
+        lows = d['lows']
+        volumes = d['volumes']
+
+        if len(closes) < SEQUENCE_LENGTH + 1:
+            continue
+
+        # Build features for last window
+        features = []
+        for j in range(len(closes) - SEQUENCE_LENGTH, len(closes)):
+            feat = _calc_features(
+                closes[:j + 1], highs[:j + 1], lows[:j + 1], volumes[:j + 1]
+            )
+            if feat is None:
+                break
+            features.append(feat + macro)
+
+        if len(features) != SEQUENCE_LENGTH:
+            continue
+
+        X = np.array([features], dtype=np.float32)
+        X = np.nan_to_num(X, nan=0.0)
+
+        X_scaled = (X - min_) / (max_ - min_ + 1e-8)
+
+        with torch.no_grad():
+            logits, world_pred = model(torch.tensor(X_scaled, dtype=torch.float32))
+            probs = torch.softmax(logits, dim=1)[0]
+            regime_idx = probs.argmax().item()
+
+        current_close = closes[-1]
+        world = world_pred[0].numpy()
+
+        predicted_return_pct = float(world[0] * 100)  # Δ_close% as percentage
+        predicted_close_t1 = float(current_close * (1 + world[0]))
+
+        entry = {
+            'regime': CLASS_NAMES[regime_idx],
+            'predicted_return_pct': round(predicted_return_pct, 4),
+            'predicted_close_t1': round(predicted_close_t1, 4),
+            'current_close': current_close,
+            'timestamp': datetime.now().isoformat(),
+        }
+        _world_cache[sym] = entry
+        _world_cache_ts[sym] = now
+
+    return _world_cache.get(symbol)
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
