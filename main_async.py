@@ -741,6 +741,17 @@ async def async_main_loop():
                     for a in sl_msgs:
                         add_alert('SL', a)
 
+                # ── V10: Time exit — закрыть позиции-зомби (каждый цикл) ──
+                try:
+                    from .time_exit import check_time_exit, apply_time_exits
+                    stale = check_time_exit(new_positions, new_orders)
+                    if stale:
+                        result = apply_time_exits(stale)
+                        if result.get('closed', 0) > 0:
+                            log_event(f"⏰ Time exit: {result['closed']}/{len(stale)} closed")
+                except Exception as e:
+                    log_event(f'⚠️ time_exit error: {e}')
+
                 # Маржа
                 margin_msgs, _ = await run_in_thread(check_margin_utilization, new_positions)
                 if isinstance(margin_msgs, list):

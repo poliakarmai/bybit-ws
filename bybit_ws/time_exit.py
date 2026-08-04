@@ -10,7 +10,7 @@ from typing import Optional
 
 # Конфиг
 TIME_EXIT_HOURS = 6  # максимум часов в позиции без движения
-TIME_EXIT_MAX_HOURS = 48  # абсолютный максимум — закрыть в любом случае
+TIME_EXIT_MAX_HOURS = 24  # v10: был 48, снижен — STGUSDT висела 730ч
 TIME_EXIT_MIN_PNL = 0.0  # минимальный PnL для «живой» позиции (в процентах от входа)
 TIME_EXIT_ENABLED = True
 
