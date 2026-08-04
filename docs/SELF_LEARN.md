@@ -1,4 +1,4 @@
-# Self-Learning Module — bybit-ws v7
+# Self-Learning Module — bybit-ws v8
 
 > Автономное самообучение торговой стратегии. Без участия человека.
 > Обновлено: 2026-08-04.
@@ -7,107 +7,148 @@
 
 ```
 main_async.py (event-driven: ≥10 сделок / 6ч или 24ч fallback)
-  └─ should_run_self_learn_v6()      ← проверка условий
-       └─ mark_self_learn_run()      ← запись времени
-            └─ load_from_sqlite()     ← adapter.py: SQLite → analyzer
-                 └─ analyze()          ← analyzer.py: профиль + bias
-                      └─ apply_journal_insights()  ← коррекция параметров
-                           ├─ composite_score       ← multi-objective (v7)
-                           ├─ regime params         ← per-regime tuning (v7)
-                           ├─ stress testing        ← crash scenarios (v7)
-                           ├─ drawdown adjustment   ← risk-aware (v7)
-                           ├─ adaptive canary %     ← dynamic (v7)
-                           ├─ Bayesian shrinkage    ← cluster mean (v6)
-                           ├─ SL time analysis      ← quick vs slow (v6)
+  └─ should_run_self_learn_v6()          ← проверка условий
+       └─ mark_self_learn_run()          ← запись времени
+            └─ load_from_sqlite()         ← adapter.py: SQLite → analyzer
+                 └─ analyze()              ← analyzer.py: профиль + bias
+                      └─ apply_journal_insights()
+                           ├─ anomaly filter        ← IQR outlier detection (v8)
+                           ├─ composite_score_v8    ← adaptive per-regime weights (v8)
+                           ├─ Thompson Sampling     ← multi-armed bandit (v8)
+                           ├─ Monte Carlo stress    ← 1000 random crash sims (v8)
+                           ├─ drift detector        ← ADWIN-based (v8)
+                           ├─ param versioning      ← Git-like snapshots (v8)
                            ├─ walk-forward          ← out-of-sample (v6)
-                           ├─ global rollback       ← auto-rollback (v6)
-                           ├─ feature importance    ← filter tracking (v6)
-                           └─ canary: Bayesian A/B  ← Beta posterior (v6)
+                           ├─ Bayesian A/B          ← Beta posterior (v6)
+                           ├─ regime params         ← per-regime tuning (v7)
+                           ├─ drawdown adjustment   ← risk-aware (v7)
+                           └─ stress test           ← 4 historical scenarios (v7)
 ```
 
-## V7 — Новое (04.08.2026)
+## V8 — Новое (04.08.2026)
 
-| # | Механика | Описание |
-|---|----------|----------|
-| 1 | **Composite Score** | WR(30%) + Profit Factor(25%) + Sharpe(20%) + MaxDD(15%) + AvgHold(10%) |
-| 2 | **Regime-Specific Params** | Раздельные min_score/sl_pct/tp_mult/max_positions/direction для 6 режимов |
-| 3 | **Stress Testing** | 4 crash-сценария: COVID 2020, FTX 2022, China Ban 2021, Luna 2022 |
-| 4 | **Drawdown-Based** | DD>10% → conservative (×1.3 min_score, ×0.5 size). Profit>5% → aggressive |
-| 5 | **Adaptive Canary %** | WR стабилен → 20%, нестабилен → 5%, default 10% |
+| # | Механика | Как работает |
+|---|----------|-------------|
+| 1 | **Thompson Sampling** | 3 руки Beta(α,β). Выбор по max sampled reward. Авто-balance explore/exploit |
+| 2 | **Monte Carlo Stress** | 1000 синтетических crash: BTC -20..-60%, alt 1.2-2×, vol 2-8× |
+| 3 | **Drift Detector** | Скользящее окно 100. WR drop >5% + подтверждение 20 → DRIFT |
+| 4 | **Anomaly Detection** | IQR 3×: экстремальный PnL или hold >100ч → исключение из обучения |
+| 5 | **Adaptive Weights** | 6 режимов × свои веса composite_score (TRENDING_DOWN: dd=40%) |
+| 6 | **Param Versioning** | `params_history/v001.json` → `v002.json` → HEAD.json |
 
-### Composite Score
+### Thompson Sampling
 
 ```python
-score = 0.30*wr + 0.25*pf_norm + 0.20*sharpe_norm + 0.15*dd_norm + 0.10*hold_norm
-# score: 0..1, выше = лучше
-# Пороги: score up >5% → promote, down >10% → rollback
-# max_dd > $15 → force conservative независимо от WR
+bandit = ParameterBandit([
+    {"min_score": 25, "sl_pct": 5.0, "tp_mult": 1.5},  # рука 0
+    {"min_score": 30, "sl_pct": 5.0, "tp_mult": 1.2},  # рука 1
+    {"min_score": 35, "sl_pct": 4.0, "tp_mult": 1.0},  # рука 2
+])
+params, idx = bandit.select_arm()   # Thompson sample
+bandit.update(idx, win=True)        # обновить Beta posterior
+best = bandit.get_best_arm()        # лучшая рука по mean
 ```
 
-### Regime-Specific Parameters
+### Monte Carlo Stress Test
 
-```json
-// regime_params.json
-{
-  "TRENDING_UP":    {"min_score":25, "sl_pct":5, "tp_mult":1.5, "direction":"LONG_only"},
-  "TRENDING_DOWN":  {"min_score":35, "sl_pct":5, "tp_mult":0.8, "direction":"SHORT_only"},
-  "RANGING":        {"min_score":30, "sl_pct":5, "tp_mult":1.0, "direction":"BOTH"},
-  "CHOPPY":         {"min_score":40, "sl_pct":4, "tp_mult":0.7, "direction":"NONE"},
-  "HIGH_VOL":       {"min_score":22, "sl_pct":6, "tp_mult":1.3, "direction":"BOTH"},
-  "LOW_VOL":        {"min_score":28, "sl_pct":4, "tp_mult":0.9, "direction":"BOTH"}
-}
+| Параметр | Распределение |
+|----------|--------------|
+| BTC drop | U(−20%, −60%) |
+| Alt/BTC ratio | U(1.2×, 2.0×) |
+| Duration | U(1h, 72h) |
+| Vol spike | U(2×, 8×) |
+
+Результат: `prob_ruin` — вероятность потери >50% капитала. Порог: <5%.
+
+### Drift Detector
+
+```
+окно 100 сделок → current_wr
+базовый wr (при инициализации)
+если baseline - current > 5% И последние 20 сделок WR < 30% → DRIFT
+действие: ×1.5 min_score, ×0.5 position size, canary=0%
+авто-сброс через 48ч если восстановились
 ```
 
-### Stress Testing
+### Adaptive Composite Weights
 
-| Сценарий | BTC Drop | Alt Drop | VIX |
-|----------|----------|----------|-----|
-| COVID Crash (Mar 2020) | -50% | -70% | ×5 |
-| FTX Collapse (Nov 2022) | -25% | -40% | ×3 |
-| China Ban (May 2021) | -35% | -50% | ×4 |
-| Luna Collapse (May 2022) | -30% | -55% | ×4.5 |
+| Режим | WR вес | PF вес | Sharpe | MaxDD | Hold |
+|-------|--------|--------|--------|-------|------|
+| TRENDING_UP | 35% | 20% | 20% | 15% | 10% |
+| TRENDING_DOWN | 20% | 25% | 15% | **30%** | 10% |
+| RANGING | 25% | **30%** | 20% | 15% | 10% |
+| HIGH_VOL | 15% | 20% | 15% | **40%** | 10% |
+| LOW_VOL | **30%** | 25% | **25%** | 10% | 10% |
+| CHOPPY | 20% | 20% | 15% | **35%** | 10% |
 
-## V6 — Bayesian + Shrinkage + Walk-Forward
+> В тренде — WR важнее. Во флэте — Profit Factor. В кризис/чоппи — MaxDD.
 
-| # | Механика |
-|---|----------|
-| 1 | Bayesian A/B testing — P(canary > baseline) через Beta |
-| 2 | Bayesian shrinkage — per-symbol → cluster mean |
-| 3 | SL time analysis — quick (<30м) vs slow (>4ч) |
-| 4 | Event-driven trigger — ≥10 сделок / 6ч или 24ч fallback |
-| 5 | Global rollback — WR drop >15% → авто-откат |
-| 6 | Feature importance — WR pass/fail по фильтрам |
-| 7 | Confidence intervals — Wilson score 95% CI |
-| 8 | Walk-forward validation — 70/30 out-of-sample |
-| 9 | Human-readable explanations |
+## Полная таблица механик (v4→v8)
+
+| Механика | v4 | v5 | v6 | v7 | v8 |
+|---|---|---|---|---|---|
+| A/B тест | — | — | Bayesian Beta | Bayesian Beta | **Thompson Sampling** |
+| Canary % | 10% fixed | 10% fixed | 10% fixed | Adaptive 5-20% | **Bandit explore/exploit** |
+| Стресс-тест | — | — | — | 4 historical | **1000 Monte Carlo** |
+| Дрифт | — | — | — | — | **ADWIN detector** |
+| Аномалии | — | — | — | — | **IQR filter** |
+| Скор | — | — | WR+CI | Fixed weights | **Adaptive per-regime** |
+| Версионирование | — | — | — | — | **Git-like snapshots** |
+| Режим | — | Stats only | Stats only | Per-regime params | **Per-regime weights** |
+| Валидация | — | — | Walk-forward | +Stress test | **+Monte Carlo** |
 
 ## Диагностика
 
 ```bash
-# Composite score (live)
+# Thompson Sampling — состояние bandit
 python3 -c "
-from bybit_ws.journal.self_learn import composite_score, get_regime_aware_stats
-stats = get_regime_aware_stats()
-# Преобразуем в список трейдов для composite_score
-print('Regime stats:', stats)
+from bybit_ws.journal.self_learn import load_bandit
+b = load_bandit()
+for i, a in enumerate(b.arms):
+    wr = a['alpha']/(a['alpha']+a['beta'])
+    print(f'arm {i}: {a[\"params\"]} | WR={wr:.1%} trades={a[\"trades\"]}')
+print('best:', b.get_best_arm())
 "
 
-# Regime params
-cat ~/.local/share/bybit-ws/regime_params.json | python3 -m json.tool
-
-# Stress test
+# Monte Carlo stress test
 python3 -c "
-from bybit_ws.journal.self_learn import stress_test_params, get_params_for_regime
+from bybit_ws.journal.self_learn import monte_carlo_stress_test, get_params_for_regime
 import json
 params = get_params_for_regime()
-result = stress_test_params(params)
-print(json.dumps(result, indent=2))
+print(json.dumps(monte_carlo_stress_test(params, 500), indent=2))
 "
 
-# Drawdown adjustment
+# Drift detector status
 python3 -c "
-from bybit_ws.journal.self_learn import drawdown_adjustment
-print(drawdown_adjustment())
+from bybit_ws.journal.self_learn import get_drift_detector
+print(get_drift_detector().get_status())
+"
+
+# Anomaly detection
+python3 -c "
+from bybit_ws.journal.self_learn import detect_anomalous_trades
+import sqlite3, json
+db = '/home/openclaw/.local/share/bybit-ws/state.db'
+rows = [dict(r) for r in sqlite3.connect(db).execute(
+    'SELECT pnl, hold_hours FROM trade_history WHERE closed_at IS NOT NULL LIMIT 100'
+).fetchall()]
+result = detect_anomalous_trades(rows)
+print(f'normal={result[\"normal_count\"]} anomalous={result[\"anomalous_count\"]}')
+"
+
+# Adaptive composite score
+python3 -c "
+from bybit_ws.journal.self_learn import composite_score_v8
+trades = [{'pnl':5},{'pnl':-3},{'pnl':8},{'pnl':-2},{'pnl':10}]
+print(composite_score_v8(trades))
+"
+
+# Param version history
+python3 -c "
+from bybit_ws.journal.self_learn import get_params_history
+import json
+for v in get_params_history(10):
+    print(f'{v[\"version\"]}: {v[\"reason\"][:60]}')
 "
 ```
 
@@ -115,6 +156,7 @@ print(drawdown_adjustment())
 
 | Версия | Дата | Ключевые изменения |
 |--------|------|-------------------|
+| v8 | 04.08.2026 | Thompson Sampling, Monte Carlo stress, Drift Detector, Anomaly filter, Adaptive weights, Param versioning |
 | v7 | 04.08.2026 | Composite score, regime params, stress testing, drawdown, adaptive canary |
 | v6 | 04.08.2026 | Bayesian A/B, shrinkage, SL time, event trigger, rollback, feature importance |
 | v5 | 04.08.2026 | Wall-clock trigger, regime-aware stats, cluster learning, idle timeout |
