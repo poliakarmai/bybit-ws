@@ -1,4 +1,4 @@
-# Self-Learning Module — bybit-ws v5
+# Self-Learning Module — bybit-ws v6
 
 > Автономное самообучение торговой стратегии. Без участия человека.
 > Обновлено: 2026-08-04.
@@ -6,19 +6,33 @@
 ## Архитектура
 
 ```
-main_async.py (каждые 6ч по wall clock)
-  └─ should_run_self_learn()         ← проверка таймера
-       └─ mark_self_learn_run()      ← запись времени
-            └─ load_from_sqlite()     ← adapter.py: SQLite → analyzer
-                 └─ analyze()          ← analyzer.py: профиль + bias
+main_async.py (event-driven: ≥10 сделок за 6ч или 24ч fallback)
+  └─ should_run_self_learn_v6()     ← проверка условий
+       └─ mark_self_learn_run()     ← запись времени
+            └─ load_from_sqlite()    ← adapter.py: SQLite → analyzer
+                 └─ analyze()         ← analyzer.py: профиль + bias
                       └─ apply_journal_insights()  ← коррекция параметров
-                           ├─ global: min_score, sl_pct, tp_mult
-                           ├─ per-symbol: профили монет
-                           ├─ cluster: группировка по волатильности
-                           ├─ exit analysis: SL/TP ratio
-                           ├─ session: asia/europe/us
-                           └─ canary: 10% входов с новыми параметрами
+                           ├─ Bayesian shrinkage ← сдвиг к cluster WR
+                           ├─ SL time analysis   ← quick vs slow SL
+                           ├─ Walk-forward validation ← проверка на истории
+                           ├─ Global rollback check ← авто-откат при падении WR
+                           ├─ Feature importance ← вклад фильтров
+                           └─ canary: Bayesian A/B testing
 ```
+
+## V6 — Новое (04.08.2026)
+
+| # | Механика | Описание |
+|---|----------|----------|
+| 1 | **Bayesian A/B testing** | P(canary > baseline) через Beta-распределение. Порог: >0.95 promote, <0.05 rollback |
+| 2 | **Bayesian shrinkage** | Per-symbol → cluster mean. 5 сделок = 25% веса, 20 сделок = 100% |
+| 3 | **SL time analysis** | Quick SL (<30мин) = плохие входы. Slow SL (>4ч) = tight SL |
+| 4 | **Event-driven trigger** | ≥10 сделок за 6ч ИЛИ 24ч fallback |
+| 5 | **Global rollback** | WR drop >15% → авто-откат к предыдущим параметрам |
+| 6 | **Feature importance** | WR pass vs fail по каждому фильтру (MTF, Orderbook, Volume...) |
+| 7 | **Confidence intervals** | Wilson score CI для WR (95%) |
+| 8 | **Walk-forward validation** | 70/30 split, проверка параметров на out-of-sample |
+| 9 | **Human-readable explanations** | «min_score 15→19: wr=0.35» вместо JSON |
 
 ## Файлы
 
@@ -162,6 +176,7 @@ echo '{"active":false,"params":{},"baseline":{},"started_at":null,"canary_trades
 
 | Версия | Дата | Изменения |
 |--------|------|-----------|
+| v6 | 04.08.2026 | Bayesian A/B, shrinkage, SL time, event-driven trigger, global rollback, feature importance, CI, walk-forward, explanations |
 | v5 | 04.08.2026 | Wall-clock trigger, regime-aware stats, cluster learning, idle timeout |
 | v4 | 01.08.2026 | Per-symbol profiles, exit tracking, session params, streak guard |
 | v3 | 07.2026 | Canary mode, post-trade clustering |

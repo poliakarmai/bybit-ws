@@ -794,11 +794,11 @@ async def async_main_loop():
                 except Exception as e:
                     log_event(f'⚠️ ab_status log: {e}')
 
-            # ── Self-learning + Post-trade анализ (каждые 6ч по wall clock) ──
+            # ── Self-learning + Post-trade анализ (v6: event-driven trigger) ──
             try:
                 from .journal.self_learn import (
                     apply_journal_insights as _apply_insights,
-                    should_run_self_learn as _should_learn,
+                    should_run_self_learn_v6 as _should_learn,
                     mark_self_learn_run as _mark_learn,
                 )
             except ImportError:
@@ -842,6 +842,18 @@ async def async_main_loop():
                                 for r, s in sorted(regime_stats.items())
                             )
                             log_event(f'📊 Regime stats: {summary}')
+                    except Exception:
+                        pass
+
+                    # ── NEW v6: feature importance ──
+                    try:
+                        from .journal.self_learn import track_filter_performance
+                        filter_perf = await run_in_thread(track_filter_performance)
+                        if filter_perf:
+                            useful = [f for f, p in filter_perf.items() if p.get("useful")]
+                            useless = [f for f, p in filter_perf.items() if not p.get("useful")]
+                            if useful or useless:
+                                log_event(f'🔍 Filters: useful={useful}, weak={useless}')
                     except Exception:
                         pass
                 except Exception as e:

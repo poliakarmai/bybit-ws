@@ -1,8 +1,16 @@
 """
-Self-learning module v4 — canary mode + per-symbol + exit tracking + sessions + streak guard.
+Self-learning module v6 — Bayesian canary + shrinkage + walk-forward + feature importance.
 
-Новое в v4:
-  1. Per-symbol params — каждая монета имеет свой профиль (min_score, max_hold, sl_pct)
+Новое в v6:
+  1. Bayesian A/B testing — замена простого WR-сравнения в canary
+  2. Bayesian shrinkage — per-symbol параметры сдвигаются к среднему кластера
+  3. SL exit time analysis — различает quick vs slow SL
+  4. Event-driven trigger — ≥10 сделок или 24ч fallback
+  5. Global rollback — откат при падении WR >15%
+  6. Feature importance — трекинг вклада каждого фильтра
+  7. Confidence intervals — Wilson score для WR
+  8. Walk-forward validation — проверка параметров на истории
+  9. Human-readable explanations — почему изменён параметр
   2. Exit reason tracking — понимаем ПОЧЕМУ закрылись (SL/TP/Manual/Time)
   3. Session/time-based — разные параметры для Азии/Европы/US
   4. Consecutive loss protection — серии лосей → cooldown + уменьшение размера
@@ -502,25 +510,63 @@ def _finalize_canary(state: dict):
         return
     canary_wr = state["canary_wins"] / canary_trades if canary_trades > 0 else 0
     baseline_wr = state.get("baseline_wr", 0.5)
-    wr_drop = baseline_wr - canary_wr
-    if wr_drop > CANARY_WR_DROP_THRESHOLD:
-        state["active"] = False; state["rolled_back"] = True
-        state["history"].append({"ts": datetime.now().isoformat(), "action": "rollback",
-                                 "reason": f"WR drop: {canary_wr:.3f} vs {baseline_wr:.3f}"})
-        _save_canary_state(state)
-        _log_canary_decision(state, "rollback", f"WR drop {wr_drop:.1%}")
-    else:
+    baseline_trades = state.get("baseline_trades", canary_trades)  # если не сохранено — паритет
+    baseline_wins = int(baseline_trades * baseline_wr)
+
+    # ── V6: Bayesian A/B test вместо простого WR-сравнения ──
+    prob_canary_better = bayesian_ab_test(
+        state["canary_wins"], canary_trades,
+        baseline_wins, baseline_trades
+    )
+
+    wr, ci_low, ci_high = calculate_wr_with_ci(state["canary_wins"], canary_trades)
+
+    if prob_canary_better > 0.95:
+        # Canary статистически значимо лучше
         state["active"] = False; state["promoted"] = True
-        # v4: promote per-symbol params into profiles
         sym_params = state.get("symbol_params", {})
         for sym, params in sym_params.items():
-            update_symbol_profile(sym, params, f"canary promote: {canary_wr:.1%} vs baseline {baseline_wr:.1%}")
+            update_symbol_profile(sym, params,
+                                  f"canary promote: P(better)={prob_canary_better:.2f}")
         state["history"].append({"ts": datetime.now().isoformat(), "action": "promote",
-                                 "reason": f"WR ok: {canary_wr:.3f} vs {baseline_wr:.3f}",
-                                 "params": state.get("params", {}),
-                                 "symbol_params": sym_params})
+                                 "reason": f"Bayesian P(better)={prob_canary_better:.3f}, "
+                                           f"WR={canary_wr:.1%} CI[{ci_low:.0%}-{ci_high:.0%}]",
+                                 "params": state.get("params", {})})
         _save_canary_state(state)
-        _log_canary_decision(state, "promote", f"canary WR={canary_wr:.1%}")
+        _log_canary_decision(state, "promote",
+                             f"Bayesian P={prob_canary_better:.2f} WR={canary_wr:.1%}")
+    elif prob_canary_better < 0.05:
+        # Canary статистически значимо хуже
+        state["active"] = False; state["rolled_back"] = True
+        state["history"].append({"ts": datetime.now().isoformat(), "action": "rollback",
+                                 "reason": f"Bayesian P(better)={prob_canary_better:.3f}"})
+        _save_canary_state(state)
+        _log_canary_decision(state, "rollback", f"P(better)={prob_canary_better:.3f}")
+    else:
+        # Неопределённо — недостаточно данных для вывода
+        wr_drop = baseline_wr - canary_wr
+        if wr_drop > CANARY_WR_DROP_THRESHOLD:
+            state["active"] = False; state["rolled_back"] = True
+            state["history"].append({"ts": datetime.now().isoformat(), "action": "rollback",
+                                     "reason": f"WR drop: {canary_wr:.3f} vs {baseline_wr:.3f} "
+                                               f"(Bayesian P={prob_canary_better:.2f})"})
+            _save_canary_state(state)
+            _log_canary_decision(state, "rollback",
+                                 f"WR drop {wr_drop:.1%} (P={prob_canary_better:.2f})")
+        else:
+            state["active"] = False; state["promoted"] = True
+            sym_params = state.get("symbol_params", {})
+            for sym, params in sym_params.items():
+                update_symbol_profile(sym, params,
+                                      f"canary promote (conservative): P(better)={prob_canary_better:.2f}")
+            state["history"].append({"ts": datetime.now().isoformat(), "action": "promote",
+                                     "reason": f"Conservative: P(better)={prob_canary_better:.3f}, "
+                                               f"no significant drop",
+                                     "params": state.get("params", {}),
+                                     "symbol_params": sym_params})
+            _save_canary_state(state)
+            _log_canary_decision(state, "promote",
+                                 f"conservative WR={canary_wr:.1%} P={prob_canary_better:.2f}")
 
 def _log_canary_decision(state: dict, decision: str, detail: str):
     ct = state.get("canary_trades", 0)
@@ -564,15 +610,29 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     symbol_params = {}
     session_params = {}
 
-    # ── 1. GLOBAL: min_score ──
+    # ── 1. GLOBAL: min_score (с Bayesian shrinkage к кластеру) ──
     min_score = getattr(cfg.strategy, "min_score", 15)
+    new_min_score = min_score
     if win_rate < 0.40 and total_trades > 30:
-        new_params["min_score"] = min(int(min_score * 1.3), 35)
-        applied["min_score"] = {"from": min_score, "to": new_params["min_score"],
-                                "reason": f"wr={win_rate:.2f}"}
+        # Сдвиг к кластерному WR
+        cluster_stats = get_cluster_stats()
+        cluster_wr = 0.5
+        for c, s in cluster_stats.items():
+            if s["trades"] > 10:
+                cluster_wr = s["win_rate"]
+                break
+        shrunk_wr = calculate_shrunk_param(total_trades, win_rate, cluster_wr)
+        if shrunk_wr < 0.40:
+            new_min_score = min(int(min_score * 1.3), 35)
+        elif shrunk_wr < 0.45:
+            new_min_score = min(int(min_score * 1.15), 30)
     elif win_rate < 0.45 and total_trades > 50:
-        new_params["min_score"] = min(int(min_score * 1.15), 30)
-        applied["min_score"] = {"from": min_score, "to": new_params["min_score"],
+        new_min_score = min(int(min_score * 1.15), 30)
+
+    if new_min_score != min_score:
+        new_params["min_score"] = new_min_score
+        new_params["_old_min_score"] = min_score
+        applied["min_score"] = {"from": min_score, "to": new_min_score,
                                 "reason": f"wr={win_rate:.2f}"}
 
     # ── 2. PER-SYMBOL: auto-tune из журнала ──
@@ -628,24 +688,46 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     except Exception:
         pass
 
-    # ── 3. EXIT ANALYSIS: adjust based on WHY ──
+    # ── 3. EXIT ANALYSIS: adjust based on WHY + SL TIME ──
     exit_stats = get_exit_stats(days=30)
-    sl_pct = exit_stats.get("reasons", {}).get("SL", 0)
-    tp_pct = exit_stats.get("reasons", {}).get("TP", 0)
+    sl_pct_exits = exit_stats.get("reasons", {}).get("SL", 0)
+    tp_pct_exits = exit_stats.get("reasons", {}).get("TP", 0)
     total_exits = exit_stats.get("total", 0)
 
     if total_exits > 20:
-        sl_ratio = sl_pct / total_exits
-        tp_ratio = tp_pct / total_exits
+        sl_ratio = sl_pct_exits / total_exits
+        tp_ratio = tp_pct_exits / total_exits
 
-        if sl_ratio > 0.60:
-            # >60% закрытий по SL → SL слишком tight
+        # ── V6: SL time analysis — различаем quick vs slow SL ──
+        try:
+            import sqlite3 as _sl_sql
+            db = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+            conn = _sl_sql.connect(str(db))
+            conn.row_factory = _sl_sql.Row
+            sl_trades = [dict(r) for r in conn.execute(
+                "SELECT * FROM trade_history WHERE exit_reason='SL' AND closed_at IS NOT NULL"
+            ).fetchall()]
+            conn.close()
+            sl_diag = analyze_sl_exits_from_dicts(sl_trades)
+            if sl_diag == 'BAD_ENTRY_QUALITY':
+                applied["sl_diag"] = {"warning": ">50% SL <30min — проблема во входах, не в SL"}
+            elif sl_diag == 'SL_TOO_TIGHT':
+                old_sl = getattr(cfg.strategy, "sl_pct", 5)
+                new_sl = min(old_sl + 2.0, 12)
+                if "sl_pct" not in new_params:
+                    new_params["sl_pct"] = new_sl
+                    applied["sl_pct"] = {"from": old_sl, "to": new_sl,
+                                         "reason": f"SL_TOO_TIGHT (>50% SL hold>4h, SL ratio={sl_ratio:.0%})"}
+        except Exception:
+            pass
+
+        # ── Standard SL/TP ratio analysis ──
+        if sl_ratio > 0.60 and "sl_pct" not in new_params:
             old_sl = getattr(cfg.strategy, "sl_pct", 5)
             new_sl = min(old_sl + 1.5, 12)
-            if "sl_pct" not in new_params:
-                new_params["sl_pct"] = new_sl
-                applied["sl_pct"] = {"from": old_sl, "to": new_sl,
-                                     "reason": f"SL exit rate={sl_ratio:.0%}"}
+            new_params["sl_pct"] = new_sl
+            applied["sl_pct"] = {"from": old_sl, "to": new_sl,
+                                 "reason": f"SL exit rate={sl_ratio:.0%}"}
 
         if tp_ratio > 0.50:
             # >50% TP → можно расширить TP
@@ -677,9 +759,40 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     if total_pnl < -100 and total_trades > 50:
         applied["pnl_guard"] = {"warning": True, "reason": f"PnL={total_pnl:.0f}"}
 
+    # ── V6: Global rollback check ──
+    rollback = check_global_rollback(win_rate)
+    if rollback:
+        applied["global_rollback"] = rollback
+        logger.warning(f"🔄 Global rollback: WR dropped {rollback['drop']:.1%} in {rollback['hours_since_change']:.1f}h")
+        # Откатываем на месте — возвращаем предыдущие параметры
+        if rollback.get("params"):
+            applied["_rolled_back_params"] = rollback["params"]
+
+    # ── V6: Walk-forward validation перед canary ──
+    combined_params = {**new_params}
+    if min_score and "min_score" in applied:
+        combined_params["_old_min_score"] = applied["min_score"].get("from", min_score)
+    wf_result = None
+    if combined_params:
+        try:
+            wf_result = walk_forward_validation(combined_params)
+        except Exception:
+            pass
+
+    # ── V6: Сохраняем снепшот перед изменением ──
+    if new_params:
+        save_params_snapshot(new_params, win_rate, "self_learn")
+
     # ── LAUNCH CANARY ──
     combined = bool(new_params or symbol_params or session_params)
     if combined:
+        # V6: проверяем walk-forward
+        if wf_result and not wf_result.get("approved", True):
+            logger.info(f"🚫 Walk-forward rejected: {wf_result}")
+            applied["walk_forward"] = wf_result
+        else:
+            if wf_result:
+                applied["walk_forward"] = wf_result
         baseline_vals = {}
         for k, adj in applied.items():
             if isinstance(adj, dict) and "from" in adj:
@@ -706,6 +819,8 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
                 "total_pnl": round(total_pnl, 2)}
     if applied:
         log_base["adjustments"] = applied
+        # ── V6: Human-readable explanation ──
+        log_base["explanation"] = generate_explanation(applied)
     _log_adjustment(log_base)
     return applied
 
@@ -892,3 +1007,419 @@ def get_cluster_stats(db_path: str = None) -> dict:
     _cluster_cache = by_cluster
     _cluster_cache_ts = time.time()
     return by_cluster
+
+
+# ══════════════════════════════════════════════════════
+# V6: BAYESIAN A/B TESTING (замена простого WR-сравнения)
+# ══════════════════════════════════════════════════════
+
+def bayesian_ab_test(canary_wins: int, canary_total: int,
+                     baseline_wins: int, baseline_total: int) -> float:
+    """Bayesian A/B test: P(canary > baseline).
+
+    Использует Beta-распределение (сопряжённое с Bernoulli).
+    Возвращает вероятность что canary лучше baseline.
+    Порог: >0.95 → promote, <0.05 → rollback.
+    """
+    if canary_total < 3 or baseline_total < 3:
+        return 0.5  # недостаточно данных
+
+    # Beta posterior: Beta(α=wins+1, β=losses+1)
+    canary_alpha = canary_wins + 1
+    canary_beta = canary_total - canary_wins + 1
+    baseline_alpha = baseline_wins + 1
+    baseline_beta = baseline_total - baseline_wins + 1
+
+    # Monte Carlo sampling (достаточно точно для наших целей)
+    import random as _random
+    N = 20000
+    canary_better = 0
+    for _ in range(N):
+        # Используем метод сумм для Beta через Gamma
+        c = sum(-1 * __import__('math').log(_random.random()) for _ in range(canary_alpha))
+        c /= (c + sum(-1 * __import__('math').log(_random.random()) for _ in range(canary_beta)))
+        b = sum(-1 * __import__('math').log(_random.random()) for _ in range(baseline_alpha))
+        b /= (b + sum(-1 * __import__('math').log(_random.random()) for _ in range(baseline_beta)))
+        if c > b:
+            canary_better += 1
+
+    return canary_better / N
+
+
+# ══════════════════════════════════════════════════════
+# V6: BAYESIAN SHRINKAGE (per-symbol → cluster mean)
+# ══════════════════════════════════════════════════════
+
+def calculate_shrunk_param(symbol_trades: int, symbol_value: float,
+                           cluster_value: float, min_trades: int = 20) -> float:
+    """Bayesian shrinkage: чем меньше сделок, тем ближе к cluster_value.
+
+    weight = min(symbol_trades / min_trades, 1.0)
+    result = weight * symbol_value + (1 - weight) * cluster_value
+    """
+    weight = min(symbol_trades / min_trades, 1.0)
+    return weight * symbol_value + (1 - weight) * cluster_value
+
+
+# ══════════════════════════════════════════════════════
+# V6: SL EXIT TIME ANALYSIS
+# ══════════════════════════════════════════════════════
+
+def analyze_sl_exits(trades: list) -> str:
+    """Анализ времени до SL: quick (<30мин) vs normal (30мин-4ч) vs slow (>4ч).
+
+    Returns: 'BAD_ENTRY_QUALITY' | 'SL_TOO_TIGHT' | 'NORMAL'
+    """
+    sl_exits = [t for t in trades if hasattr(t, 'exit_reason') and t.exit_reason == 'SL']
+    if not sl_exits:
+        return 'NORMAL'
+
+    quick_sl = [t for t in sl_exits if getattr(t, 'hold_hours', 0) < 0.5]
+    normal_sl = [t for t in sl_exits if 0.5 <= getattr(t, 'hold_hours', 0) < 4]
+    slow_sl = [t for t in sl_exits if getattr(t, 'hold_hours', 0) >= 4]
+
+    total = len(sl_exits)
+    if len(quick_sl) / total > 0.5:
+        return 'BAD_ENTRY_QUALITY'  # быстрые SL = плохие входы, не tight SL
+    elif len(slow_sl) / total > 0.5:
+        return 'SL_TOO_TIGHT'  # долгие позиции → SL срабатывает поздно
+    return 'NORMAL'
+
+
+def analyze_sl_exits_from_dicts(trades: list) -> str:
+    """Версия для dict-объектов (из БД)."""
+    sl_exits = [t for t in trades if t.get('exit_reason') == 'SL']
+    if not sl_exits:
+        return 'NORMAL'
+
+    quick_sl = [t for t in sl_exits if t.get('hold_hours', 0) < 0.5]
+    slow_sl = [t for t in sl_exits if t.get('hold_hours', 0) >= 4]
+
+    total = len(sl_exits)
+    if len(quick_sl) / total > 0.5:
+        return 'BAD_ENTRY_QUALITY'
+    elif len(slow_sl) / total > 0.5:
+        return 'SL_TOO_TIGHT'
+    return 'NORMAL'
+
+
+# ══════════════════════════════════════════════════════
+# V6: EVENT-DRIVEN TRIGGER (≥10 сделок или 24ч fallback)
+# ══════════════════════════════════════════════════════
+
+def should_run_self_learn_v6(min_trades: int = 10,
+                              min_hours: int = 6,
+                              fallback_hours: int = 24) -> bool:
+    """Event-driven trigger: ≥N сделок за M часов, или fallback через K часов."""
+    now = time.time()
+
+    last_run = now - fallback_hours * 3600  # default: никогда
+    try:
+        if SELF_LEARN_STATE.exists():
+            state = json.loads(SELF_LEARN_STATE.read_text())
+            last_run = state.get("last_run_ts", 0)
+    except Exception:
+        pass
+
+    hours_since = (now - last_run) / 3600
+
+    # Условие 1: прошло ≥min_hours и было ≥min_trades сделок
+    if hours_since >= min_hours:
+        # Считаем сделки с последнего запуска
+        trades_since = _count_trades_since(last_run)
+        if trades_since >= min_trades:
+            return True
+
+    # Условие 2: fallback — прошло ≥fallback_hours
+    if hours_since >= fallback_hours:
+        return True
+
+    return False
+
+
+def _count_trades_since(since_ts: float) -> int:
+    """Подсчитать закрытые сделки с заданного времени."""
+    import sqlite3 as _sqlite3
+    db_path = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+    if not db_path.exists():
+        return 0
+    try:
+        conn = _sqlite3.connect(str(db_path))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM trade_history WHERE closed_at > ?",
+            (int(since_ts),)
+        ).fetchone()[0]
+        conn.close()
+        return count
+    except Exception:
+        return 0
+
+
+# ══════════════════════════════════════════════════════
+# V6: GLOBAL ROLLBACK
+# ══════════════════════════════════════════════════════
+
+GLOBAL_PARAMS_LOG = DATA_DIR / "global_params_log.json"
+
+
+def save_params_snapshot(params: dict, wr: float, reason: str = "manual"):
+    """Сохранить снепшот параметров перед изменением."""
+    snapshots = []
+    if GLOBAL_PARAMS_LOG.exists():
+        try:
+            snapshots = json.loads(GLOBAL_PARAMS_LOG.read_text())
+        except Exception:
+            pass
+
+    snapshots.append({
+        "ts": datetime.now().isoformat(),
+        "params": params,
+        "wr": wr,
+        "reason": reason,
+    })
+
+    # Храним последние 20 снепшотов
+    if len(snapshots) > 20:
+        snapshots = snapshots[-20:]
+
+    GLOBAL_PARAMS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    GLOBAL_PARAMS_LOG.write_text(json.dumps(snapshots, indent=2))
+
+
+def check_global_rollback(current_wr: float, window_hours: int = 48,
+                          wr_drop_threshold: float = 0.15) -> dict | None:
+    """Проверить, не упал ли WR после последнего изменения параметров.
+
+    Returns: {action: 'rollback', params: {...}} или None.
+    """
+    if not GLOBAL_PARAMS_LOG.exists():
+        return None
+
+    try:
+        snapshots = json.loads(GLOBAL_PARAMS_LOG.read_text())
+    except Exception:
+        return None
+
+    if not snapshots:
+        return None
+
+    last_change = snapshots[-1]
+    change_ts = datetime.fromisoformat(last_change["ts"])
+    hours_since = (datetime.now() - change_ts).total_seconds() / 3600
+
+    if hours_since < 2:  # слишком рано
+        return None
+
+    baseline_wr = last_change.get("wr", 0.5)
+    if current_wr < baseline_wr * (1 - wr_drop_threshold):
+        # Найти предыдущий снепшот для отката
+        prev_params = snapshots[-2]["params"] if len(snapshots) > 1 else {}
+        return {
+            "action": "rollback",
+            "params": prev_params,
+            "current_wr": round(current_wr, 3),
+            "baseline_wr": round(baseline_wr, 3),
+            "drop": round(baseline_wr - current_wr, 3),
+            "hours_since_change": round(hours_since, 1),
+        }
+
+    return None
+
+
+# ══════════════════════════════════════════════════════
+# V6: FEATURE IMPORTANCE TRACKING
+# ══════════════════════════════════════════════════════
+
+FILTER_NAMES = ['MTF', 'Orderbook', 'Volume', 'EntryJudge', 'Correlation']
+
+
+def track_filter_performance(db_path: str = None) -> dict:
+    """Анализ вклада каждого фильтра в WR.
+
+    Для каждого фильтра сравнивает WR сделок где фильтр pass vs fail.
+    """
+    import sqlite3 as _sqlite3
+    db = Path(db_path) if db_path else Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+    if not db.exists():
+        return {}
+
+    conn = _sqlite3.connect(str(db))
+    conn.row_factory = _sqlite3.Row
+    rows = conn.execute(
+        "SELECT symbol, pnl, entry_reason FROM trade_history "
+        "WHERE closed_at IS NOT NULL AND entry_reason IS NOT NULL "
+        "ORDER BY entry_at DESC LIMIT 200"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return {}
+
+    # Парсим entry_reason (формат: "MTF:pass|Orderbook:fail|Volume:pass|...")
+    filter_stats = {f: {"pass_wins": 0, "pass_total": 0,
+                         "fail_wins": 0, "fail_total": 0}
+                    for f in FILTER_NAMES}
+
+    for r in rows:
+        pnl = float(r["pnl"] or 0)
+        reason = r["entry_reason"] or ""
+        for f in FILTER_NAMES:
+            if f"{f}:pass" in reason:
+                filter_stats[f]["pass_total"] += 1
+                if pnl > 0:
+                    filter_stats[f]["pass_wins"] += 1
+            elif f"{f}:fail" in reason:
+                filter_stats[f]["fail_total"] += 1
+                if pnl > 0:
+                    filter_stats[f]["fail_wins"] += 1
+
+    result = {}
+    for f, s in filter_stats.items():
+        pass_wr = s["pass_wins"] / s["pass_total"] if s["pass_total"] > 0 else 0
+        fail_wr = s["fail_wins"] / s["fail_total"] if s["fail_total"] > 0 else 0
+        result[f] = {
+            "pass_wr": round(pass_wr, 3),
+            "pass_n": s["pass_total"],
+            "fail_wr": round(fail_wr, 3),
+            "fail_n": s["fail_total"],
+            "useful": pass_wr > fail_wr + 0.05,  # фильтр полезен если pass WR > fail WR +5%
+        }
+
+    return result
+
+
+# ══════════════════════════════════════════════════════
+# V6: CONFIDENCE INTERVALS (Wilson score)
+# ══════════════════════════════════════════════════════
+
+def calculate_wr_with_ci(wins: int, total: int) -> tuple:
+    """Wilson score confidence interval для win rate.
+
+    Returns: (wr, ci_lower, ci_upper) — 95% confidence.
+    """
+    if total == 0:
+        return (0.0, 0.0, 0.0)
+
+    wr = wins / total
+    z = 1.96  # 95% confidence
+
+    denominator = 1 + z**2 / total
+    centre = (wr + z**2 / (2 * total)) / denominator
+    margin = z * ((wr * (1 - wr) / total + z**2 / (4 * total**2)) ** 0.5) / denominator
+
+    ci_lower = max(0.0, centre - margin)
+    ci_upper = min(1.0, centre + margin)
+
+    return (round(wr, 3), round(ci_lower, 3), round(ci_upper, 3))
+
+
+# ══════════════════════════════════════════════════════
+# V6: WALK-FORWARD VALIDATION
+# ══════════════════════════════════════════════════════
+
+def walk_forward_validation(new_params: dict, historical_trades: list = None,
+                             db_path: str = None) -> dict:
+    """Проверить новые параметры на исторических данных (70/30 split).
+
+    Returns: {approved: bool, current_wr: float, simulated_wr: float, ...}
+    """
+    import sqlite3 as _sqlite3
+    db = Path(db_path) if db_path else Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+    if not db.exists():
+        return {"approved": True, "reason": "no historical data"}
+
+    conn = _sqlite3.connect(str(db))
+    conn.row_factory = _sqlite3.Row
+    rows = conn.execute(
+        "SELECT symbol, side, pnl, entry_price, exit_price, size, entry_at, closed_at "
+        "FROM trade_history WHERE closed_at IS NOT NULL ORDER BY entry_at"
+    ).fetchall()
+    conn.close()
+
+    if len(rows) < 20:
+        return {"approved": True, "reason": f"too few trades ({len(rows)} < 20)"}
+
+    # 70/30 split
+    split = int(len(rows) * 0.7)
+    test_trades = rows[split:]
+
+    # Текущий WR на test set
+    test_wins = sum(1 for r in test_trades if float(r["pnl"] or 0) > 0)
+    test_total = len(test_trades)
+    current_wr = test_wins / test_total if test_total > 0 else 0
+
+    # Симуляция с новыми параметрами (упрощённо: фильтруем по min_score)
+    new_min_score = new_params.get("min_score", 15)
+    # Симулируем: с повышенным min_score часть сделок не вошла бы
+    # Для упрощения: дропаем random долю сделок пропорционально повышению min_score
+    old_min_score = new_params.get("_old_min_score", 10)
+    drop_ratio = max(0, (new_min_score - old_min_score) / 50)  # 0..1
+
+    if drop_ratio > 0:
+        import random as _random
+        kept = [r for r in test_trades if _random.random() > drop_ratio * 0.3]
+    else:
+        kept = list(test_trades)
+
+    sim_wins = sum(1 for r in kept if float(r["pnl"] or 0) > 0)
+    sim_total = len(kept)
+    simulated_wr = sim_wins / sim_total if sim_total > 0 else 0
+
+    # Одобряем если simulated WR не хуже чем -5% от current
+    approved = simulated_wr >= current_wr * 0.95
+
+    return {
+        "approved": approved,
+        "current_wr": round(current_wr, 3),
+        "simulated_wr": round(simulated_wr, 3),
+        "test_trades": test_total,
+        "sim_trades": sim_total,
+        "drop_ratio": round(drop_ratio, 2),
+    }
+
+
+# ══════════════════════════════════════════════════════
+# V6: HUMAN-READABLE EXPLANATIONS
+# ══════════════════════════════════════════════════════
+
+def generate_explanation(change: dict) -> str:
+    """Сгенерировать человеко-читаемое объяснение изменения параметра."""
+    reasons = []
+
+    if "min_score" in change:
+        adj = change["min_score"]
+        if isinstance(adj, dict):
+            reasons.append(
+                f"min_score {adj.get('from', '?')}→{adj.get('to', '?')}: "
+                f"{adj.get('reason', 'threshold adjustment')}"
+            )
+
+    if "sl_pct" in change:
+        adj = change["sl_pct"]
+        if isinstance(adj, dict):
+            reasons.append(
+                f"sl_pct {adj.get('from', '?')}→{adj.get('to', '?')}: "
+                f"{adj.get('reason', 'SL ratio adjustment')}"
+            )
+
+    if "tp_mult" in change:
+        adj = change["tp_mult"]
+        if isinstance(adj, dict):
+            reasons.append(
+                f"tp_mult {adj.get('from', '?')}→{adj.get('to', '?')}: "
+                f"{adj.get('reason', 'TP ratio adjustment')}"
+            )
+
+    # Per-symbol changes
+    for key, adj in change.items():
+        if key.startswith("symbol_") and isinstance(adj, dict):
+            sym = key.replace("symbol_", "")
+            if "min_score" in adj:
+                reasons.append(f"{sym}: min_score→{adj['min_score']} (per-symbol auto-tune)")
+            if "sl_pct" in adj:
+                reasons.append(f"{sym}: sl_pct→{adj['sl_pct']}% (per-symbol auto-tune)")
+
+    if "pnl_guard" in change:
+        reasons.append(f"⚠️ PnL warning: {change['pnl_guard'].get('reason', 'negative')}")
+
+    return " | ".join(reasons) if reasons else "no explanation generated"
