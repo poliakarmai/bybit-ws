@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-[![Phase 8.0](https://img.shields.io/badge/phase-8.0-blue)](./CHANGELOG.md)
+[![Phase 8.2](https://img.shields.io/badge/phase-8.2-blue)](./CHANGELOG.md)
 
 ---
 
@@ -15,14 +15,14 @@
 - Находит точки входа по Bollinger Bands + 9-метричному AI-скорингу
 - Входит LONG/SHORT автоматически
 - Управляет рисками: стоп-лоссы, тейк-профиты, трейлинг, DCA
-- Защищает депозит: Circuit Breaker, BlackSwan 3-tier, корреляционный блок
-- Самообучается: LSTM-классификатор рынка, canary-режим для новых стратегий
+- Защищает депозит: Circuit Breaker, BlackSwan, Anti-ludomania, корреляционный блок
+- Самообучается: LSTM-классификатор рынка, World Model, canary-режим
 
 Работает **24/7 на VPS за $5/мес**. 52 smoke-теста, атомарный деплой.
 
 ---
 
-## Результаты (на v8.0)
+## Результаты (на v8.2)
 
 > **Важно:** это результаты конкретной инсталляции при конкретных параметрах. Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
 
@@ -30,6 +30,9 @@
 |--------|--------|---------|-----|
 | Июнь 2026 | 89 | 71% | +$340 |
 | Июль 2026 | 112 | 68% | +$410 |
+| Август 2026 | 244 | 35% | +$93 |
+
+*Август: переход на SHORT в TRENDING_DOWN, винрейт снизился, система в процессе адаптации*
 
 *Цифры для стратегии Bollinger Grid LONG, риск 5% на сделку, плечо 3x*
 
@@ -89,7 +92,8 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 
 ### 🛡️ Защита депозита
 - **Circuit Breaker** при 80% дневного лимита
-- **BlackSwan 3-tier**: BTC −3% → 50% закрытие, −5% → 80%, −8% → 100%
+- **BlackSwan v2**: 5+ красных позиций + uPnL < -$150 → алерт (без авто-закрытия)
+- **Anti-ludomania**: 3 убытка за час → блок авто-входов на 30 минут
 - **Корреляционный блок**: запрет входа при >80% корреляции с открытой позицией
 - **Pump Detection**: детект пампов +24ч/+230% нед → блок входа
 - **Kill Switch**: мгновенное закрытие всех позиций через RPC
@@ -108,7 +112,8 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 
 ### 🧠 AI & Self-Learning
 - **Entry Judge**: cross-model validation (DeepSeek), fail-closed
-- **LSTM Market Regime**: 5 классов, авто-адаптация параметров
+- **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% точность)
+- **LSTM World Model**: multi-task OHLCV prediction для скоринга входов
 - **Canary mode**: 10% сделок с новыми self-learned параметрами, авто-rollback
 - **Post-trade анализ**: кластерный анализ убыточных сделок → блок паттернов
 

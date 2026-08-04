@@ -131,10 +131,23 @@ Walk-forward валидация ML.
 - SL: RANGING→×0.7 (быстрее режем), TRENDING→×1.2 (даём пространство)
 - MTF-фикс: блокировать входы без данных D-TF (дыра закрыта)
 
-### BlackSwan v2 — корреляционная паника
-- 3+ позиций в минусе + uPnL < -$50 → закрыть красные (не все)
+### BlackSwan v2 — корреляционный алерт
+- 5+ позиций в минусе + uPnL < -$150 → **только алерт** (без авто-закрытия)
 - Зелёные позиции не трогаем
+- v1 (авто-закрытие) откачена — сработала без ведома пользователя
+
+### Anti-ludomania
+- 3 убытка за час → блок авто-входов на 30 минут
 
 ### Telegram Dashboard
 - Скрипт `~/.hermes/scripts/bybit-dashboard.py`
+
+### v8.2 — Systemd Hardening (04.08.2026)
+- `MemoryDenyWriteExecute=true` блокировал PyTorch → закомментирован
+- LSTM HMAC mismatch после переобучения — процедура переподписи
+- `TimeoutStopSec=10` — предотвращает зависание рестарта
+- `lstm_world_model.py` симлинк в `bybit_ws/`
+- MTF-скидка TRENDING_DOWN: `min_tfs=1` (было 2) для SHORT
+- log_event fallback на stderr
+- AGENTS.md с разделом Systemd Pitfalls
 - Позиции + PnL + ASCII-бары + equity + риск

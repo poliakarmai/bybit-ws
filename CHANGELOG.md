@@ -7,6 +7,61 @@
 
 ---
 
+## [8.2] — 2026-08-04
+
+### Added
+- LSTM World Model интегрирован в SHORT-сканер: `auto_short.py` использует `lstm_world_model` для скоринга
+- `TimeoutStopSec=10` в systemd unit — предотвращает зависание рестарта на 90с
+- `PYTORCH_JIT=0` + `TORCH_COMPILE_DISABLE=1` в unit для совместимости
+
+### Fixed
+- **Критично:** `MemoryDenyWriteExecute=true` блокировал PyTorch → LSTM падал с «could not create a primitive». Закомментирован
+- LSTM HMAC mismatch после переобучения — модель переподписывается с env-ключом
+- `lstm_world_model.py` в корне репо → симлинк в `bybit_ws/` для импорта `from bybit_ws.lstm_world_model`
+- `log_event` fallback на stderr при ошибке записи в events.log
+- `DATA_DIR` как str вместо Path в auto_short.py
+- **MTF confluence:** режимная скидка TRENDING_DOWN — `min_tfs=1` (было 2) для SHORT-входов
+
+### Changed
+- AGENTS.md: v8.2 с разделом Systemd Pitfalls
+
+## [8.1] — 2026-08-01 / 2026-08-04
+
+### Added
+- **LSTM World Model** (`lstm_world_model.py`): multi-task OHLCV prediction + entry scoring (0-5 баллов)
+- World Model в `auto_entry.py` для LONG и `auto_short.py` для SHORT
+- **Fix exit_reason:** детект SL/TP по движению цены вместо полей Bybit API (которые всегда null)
+- **Anti-ludomania:** 3 убытка за час → блок авто-входов на 30 минут
+- **LSTM-режим блокирует входы:** RANGING/CHOPPY → LONG=OFF, SHORT=OFF. `BYBIT_REGIME_AUTO=1`
+- **Адаптивный TP/SL по LSTM-режиму:** RANGING→TP ближе/SL ближе, TRENDING→TP дальше/SL дальше
+- **BlackSwan v2:** корреляционный алерт без авто-закрытия (порог -$150, только уведомление)
+- **MTF-дыра закрыта:** без данных D-TF входы блокируются (раньше пропускались)
+- `references/world-model-debugging.md` — документация отладки World Model
+
+### Fixed
+- REGIME_AUTO: `'method-wrapper' object has no attribute REGIME_LONG_ENABLED` (импорт модуля вместо `from . import __init__`)
+- SL floor: 2% → 5% для LONG (не выбивает шумом при ×10 плече)
+- LSTM FeatureScaler pickle compatibility при `python3 -m bybit_ws.lstm_regime`
+- BlackSwan v1 закрывал позиции без ведома пользователя → откачено
+- Time-stop по createdTime откачен — createdTime ≠ время открытия позиции
+
+### Changed
+- Тяжёлый цикл: параллельные pump/funding/overbought проверки через `asyncio.gather` (56-95с → 44-58с)
+- Таймауты pump/funding: 25с → 10с
+
+## [8.0] — 2026-08-01 / 2026-08-02
+
+### Added
+- **Paper Trading** (`paper_trade.py`): бэктест Bollinger Grid на исторических свечах
+- **Веб-дашборд** (публичный): `/dashboard`, `/rpc/dash/all`, `/rpc/dash/risk`, `/rpc/dash/signals`
+- **SVG-дашборд**: генерация `dashboard.svg` каждые 5 мин (cron)
+- **Продуктовая документация:** README.md, ONBOARDING.md, AGENTS.md для AI-агентов
+- Graphify-driven рефакторинг: граф кода → чистка циклов импортов и дедупликация
+
+### Changed
+- Лицензия: MIT → AGPL-3.0
+- Тесты: 45 → 52 smoke-тестов
+
 ## [7.9] — 2026-07-12
 
 ### Added
