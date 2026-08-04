@@ -7,6 +7,8 @@ Type=simple
 WorkingDirectory=/home/openclaw/bybit-ws
 EnvironmentFile=/home/openclaw/.config/bybit-ws/env
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTORCH_JIT=0
+Environment=TORCH_COMPILE_DISABLE=1
 # ── Security hardening (GSC 26.06.2026) ──
 ProtectProc=invisible
 NoNewPrivileges=true
@@ -17,14 +19,15 @@ ReadWritePaths=/home/openclaw/.local/share/bybit-ws /home/openclaw/.config/bybit
 RestrictAddressFamilies=AF_INET AF_INET6
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-MemoryDenyWriteExecute=true
+#MemoryDenyWriteExecute=true  # DISABLED: incompatible with PyTorch (2026-08-04)
 RestrictRealtime=true
 RemoveIPC=true
 LockPersonality=true
 # ── Restart policy ──
-ExecStart=%h/.hermes/hermes-agent/venv/bin/python3 -m bybit_ws.main_async
+ExecStart=/usr/bin/python3 -m bybit_ws.main_async
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=10
 StartLimitBurst=3
 StartLimitInterval=120
 # ── Resource limits ──

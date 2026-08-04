@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-08-04 (v8.1 — LSTM World Model: multi-task OHLCV prediction + entry scoring)
+> Обновлено: 2026-08-04 (v8.2 — Systemd pitfalls: MemoryDenyWriteExecute, HMAC, TimeoutStopSec, symlink)
 
 ## Что это
 
@@ -153,6 +153,47 @@ systemctl --user restart bybit-ws-async
 - [ ] `curl -s http://127.0.0.1:8766/health` → alive
 - [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий
 - [ ] `bash deploy.sh`
+- [ ] `grep "MemoryDenyWriteExecute" deploy/bybit-ws-async.service` — должен быть закомментирован
+- [ ] `grep "TimeoutStopSec" deploy/bybit-ws-async.service` — должен быть =10
+
+## Systemd Pitfalls (v8.2, 04.08.2026)
+
+### MemoryDenyWriteExecute vs PyTorch
+
+`MemoryDenyWriteExecute=true` блокирует PyTorch — LSTM-модель падает с «could not create a primitive».
+**Решение:** закомментировать в unit-файле, добавить `Environment=PYTORCH_JIT=0` и `TORCH_COMPILE_DISABLE=1`.
+
+### LSTM HMAC mismatch после переобучения
+
+После `python3 lstm_regime.py --train` модель подписывается fallback-ключом. Сервис использует ключ из `BYBIT_HMAC_SECRET` → mismatch.
+**Решение:** переподписать модель явно:
+```bash
+cd ~/bybit-ws && python3 -c "
+import os, hmac, hashlib
+with open(os.path.expanduser('~/.config/bybit-ws/env')) as f:
+    for line in f:
+        if line.startswith('BYBIT_HMAC_SECRET='):
+            key = line.strip().split('=',1)[1].encode()
+            break
+for fname in ['lstm_regime.pt', 'lstm_regime_scaler.pkl']:
+    path = f'/home/openclaw/.local/share/bybit-ws/models/{fname}'
+    with open(path, 'rb') as fh:
+        sha = hashlib.sha256(fh.read()).hexdigest()
+    sig = hmac.new(key, sha.encode(), hashlib.sha256).hexdigest()
+    with open(path + '.hmac', 'w') as fh:
+        fh.write(sig)
+"
+```
+
+### TimeoutStopSec — зависание на SIGTERM
+
+main_async не обрабатывает SIGTERM — systemd restart зависает на 90с.
+**Решение:** `TimeoutStopSec=10` в unit-файле.
+
+### lstm_world_model — симлинк
+
+Файл `lstm_world_model.py` в корне репо, а импорт `from bybit_ws.lstm_world_model`.
+**Решение:** симлинк `bybit_ws/lstm_world_model.py -> ../lstm_world_model.py` (закоммичен в git).
 
 ## Paper Trading
 
