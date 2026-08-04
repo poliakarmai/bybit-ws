@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-[![Phase 8.2](https://img.shields.io/badge/phase-8.2-blue)](./CHANGELOG.md)
+[![Phase 10](https://img.shields.io/badge/phase-10-blue)](./CHANGELOG.md)
 
 ---
 
@@ -16,25 +16,25 @@
 - Входит LONG/SHORT автоматически
 - Управляет рисками: стоп-лоссы, тейк-профиты, трейлинг, DCA
 - Защищает депозит: Circuit Breaker, BlackSwan, Anti-ludomania, корреляционный блок
-- Самообучается: LSTM-классификатор рынка, World Model, canary-режим
+- Самообучается: LSTM-классификатор рынка, Thompson Sampling, Dynamic Bandit, Drift Detector, Ensemble (20+ механик)
 
 Работает **24/7 на VPS за $5/мес**. 52 smoke-теста, атомарный деплой.
 
 ---
 
-## Результаты (на v8.2)
+## Результаты (на v10)
 
 > **Важно:** это результаты конкретной инсталляции при конкретных параметрах. Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
 
-| Период | Сделок | Винрейт | PnL |
-|--------|--------|---------|-----|
-| Июнь 2026 | 89 | 71% | +$340 |
-| Июль 2026 | 112 | 68% | +$410 |
-| Август 2026 | 244 | 35% | +$93 |
+| Период | Сделок | Винрейт | PnL | Примечание |
+|--------|--------|---------|-----|-----------|
+| Июнь 2026 | 89 | 71% | +$340 | |
+| Июль 2026 | 112 | 68% | +$410 | |
+| Август 2026 | 123 | 57% | ~−$100 | SHORT avg_loss ×1.75 avg_win, time exit fix deployed |
 
-*Август: переход на SHORT в TRENDING_DOWN, винрейт снизился, система в процессе адаптации*
+> **Август:** PF=0.75. Корень — одна SHORT-позиция (STGUSDT) на 30 дней с убытком $167. Без неё SHORT: WR=71%, PnL=+$138. Time exit теперь в каждом цикле, макс. удержание 24ч — проблема исправлена.
 
-*Цифры для стратегии Bollinger Grid LONG, риск 5% на сделку, плечо 3x*
+*Цифры для стратегии Bollinger Grid LONG/SHORT, риск 5% на сделку, плечо до 10x*
 
 ---
 
@@ -110,12 +110,17 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Telegram-алерты**: входы, SL, TP, DCA, пампы, ошибки
 - **One-click trading** через Hermes-чат: «просканируй SOL» → «бери 5%»
 
-### 🧠 AI & Self-Learning
+### 🧠 AI & Self-Learning (v10 — 20+ механик)
+- **Thompson Sampling**: Dynamic Bandit — авто-прунинг + генерация рук, Uncertainty-aware selection
+- **Ensemble Learning**: отдельный bandit для каждого режима рынка (6 режимов)
+- **Drift Detector**: per-regime окна с EMA baseline, Causal inference (market vs parameters)
+- **Stress Testing**: 4 исторических backtest-сценария + 1000 Pareto Monte Carlo симуляций
+- **Composite Score**: WR+PF+Sharpe+MaxDD+AvgHold с adaptive per-regime весами и exponential decay
+- **Micro-updates**: обучение после каждой сделки с outlier-защитой (>3σ)
+- **Canary mode**: Bayesian A/B тест, адаптивный 5-20%, авто-rollback
 - **Entry Judge**: cross-model validation (DeepSeek), fail-closed
 - **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% точность)
 - **LSTM World Model**: multi-task OHLCV prediction для скоринга входов
-- **Canary mode**: 10% сделок с новыми self-learned параметрами, авто-rollback
-- **Post-trade анализ**: кластерный анализ убыточных сделок → блок паттернов
 
 ---
 
@@ -136,6 +141,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 ┌───────────── MAIN LOOP (async, 30s) ─────────────┐
 │  Каждый цикл:                                      │
 │  • unified_sl.py     — Unified SL (5 механизмов)   │
+│  • time_exit.py       — Time exit (каждый цикл, макс 24ч)│
 │  • auto_tp.py        — ATR-based TP                │
 │  • risk_manager.py   — Circuit Breaker + BlackSwan │
 │                                                     │
@@ -146,9 +152,9 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 │  • correlation.py    — корреляционная матрица      │
 │  • dca.py            — DCA-докупки                 │
 │                                                     │
-│  Раз в 6 часов (720 циклов):                       │
-│  • self_learn.py     — самообучение                │
-│  • canary mode       — A/B-тест новых параметров   │
+│  Раз в 24 часа (self-learn):                        │
+│  • self_learn.py     — Dynamic Bandit, Drift, Ensemble│
+│  • canary mode       — Bayesian A/B-тест параметров │
 └─────────────────────────────────────────────────────┘
 ```
 

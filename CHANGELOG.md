@@ -7,23 +7,62 @@
 
 ---
 
-## [8.2] — 2026-08-04
+## [10.0] — 2026-08-04
 
-### Added
-- LSTM World Model интегрирован в SHORT-сканер: `auto_short.py` использует `lstm_world_model` для скоринга
-- `TimeoutStopSec=10` в systemd unit — предотвращает зависание рестарта на 90с
-- `PYTORCH_JIT=0` + `TORCH_COMPILE_DISABLE=1` в unit для совместимости
+### Self-Learning v10 (20+ механик)
+- **Thompson Sampling**: Dynamic Bandit — авто-прунинг + генерация рук, Uncertainty-aware selection
+- **Ensemble Learning**: отдельный bandit для каждого режима рынка (6 режимов), Coordinated transition handover
+- **Drift Detector**: per-regime окна (HIGH_VOL=30, RANGING=100) с EMA baseline, Causal inference
+- **Stress Testing**: 4 исторических backtest-сценария + 1000 Pareto Monte Carlo (α=2.5, heavy-tail)
+- **Composite Score**: adaptive per-regime веса + Exponential decay (200 дней → 37% веса)
+- **Micro-updates**: обучение после каждой сделки с outlier-защитой (>3σ skip)
+- **Robust bandit updates**: >2σ → damped weight 0.5, >3σ → outlier skip
+- **Canary mode**: Bayesian A/B, адаптивный 5-20%, idle timeout 3ч
+- **Param versioning**: Git-like snapshots (`params_history/v*.json`)
 
 ### Fixed
-- **Критично:** `MemoryDenyWriteExecute=true` блокировал PyTorch → LSTM падал с «could not create a primitive». Закомментирован
-- LSTM HMAC mismatch после переобучения — модель переподписывается с env-ключом
-- `lstm_world_model.py` в корне репо → симлинк в `bybit_ws/` для импорта `from bybit_ws.lstm_world_model`
-- `log_event` fallback на stderr при ошибке записи в events.log
-- `DATA_DIR` как str вместо Path в auto_short.py
-- **MTF confluence:** режимная скидка TRENDING_DOWN — `min_tfs=1` (было 2) для SHORT-входов
+- **Критично: PF=0.75** — корень в SHORT-позиции STGUSDT (730ч удержания, $−167). Без неё SHORT: WR=71%, PnL=+$138
+- **Time exit** перенесён в основной цикл (каждый 30с, не только heavy)
+- `TIME_EXIT_MAX_HOURS` 48→24ч — позиции-зомби закрываются за ≤24ч
+- **Composite score** брал пустые данные из `roundtrips_sample` → загрузка сырых трейдов из SQLite
+- **DEFAULT_REGIME_PARAMS** унифицированы: 6 режимов (TRENDING_UP/DOWN, RANGING, HIGH/LOW_VOL, CHOPPY)
+- **Self-learn interval** 6ч→24ч (cooldown, меньше overfitting)
+- **Exponential decay** 0.01→0.005 (200 дней → 37% вместо 100)
+- feature flags задокументированы: self-learn не зависит от `BYBIT_AB_ENABLED`, `BYBIT_REGIME_AUTO`
 
 ### Changed
-- AGENTS.md: v8.2 с разделом Systemd Pitfalls
+- AGENTS.md: v10 с текущими метриками (123 trades, PF=0.75, SHORT diagnostic)
+- SELF_LEARN.md: v10 с полной эволюцией v4→v10, реальными цифрами, диагностикой
+- README.md: phase 8.2→10, обновлённые результаты, self-learning секция
+- LICENSE: MIT → AGPL-3.0 (подтверждено в v8.0)
+
+## [9.0] — 2026-08-04
+
+### Added
+- **Dynamic ParameterBandit**: авто-прунинг худших рук + генерация вариаций лучшей каждые 24ч
+- **Pareto-calibrated Monte Carlo**: heavy-tail распределение (α=2.5) вместо uniform
+- **Regime-aware Drift Detector**: per-regime окна (HIGH_VOL=30, RANGING=100) + EMA baseline
+- **ParameterEnsemble**: отдельный Dynamic Bandit для каждого из 6 режимов
+- **Online micro-updates**: `on_trade_closed()` — bandit posterior + drift + symbol profile после каждой сделки
+
+## [8.0] — 2026-08-01 / 2026-08-02
+
+### Added
+- **Paper Trading** (`paper_trade.py`): бэктест Bollinger Grid на исторических свечах
+- **Веб-дашборд** (публичный): `/dashboard`, `/rpc/dash/all`, `/rpc/dash/risk`, `/rpc/dash/signals`
+- **SVG-дашборд**: генерация `dashboard.svg` каждые 5 мин (cron)
+- **Продуктовая документация:** README.md, ONBOARDING.md, AGENTS.md для AI-агентов
+- Graphify-driven рефакторинг: граф кода → чистка циклов импортов и дедупликация
+- **Thompson Sampling** (v8): 3-рукий bandit с Beta posterior
+- **Monte Carlo stress test**: 1000 синтетических crash-симуляций
+- **ConceptDriftDetector**: ADWIN-based, окно 100, порог 5%
+- **Anomaly detection**: IQR-based outlier filter (3×IQR)
+- **Adaptive composite weights**: 6 режимов × свои веса composite_score
+- **Parameter versioning**: Git-like snapshots
+
+### Changed
+- Лицензия: MIT → AGPL-3.0
+- Тесты: 45 → 52 smoke-тестов
 
 ## [8.1] — 2026-08-01 / 2026-08-04
 
@@ -48,19 +87,6 @@
 ### Changed
 - Тяжёлый цикл: параллельные pump/funding/overbought проверки через `asyncio.gather` (56-95с → 44-58с)
 - Таймауты pump/funding: 25с → 10с
-
-## [8.0] — 2026-08-01 / 2026-08-02
-
-### Added
-- **Paper Trading** (`paper_trade.py`): бэктест Bollinger Grid на исторических свечах
-- **Веб-дашборд** (публичный): `/dashboard`, `/rpc/dash/all`, `/rpc/dash/risk`, `/rpc/dash/signals`
-- **SVG-дашборд**: генерация `dashboard.svg` каждые 5 мин (cron)
-- **Продуктовая документация:** README.md, ONBOARDING.md, AGENTS.md для AI-агентов
-- Graphify-driven рефакторинг: граф кода → чистка циклов импортов и дедупликация
-
-### Changed
-- Лицензия: MIT → AGPL-3.0
-- Тесты: 45 → 52 smoke-тестов
 
 ## [7.9] — 2026-07-12
 
