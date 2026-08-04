@@ -151,15 +151,25 @@ def _import_bybit_trades(data_dir):
                     try:
                         entry_ts_raw = int(item.get('createdTime', 0))
                         hold_h = (ts_val - entry_ts_raw/1000) / 3600 if entry_ts_raw else None
-                        exit_reason = 'Unknown'
-                        sl_price = item.get('stopLoss', '')
-                        tp_price = item.get('takeProfit', '')
-                        if sl_price and float(sl_price) > 0:
-                            exit_reason = 'SL'
-                        elif tp_price and float(tp_price) > 0:
-                            exit_reason = 'TP'
-                        elif hold_h and hold_h > 48:
-                            exit_reason = 'Time'
+                        entry_px = float(item.get('avgEntryPrice', 0))
+                        exit_px = float(item.get('avgExitPrice', 0))
+                        # Bybit returns stopLoss/takeProfit=null for closed positions.
+                        # Detect exit reason from price movement instead.
+                        if entry_px > 0 and exit_px > 0:
+                            if side == 'sell':  # SHORT
+                                if exit_px > entry_px:
+                                    exit_reason = 'SL'
+                                else:
+                                    exit_reason = 'TP'
+                            else:  # LONG
+                                if exit_px < entry_px:
+                                    exit_reason = 'SL'
+                                else:
+                                    exit_reason = 'TP'
+                            if hold_h and hold_h > 48:
+                                exit_reason = 'Time'
+                        else:
+                            exit_reason = 'Unknown'
                         sync_db.add_trade(
                             symbol=sym, side='Buy' if side == 'buy' else 'Sell',
                             strategy='auto', entry_price=float(item.get('avgEntryPrice', 0)),
@@ -174,17 +184,18 @@ def _import_bybit_trades(data_dir):
                     entry_ts = int(item.get('createdTime', 0)) / 1000
                     try:
                         hold_h = (ts_val - entry_ts) / 3600 if entry_ts > 0 else 0
-                        # Детект причины выхода
-                        exit_reason = 'Unknown'
-                        # Проверяем stopLoss/takeProfit поля
-                        sl_price = item.get('stopLoss', '')
-                        tp_price = item.get('takeProfit', '')
-                        if sl_price and float(sl_price) > 0:
-                            exit_reason = 'SL'
-                        elif tp_price and float(tp_price) > 0:
-                            exit_reason = 'TP'
-                        elif hold_h > 48:
-                            exit_reason = 'Time'  # Долгий холд → скорее time exit
+                        entry_px = float(item.get('avgEntryPrice', 0))
+                        exit_px = float(item.get('avgExitPrice', 0))
+                        # Bybit returns stopLoss/takeProfit=null. Detect from price.
+                        if entry_px > 0 and exit_px > 0:
+                            if side == 'sell':
+                                exit_reason = 'SL' if exit_px > entry_px else 'TP'
+                            else:
+                                exit_reason = 'SL' if exit_px < entry_px else 'TP'
+                            if hold_h > 48:
+                                exit_reason = 'Time'
+                        else:
+                            exit_reason = 'Unknown'
                         _record_exit(sym, side, pnl, exit_reason, hold_h,
                                      float(item.get('avgEntryPrice', 0)),
                                      float(item.get('avgExitPrice', 0)))

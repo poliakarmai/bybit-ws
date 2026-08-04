@@ -262,16 +262,35 @@ def short_score_coin(sym: str, bb_data: dict, ticker: dict, is_junk: bool) -> di
         elif chg_pct >= 1.0:   bonus = 5; bonus_label = f' Pump+{int(chg_pct*100)}%'
         elif chg_pct >= 0.8:   bonus = 3; bonus_label = f' Pump+{int(chg_pct*100)}%'
 
-    total = bb_score + vol_score + up_score + fund_score + vola_score + qscore + bonus
+    # ── World Model (0-5): инвертировано для SHORT (отрицательный return = хорошо) ──
+    wm_score = 0
+    wm_label = ''
+    if os.environ.get('BYBIT_WORLD_MODEL', '0') == '1':
+        try:
+            from .lstm_world_model import get_cached_world_prediction as _get_wm
+            wm = _get_wm(sym)
+            if wm:
+                predicted_return = wm.get('predicted_return_pct')
+                if predicted_return is not None:
+                    if predicted_return < -0.5:
+                        wm_score = 5; wm_label = f' WM+{wm_score}'
+                    elif predicted_return <= 0.5:
+                        wm_score = 3; wm_label = f' WM+{wm_score}'
+                    else:
+                        wm_score = 1; wm_label = f' WM+{wm_score}'
+        except Exception as e:
+            log_event(f'⚠️ world_model SHORT({sym}): {e}')
+
+    total = bb_score + vol_score + up_score + fund_score + vola_score + qscore + bonus + wm_score
 
     return {
         'symbol': sym,
         'score': total,
-        'max_score': 58 if is_junk else 50,
+        'max_score': (58 if is_junk else 50) + 5,
         'bb_pos': bb_pos,
         'bb_width': bb_width,
         'cur': cur,
-        'breakdown': f'BB={bb_score} Vol={vol_score} Up={up_score} Fund={fund_score} Vola={vola_score} Q={qscore}{bonus_label}',
+        'breakdown': f'BB={bb_score} Vol={vol_score} Up={up_score} Fund={fund_score} Vola={vola_score} Q={qscore}{bonus_label}{wm_label}',
     }
 
 
