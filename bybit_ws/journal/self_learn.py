@@ -1,16 +1,15 @@
 """
-Self-learning module v7 — composite score + regime params + stress testing + drawdown-aware.
+Self-learning module v9 — Dynamic Bandit + Pareto MC + Regime Drift + Ensemble + Micro-updates.
 
-Новое в v7:
-  1. Composite score — WR + Profit Factor + Sharpe + MaxDD + Avg Hold
-  2. Regime-specific parameters — раздельные params per LSTM regime
-  3. Stress testing — 4 исторических crash-сценария
-  4. Drawdown-based learning — адаптивные params от текущей просадки
-  5. Adaptive canary % — динамический от стабильности WR
-  6. Интегрировано: Bayesian A/B, shrinkage, SL time, walk-forward, feature importance
-  2. Exit reason tracking — понимаем ПОЧЕМУ закрылись (SL/TP/Manual/Time)
-  3. Session/time-based — разные параметры для Азии/Европы/US
-  4. Consecutive loss protection — серии лосей → cooldown + уменьшение размера
+Новое в v9:
+  1. Dynamic Thompson Sampling — авто-прунинг + генерация рук каждые 24ч
+  2. Pareto-calibrated Monte Carlo — heavy-tail распределение (α=2.5)
+  3. Regime-aware Drift Detector — per-regime окна + EMA baseline
+  4. Ensemble Learning — отдельный bandit для каждого рыночного режима
+  5. Online micro-updates — инкрементальное обучение после каждой сделки
+  6. Exit reason tracking — понимаем ПОЧЕМУ закрылись (SL/TP/Manual/Time)
+  7. Session/time-based — разные параметры для Азии/Европы/US
+  8. Consecutive loss protection — серии лосей → cooldown + уменьшение размера
 
 State files:
   ~/.local/share/bybit-ws/canary_state.json     — canary-режим
@@ -2214,3 +2213,433 @@ def get_params_history(limit: int = 20) -> list:
         except Exception:
             pass
     return history
+
+
+# ══════════════════════════════════════════════════════
+# V9: DYNAMIC THOMPSON SAMPLING (auto-generate + prune)
+# ══════════════════════════════════════════════════════
+
+class DynamicParameterBandit:
+    """Thompson Sampling с авто-генерацией и прунингом рук.
+
+    Каждые 24ч: удаляет 2 худшие руки, добавляет 2 вариации лучшей.
+    """
+
+    def __init__(self, base_params: dict = None, n_arms: int = 5):
+        import random as _random
+        if base_params is None:
+            base_params = {"min_score": 30, "sl_pct": 5.0, "tp_mult": 1.2}
+        self.base_params = dict(base_params)
+        self._random = _random
+        self.arms = [self._perturb(base_params) for _ in range(n_arms)]
+        self.last_pruning = time.time()
+
+    def _perturb(self, params: dict) -> dict:
+        """Генерация вариации параметров с muted random walk."""
+        return {
+            "params": {
+                "min_score": max(15, min(45, params["min_score"] + self._random.randint(-7, 7))),
+                "sl_pct": round(max(2.0, min(10.0, params["sl_pct"] * self._random.uniform(0.75, 1.25))), 1),
+                "tp_mult": round(max(0.5, min(2.0, params["tp_mult"] * self._random.uniform(0.75, 1.25))), 1),
+            },
+            "alpha": 1.0, "beta": 1.0, "trades": 0, "wins": 0,
+        }
+
+    def select_arm(self) -> tuple:
+        """Thompson Sampling: выбрать руку с max sampled Beta."""
+        samples = [self._random.betavariate(a["alpha"], a["beta"]) for a in self.arms]
+        best_idx = max(range(len(samples)), key=lambda i: samples[i])
+        return self.arms[best_idx]["params"], best_idx
+
+    def update(self, arm_idx: int, win: bool):
+        """Обновить Beta posterior."""
+        if 0 <= arm_idx < len(self.arms):
+            self.arms[arm_idx]["trades"] += 1
+            if win:
+                self.arms[arm_idx]["alpha"] += 1
+                self.arms[arm_idx]["wins"] += 1
+            else:
+                self.arms[arm_idx]["beta"] += 1
+
+    def prune_and_regenerate(self):
+        """Удалить 2 худшие руки, добавить 2 вариации лучшей."""
+        if time.time() - self.last_pruning < 86400:
+            return
+
+        if len(self.arms) < 5:
+            return
+
+        # Сортируем по mean reward
+        def mean_reward(arm):
+            return arm["alpha"] / (arm["alpha"] + arm["beta"])
+
+        sorted_arms = sorted(self.arms, key=mean_reward, reverse=True)
+        best = sorted_arms[0]["params"]
+
+        # Оставляем топ-3, добавляем 2 новых
+        self.arms = sorted_arms[:3]
+        self.arms.append(self._perturb(best))
+        self.arms.append(self._perturb(best))
+        self.last_pruning = time.time()
+
+    def get_best_arm(self) -> dict:
+        means = [(a["alpha"] / (a["alpha"] + a["beta"]), i) for i, a in enumerate(self.arms)]
+        best_idx = max(means, key=lambda x: x[0])[1]
+        arm = self.arms[best_idx]
+        return {
+            "params": arm["params"],
+            "wr": round(arm["alpha"] / (arm["alpha"] + arm["beta"]), 3),
+            "trades": arm["trades"],
+            "n_arms": len(self.arms),
+        }
+
+    def to_dict(self) -> dict:
+        return {"arms": self.arms, "base_params": self.base_params,
+                "last_pruning": self.last_pruning}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DynamicParameterBandit":
+        bandit = cls(base_params=data.get("base_params"), n_arms=0)
+        bandit.arms = data.get("arms", [])
+        bandit.last_pruning = data.get("last_pruning", 0)
+        return bandit
+
+
+DYNAMIC_BANDIT_PATH = DATA_DIR / "dynamic_bandit.json"
+
+
+def save_dynamic_bandit(bandit: DynamicParameterBandit):
+    DYNAMIC_BANDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DYNAMIC_BANDIT_PATH.write_text(json.dumps(bandit.to_dict(), indent=2))
+
+
+def load_dynamic_bandit() -> DynamicParameterBandit:
+    if DYNAMIC_BANDIT_PATH.exists():
+        try:
+            return DynamicParameterBandit.from_dict(json.loads(DYNAMIC_BANDIT_PATH.read_text()))
+        except Exception:
+            pass
+    return DynamicParameterBandit()
+
+
+# ══════════════════════════════════════════════════════
+# V9: CALIBRATED MONTE CARLO (Pareto heavy-tail)
+# ══════════════════════════════════════════════════════
+
+def monte_carlo_stress_test_v9(params: dict, n_simulations: int = 1000,
+                                 capital: float = 200) -> dict:
+    """Monte Carlo с Pareto-distributed crash severity (heavy tails).
+
+    Вместо uniform: BTC drop ~ Pareto(α=2.5), alt ratio ~ correlated.
+    """
+    import random as _random
+    results = []
+    sl_pct = params.get("sl_pct", 5)
+    max_pos = params.get("max_positions", 7)
+    pos_size = capital * 0.05
+
+    for _ in range(n_simulations):
+        # Pareto heavy-tail: BTC drop distribution
+        # P(X > x) = (x_min/x)^α. α=2.5 даёт realistic tail risk.
+        alpha = 2.5
+        x_min = 0.15  # minimum crash: 15%
+        btc_drop = x_min / (_random.random() ** (1.0 / alpha))  # inverse CDF
+        btc_drop = min(btc_drop, 0.80)  # cap at 80%
+
+        # Alt ratio: correlated with BTC drop (bigger crash → higher ratio)
+        base_ratio = 1.2 + 0.8 * (btc_drop - 0.15) / 0.65  # 1.2 to 2.0 mapped
+        alt_ratio = base_ratio + _random.gauss(0, 0.2)
+        alt_ratio = max(1.1, min(2.5, alt_ratio))
+        alt_drop = btc_drop * alt_ratio
+
+        vol_spike = 2.0 + 6.0 * (btc_drop / 0.8) ** 0.5  # корень из crash severity
+
+        position_losses = []
+        for _ in range(max_pos):
+            effective_drop = min(alt_drop, sl_pct / 100) * vol_spike / 3
+            loss = pos_size * effective_drop
+            if _random.random() < 0.3:
+                loss = -loss * 0.5
+            position_losses.append(loss)
+
+        total_pnl = -sum(position_losses)
+        sl_capped = min(total_pnl, max_pos * pos_size * (sl_pct / 100))
+        results.append(sl_capped)
+
+    # Statistics
+    results_sorted = sorted(results)
+    p5 = results_sorted[int(n_simulations * 0.05)]
+    p25 = results_sorted[int(n_simulations * 0.25)]
+    median = results_sorted[n_simulations // 2]
+    p95 = results_sorted[int(n_simulations * 0.95)]
+
+    cvar_5 = sum(r for r in results if r <= p5) / max(1, sum(1 for r in results if r <= p5))
+    prob_ruin = sum(1 for r in results if r < -capital * 0.5) / n_simulations
+
+    return {
+        "p5_loss": round(p5, 2),
+        "p25_loss": round(p25, 2),
+        "median_loss": round(median, 2),
+        "p95_loss": round(p95, 2),
+        "cvar_5": round(cvar_5, 2),
+        "max_loss": round(min(results), 2),
+        "prob_ruin": round(prob_ruin, 4),
+        "passed": prob_ruin < 0.05,
+        "distribution": "Pareto(α=2.5, tail-heavy)",
+        "n_simulations": n_simulations,
+    }
+
+
+# ══════════════════════════════════════════════════════
+# V9: REGIME-AWARE DRIFT DETECTOR
+# ══════════════════════════════════════════════════════
+
+class RegimeAwareDriftDetector:
+    """Детектор дрейфа с per-regime окнами и EMA baseline.
+
+    Разные режимы имеют разную волатильность WR:
+    - HIGH_VOL: окно 30 (быстрое обнаружение)
+    - TRENDING_UP: окно 50
+    - RANGING: окно 100
+    - TRENDING_DOWN: окно 80
+    """
+
+    def __init__(self):
+        self.windows = {
+            "TRENDING_UP": [],
+            "TRENDING_DOWN": [],
+            "RANGING": [],
+            "HIGH_VOL": [],
+            "LOW_VOL": [],
+            "CHOPPY": [],
+        }
+        self.window_sizes = {
+            "TRENDING_UP": 50, "TRENDING_DOWN": 80, "RANGING": 100,
+            "HIGH_VOL": 30, "LOW_VOL": 120, "CHOPPY": 60,
+        }
+        self.baselines = {}       # per-regime EMA baseline
+        self.ema_alpha = 0.10     # скорость обновления baseline
+        self.drift_detected = False
+        self.drift_regime = None
+        self.drift_since = None
+
+    def update(self, regime: str, win: bool) -> bool:
+        """Добавить исход сделки в окно её режима."""
+        if regime not in self.windows:
+            regime = "RANGING"
+
+        window = self.windows[regime]
+        window.append(1.0 if win else 0.0)
+        max_size = self.window_sizes.get(regime, 100)
+        if len(window) > max_size:
+            self.windows[regime] = window[-max_size:]
+
+        if len(window) < 15:
+            return False
+
+        current_wr = sum(window) / len(window)
+
+        if regime not in self.baselines:
+            self.baselines[regime] = current_wr
+            return False
+
+        baseline_wr = self.baselines[regime]
+        drift = baseline_wr - current_wr
+        threshold = 0.10  # 10% drop for regime-specific
+
+        if drift > threshold and not self.drift_detected:
+            if len(window) >= 10:
+                recent_wr = sum(window[-10:]) / 10
+                if recent_wr < 0.30:
+                    self.drift_detected = True
+                    self.drift_regime = regime
+                    self.drift_since = datetime.now()
+                    return True
+
+        # Recovery: drift практически исчез
+        if self.drift_detected and drift < threshold * 0.3:
+            self.drift_detected = False
+            self.drift_regime = None
+            self.drift_since = None
+            self.baselines[regime] = current_wr
+
+        # EMA update baseline
+        self.baselines[regime] = (
+            (1 - self.ema_alpha) * self.baselines[regime]
+            + self.ema_alpha * current_wr
+        )
+
+        return False
+
+    def get_status(self) -> dict:
+        result = {
+            "drift_detected": self.drift_detected,
+            "drift_regime": self.drift_regime,
+            "drift_since": self.drift_since.isoformat() if self.drift_since else None,
+            "per_regime": {},
+        }
+        for regime, window in self.windows.items():
+            if len(window) < 5:
+                continue
+            wr = sum(window) / len(window)
+            baseline = self.baselines.get(regime, wr)
+            result["per_regime"][regime] = {
+                "trades": len(window),
+                "wr": round(wr, 3),
+                "baseline": round(baseline, 3),
+                "delta": round(baseline - wr, 3),
+            }
+        return result
+
+    def on_drift_detected(self) -> dict:
+        return {
+            "action": "conservative",
+            "drift_regime": self.drift_regime,
+            "min_score_mult": 1.5,
+            "position_size_mult": 0.5,
+            "canary_pct": 0.0,
+            "alert": f"Regime-specific drift in {self.drift_regime}",
+        }
+
+
+# Глобальный экземпляр
+_regime_drift_detector: RegimeAwareDriftDetector = None
+
+
+def get_regime_drift_detector() -> RegimeAwareDriftDetector:
+    global _regime_drift_detector
+    if _regime_drift_detector is None:
+        _regime_drift_detector = RegimeAwareDriftDetector()
+    return _regime_drift_detector
+
+
+# ══════════════════════════════════════════════════════
+# V9: ENSEMBLE LEARNING (per-regime bandits)
+# ══════════════════════════════════════════════════════
+
+class ParameterEnsemble:
+    """Ансамбль: отдельный DynamicParameterBandit для каждого режима."""
+
+    REGIMES = ["TRENDING_UP", "TRENDING_DOWN", "RANGING", "HIGH_VOL", "LOW_VOL", "CHOPPY"]
+
+    def __init__(self):
+        base_params = {
+            "TRENDING_UP": {"min_score": 25, "sl_pct": 5.0, "tp_mult": 1.5},
+            "TRENDING_DOWN": {"min_score": 35, "sl_pct": 5.0, "tp_mult": 0.8},
+            "RANGING": {"min_score": 30, "sl_pct": 5.0, "tp_mult": 1.0},
+            "HIGH_VOL": {"min_score": 22, "sl_pct": 6.0, "tp_mult": 1.3},
+            "LOW_VOL": {"min_score": 28, "sl_pct": 4.0, "tp_mult": 0.9},
+            "CHOPPY": {"min_score": 40, "sl_pct": 4.0, "tp_mult": 0.7},
+        }
+        self.bandits = {
+            regime: DynamicParameterBandit(base_params[regime], n_arms=4)
+            for regime in self.REGIMES
+        }
+
+    def select_params(self, regime: str = None) -> tuple:
+        """Выбрать параметры для текущего режима."""
+        if regime is None or regime not in self.bandits:
+            regime = "RANGING"
+        return self.bandits[regime].select_arm()
+
+    def update(self, regime: str, arm_idx: int, win: bool):
+        """Обновить bandit для конкретного режима."""
+        if regime in self.bandits:
+            self.bandits[regime].update(arm_idx, win)
+            self.bandits[regime].prune_and_regenerate()
+
+    def get_best_for_regime(self, regime: str) -> dict:
+        if regime in self.bandits:
+            return self.bandits[regime].get_best_arm()
+        return {}
+
+    def get_all_best(self) -> dict:
+        return {r: self.bandits[r].get_best_arm() for r in self.REGIMES}
+
+    def to_dict(self) -> dict:
+        return {r: b.to_dict() for r, b in self.bandits.items()}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ParameterEnsemble":
+        ensemble = cls()
+        for regime, bandit_data in data.items():
+            if regime in ensemble.bandits:
+                ensemble.bandits[regime] = DynamicParameterBandit.from_dict(bandit_data)
+        return ensemble
+
+
+ENSEMBLE_PATH = DATA_DIR / "parameter_ensemble.json"
+
+
+def save_ensemble(ensemble: ParameterEnsemble):
+    ENSEMBLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ENSEMBLE_PATH.write_text(json.dumps(ensemble.to_dict(), indent=2))
+
+
+def load_ensemble() -> ParameterEnsemble:
+    if ENSEMBLE_PATH.exists():
+        try:
+            return ParameterEnsemble.from_dict(json.loads(ENSEMBLE_PATH.read_text()))
+        except Exception:
+            pass
+    return ParameterEnsemble()
+
+
+# ══════════════════════════════════════════════════════
+# V9: ONLINE MICRO-UPDATES (after each trade)
+# ══════════════════════════════════════════════════════
+
+def on_trade_closed(symbol: str, side: str, pnl: float, hold_hours: float,
+                    exit_reason: str, regime: str = None):
+    """Вызывается после КАЖДОЙ закрытой сделки для микро-обучения.
+
+    Инкрементальные обновления без canary: bandit posterior, drift, regime stats.
+    """
+    win = pnl > 0
+
+    # 1. Ensemble bandit update
+    try:
+        ensemble = load_ensemble()
+        # Определяем текущий режим
+        if regime is None:
+            cache = DATA_DIR / "lstm_regime_cache.json"
+            if cache.exists():
+                try:
+                    regime = json.loads(cache.read_text()).get("regime", "RANGING")
+                except Exception:
+                    regime = "RANGING"
+            else:
+                regime = "RANGING"
+
+        # Update bandit для этого режима
+        _, arm_idx = ensemble.select_params(regime)
+        ensemble.update(regime, arm_idx, win)
+        save_ensemble(ensemble)
+    except Exception:
+        pass
+
+    # 2. Regime-aware drift detector
+    try:
+        dd = get_regime_drift_detector()
+        dd.update(regime or "RANGING", win)
+    except Exception:
+        pass
+
+    # 3. Update symbol profile (incremental)
+    try:
+        from .journal.self_learn import _load_symbol_profiles, _save_symbol_profiles, _profiles_lock
+        with _profiles_lock:
+            profiles = _load_symbol_profiles()
+        if symbol not in profiles:
+            profiles[symbol] = {"trades": 0, "wins": 0, "total_pnl": 0.0, "total_hold": 0.0}
+        profiles[symbol]["trades"] += 1
+        if win:
+            profiles[symbol]["wins"] += 1
+        profiles[symbol]["total_pnl"] += pnl
+        profiles[symbol]["total_hold"] += hold_hours
+        profiles[symbol]["last_exit_reason"] = exit_reason
+        profiles[symbol]["_updated"] = datetime.now().isoformat()
+        with _profiles_lock:
+            _save_symbol_profiles(profiles)
+    except Exception:
+        pass

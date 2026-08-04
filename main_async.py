@@ -200,6 +200,12 @@ def _import_bybit_trades(data_dir):
                                      float(item.get('avgEntryPrice', 0)),
                                      float(item.get('avgExitPrice', 0)))
                         _record_streak(pnl)
+                        # ── V9: micro-updates after each trade ──
+                        try:
+                            from .journal.self_learn import on_trade_closed as _micro_update
+                            _micro_update(sym, side, pnl, hold_h, exit_reason)
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                     # Проброс в canary-трекер: только для канареечных входов
@@ -893,10 +899,36 @@ async def async_main_loop():
                                     log_event(f'⚠️ Monte Carlo: prob_ruin={mc["prob_ruin"]:.1%} '
                                               f'CVaR=${mc["cvar_5"]} median=${mc["median_loss"]}')
 
+                                # V9: Pareto-calibrated MC
+                                try:
+                                    from .journal.self_learn import monte_carlo_stress_test_v9
+                                    mc9 = monte_carlo_stress_test_v9(current_regime_params, 500)
+                                    log_event(f'📉 MC-v9 Pareto: prob_ruin={mc9["prob_ruin"]:.1%} '
+                                              f'p5=${mc9["p5_loss"]} median=${mc9["median_loss"]}')
+                                except Exception:
+                                    pass
+
                                 # V8: parameter versioning
                                 if adjustments:
                                     ver = save_params_version(adjustments, "self_learn")
                                     log_event(f'📝 Params version: {ver}')
+                    except Exception:
+                        pass
+
+                    # ── V9: ensemble bandit status ──
+                    try:
+                        from .journal.self_learn import load_ensemble, get_regime_drift_detector
+                        ensemble = load_ensemble()
+                        best_all = ensemble.get_all_best()
+                        for regime, best in best_all.items():
+                            if best.get("trades", 0) > 0:
+                                log_event(f'🎰 Bandit[{regime}]: {best["params"]["min_score"]}/{best["params"]["sl_pct"]}%/{best["params"]["tp_mult"]}× WR={best["wr"]:.0%} trades={best["trades"]}')
+
+                        # V9: regime-aware drift
+                        rdd = get_regime_drift_detector()
+                        rdd_status = rdd.get_status()
+                        if rdd_status["drift_detected"]:
+                            log_event(f'🚨 Regime Drift: {rdd_status["drift_regime"]} since {rdd_status["drift_since"]}')
                     except Exception:
                         pass
 
