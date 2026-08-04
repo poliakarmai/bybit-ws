@@ -2643,3 +2643,204 @@ def on_trade_closed(symbol: str, side: str, pnl: float, hold_hours: float,
             _save_symbol_profiles(profiles)
     except Exception:
         pass
+
+
+# ══════════════════════════════════════════════════════
+# V10: ROBUST MICRO-UPDATES (outlier protection)
+# ══════════════════════════════════════════════════════
+
+def robust_bandit_update(bandit, arm_idx: int, pnl: float,
+                          recent_pnls: list = None) -> str:
+    """Обновление bandit с защитой от outlier-сделок.
+
+    Возвращает: 'applied' | 'outlier' | 'damped'
+    """
+    if recent_pnls and len(recent_pnls) >= 20:
+        mean_pnl = sum(recent_pnls) / len(recent_pnls)
+        variance = sum((p - mean_pnl) ** 2 for p in recent_pnls) / len(recent_pnls)
+        std_pnl = variance ** 0.5
+
+        # Outlier: >3σ
+        if std_pnl > 0 and abs(pnl - mean_pnl) > 3 * std_pnl:
+            return 'outlier'
+
+        # Damped: >2σ → половинный вес
+        if std_pnl > 0 and abs(pnl - mean_pnl) > 2 * std_pnl:
+            weight = 0.5
+        else:
+            weight = 1.0
+    else:
+        weight = 1.0
+
+    # Обновить posterior
+    if hasattr(bandit, 'arms'):
+        if pnl > 0:
+            bandit.arms[arm_idx]["alpha"] += weight
+        else:
+            bandit.arms[arm_idx]["beta"] += weight
+        bandit.arms[arm_idx]["trades"] = bandit.arms[arm_idx].get("trades", 0) + 1
+        if pnl > 0:
+            bandit.arms[arm_idx]["wins"] = bandit.arms[arm_idx].get("wins", 0) + 1
+
+    return 'damped' if weight < 1.0 else 'applied'
+
+
+# ══════════════════════════════════════════════════════
+# V10: EXPONENTIAL DECAY (old trades → lower weight)
+# ══════════════════════════════════════════════════════
+
+def weighted_wr(trades: list, decay_rate: float = 0.01) -> float:
+    """WR с экспоненциальным затуханием: старые сделки весят меньше."""
+    if not trades:
+        return 0.0
+    now = datetime.now()
+    weights, wins = [], []
+    for t in trades:
+        closed_ts = t.get("closed_at") if isinstance(t, dict) else getattr(t, "closed_at", None)
+        if closed_ts is None:
+            closed_ts = t.get("entry_at") if isinstance(t, dict) else getattr(t, "entry_at", None)
+        if closed_ts:
+            try:
+                age_days = (now - datetime.fromtimestamp(float(closed_ts))).total_seconds() / 86400
+                w = max(0.05, __import__('math').exp(-decay_rate * age_days))
+            except (ValueError, OSError):
+                w = 1.0
+        else:
+            w = 1.0
+        weights.append(w)
+        wins.append(1.0 if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) > 0 else 0.0)
+    total_w = sum(weights)
+    return sum(w * win for w, win in zip(weights, wins)) / total_w if total_w > 0 else 0.0
+
+
+def weighted_composite_score(trades: list, regime: str = None, decay_rate: float = 0.01) -> dict:
+    """Composite score с exponential decay."""
+    if not trades:
+        return {"score": 0.5, "wr": 0, "pf": 0, "sharpe": 0, "max_dd": 0, "avg_hold": 0}
+    now = datetime.now()
+    weights, pnls, holds = [], [], []
+    for t in trades:
+        closed_ts = (t.get("closed_at") if isinstance(t, dict) else getattr(t, "closed_at", None)) or \
+                     (t.get("entry_at") if isinstance(t, dict) else getattr(t, "entry_at", None))
+        w = 1.0
+        if closed_ts:
+            try:
+                age_days = (now - datetime.fromtimestamp(float(closed_ts))).total_seconds() / 86400
+                w = max(0.05, __import__('math').exp(-decay_rate * age_days))
+            except (ValueError, OSError):
+                pass
+        weights.append(w)
+        pnls.append(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0))
+        holds.append(t.get("hold_hours", 0) if isinstance(t, dict) else getattr(t, "hold_hours", 0))
+    total_w = sum(weights)
+    wr = sum(w * (1 if p > 0 else 0) for w, p in zip(weights, pnls)) / total_w
+    gross_profit = sum(w * p for w, p in zip(weights, pnls) if p > 0)
+    gross_loss = sum(w * abs(p) for w, p in zip(weights, pnls) if p < 0)
+    pf = gross_profit / gross_loss if gross_loss > 0 else 2.0
+    pf_norm = min(pf / 3.0, 1.0)
+    n = len(trades)
+    mean_pnl = sum(weights[i] * pnls[i] for i in range(n)) / total_w
+    variance = sum(weights[i] * (pnls[i] - mean_pnl) ** 2 for i in range(n)) / total_w
+    sharpe = mean_pnl / (variance ** 0.5) if variance > 0 else 0
+    sharpe_norm = min(max(sharpe + 1, 0) / 2.5, 1.0)
+    cumulative, peak, max_dd = 0, 0, 0
+    for p in pnls:
+        cumulative += p; peak = max(peak, cumulative); max_dd = max(max_dd, peak - cumulative)
+    dd_norm = max(0, 1.0 - max_dd / 100.0)
+    avg_hold = sum(w * h for w, h in zip(weights, holds)) / total_w
+    hold_norm = max(0, 1.0 - avg_hold / 48.0)
+    score = 0.30 * wr + 0.25 * pf_norm + 0.20 * sharpe_norm + 0.15 * dd_norm + 0.10 * hold_norm
+    return {"score": round(score, 3), "wr": round(wr, 3), "pf": round(pf, 2),
+            "sharpe": round(sharpe, 3), "max_dd": round(max_dd, 2),
+            "avg_hold": round(avg_hold, 1), "decay_rate": decay_rate}
+
+
+# ══════════════════════════════════════════════════════
+# V10: UNCERTAINTY-AWARE THOMPSON
+# ══════════════════════════════════════════════════════
+
+def select_arm_with_uncertainty(bandit, threshold: float = 0.10) -> tuple:
+    import random as _random
+    import math
+    means = [a["alpha"] / (a["alpha"] + a["beta"]) for a in bandit.arms]
+    n = len(means)
+    uncertainty = math.sqrt(sum((m - sum(means)/n)**2 for m in means) / n)
+    if uncertainty > threshold:
+        idx = _random.randint(0, n - 1)
+        return bandit.arms[idx]["params"], idx, "EXPLORE"
+    samples = [_random.betavariate(a["alpha"], a["beta"]) for a in bandit.arms]
+    idx = max(range(n), key=lambda i: samples[i])
+    return bandit.arms[idx]["params"], idx, "EXPLOIT"
+
+
+# ══════════════════════════════════════════════════════
+# V10: COORDINATED ENSEMBLE
+# ══════════════════════════════════════════════════════
+
+class CoordinatedEnsemble:
+    """Ансамбль с координацией при смене режима."""
+
+    def __init__(self, ensemble: ParameterEnsemble = None):
+        self.ensemble = ensemble or ParameterEnsemble()
+        self.last_regime = None
+        self.transition_trades = 0
+        self.transition_limit = 10
+
+    def on_regime_change(self, old_regime: str, new_regime: str):
+        self.last_regime = old_regime
+        self.transition_trades = 0
+
+    def select_params(self, current_regime: str) -> tuple:
+        if current_regime not in self.ensemble.bandits:
+            current_regime = "RANGING"
+        if self.transition_trades < self.transition_limit and self.last_regime:
+            old_b = self.ensemble.bandits.get(self.last_regime)
+            new_b = self.ensemble.bandits.get(current_regime)
+            if old_b and new_b:
+                op = old_b.get_best_arm()["params"]
+                np_ = new_b.get_best_arm()["params"]
+                w = 0.3 * (1 - self.transition_trades / self.transition_limit)
+                blended = {k: round(op.get(k, 0) * w + np_.get(k, 0) * (1 - w), 1) for k in op}
+                return blended, -1
+        params, idx = self.ensemble.select_params(current_regime)
+        return params, idx
+
+    def update(self, regime: str, arm_idx: int, win: bool):
+        if regime in self.ensemble.bandits and arm_idx >= 0:
+            self.ensemble.bandits[regime].update(arm_idx, win)
+            self.ensemble.bandits[regime].prune_and_regenerate()
+        self.transition_trades += 1
+        if self.transition_trades >= self.transition_limit:
+            self.last_regime = None
+
+
+# ══════════════════════════════════════════════════════
+# V10: CAUSAL INFERENCE
+# ══════════════════════════════════════════════════════
+
+def causal_analysis(trades: list, btc_return_24h: float = None) -> str:
+    """Почему WR упал? MARKET_CONDITIONS или PARAMETERS?"""
+    if len(trades) < 50:
+        return "UNCLEAR"
+    recent = trades[-20:]
+    baseline = trades[-100:-20]
+    recent_wr = sum(1 for t in recent if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) > 0) / len(recent)
+    baseline_wr = sum(1 for t in baseline if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) > 0) / len(baseline)
+    wr_drop = baseline_wr - recent_wr
+    if wr_drop < 0.05:
+        return "STABLE"
+    if btc_return_24h is None:
+        try:
+            import sqlite3 as _sql
+            db = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
+            conn = _sql.connect(str(db))
+            r = conn.execute("SELECT pnl FROM trade_history WHERE symbol='BTCUSDT' AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 5").fetchall()
+            conn.close()
+            btc_return_24h = sum(float(x[0] or 0) for x in r) if r else 0
+        except Exception:
+            btc_return_24h = 0
+    if btc_return_24h < -5 and wr_drop > 0.10:
+        return "MARKET_CONDITIONS"
+    elif btc_return_24h > -2 and wr_drop > 0.10:
+        return "PARAMETERS"
+    return "UNCLEAR"
