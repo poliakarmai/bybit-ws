@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-08-04 (v10 — 123 закрытых сделок, PF=0.75, WR=57%. SHORT avg_loss=$12.58 — требуется доработка)
+> Обновлено: 2026-08-08 (v11 — Фаза 9 завершена: SHORT-оптимизация + World Model 33.1% + Android MVP + JWT)
 
 ## Что это
 
