@@ -428,14 +428,55 @@ class RPCHandler(BaseHTTPRequestHandler):
         pass  # тихий режим
 
     _OLD_TOKENS = {}  # {old_token: expires_at}
+    _JWT_SECRET = None  # cached JWT secret
+    _JWT_ALGORITHM = 'HS256'
+
+    @classmethod
+    def _get_jwt_secret(cls) -> str:
+        if cls._JWT_SECRET is not None:
+            return cls._JWT_SECRET
+        cfg = _get_config()
+        secret = getattr(cfg, 'rpc', None)
+        if secret:
+            secret = getattr(secret, 'jwt_secret', '')
+            if secret and not secret.startswith('${'):
+                cls._JWT_SECRET = secret
+                return secret
+        # Fallback: derive from auth token
+        cls._JWT_SECRET = _get_auth_token() + '-jwt'
+        return cls._JWT_SECRET
+
+    @classmethod
+    def _verify_jwt(cls, token: str) -> dict | None:
+        """Verify JWT token. Returns payload dict or None if invalid."""
+        try:
+            import jwt as pyjwt
+            secret = cls._get_jwt_secret()
+            payload = pyjwt.decode(token, secret, algorithms=[cls._JWT_ALGORITHM])
+            # Check expiry
+            exp = payload.get('exp', 0)
+            if exp and time.time() > exp:
+                return None
+            return payload
+        except Exception:
+            return None
 
     def _check_auth(self, require_emergency: bool = False) -> bool:
-        """Проверить Bearer-токен. Если require_emergency=True — также X-Emergency-Auth."""
+        """Проверить Bearer-токен (legacy UUID) или JWT. Если require_emergency=True — также X-Emergency-Auth."""
+        auth = self.headers.get('Authorization', '')
+        provided = auth.replace('Bearer ', '', 1) if auth.startswith('Bearer ') else ''
+        if not provided:
+            return False
+
+        # Try JWT first
+        jwt_payload = self._verify_jwt(provided)
+        if jwt_payload is not None:
+            return True
+
+        # Legacy UUID token
         token = _get_auth_token()
         if not token:
             return False
-        auth = self.headers.get('Authorization', '')
-        provided = auth.replace('Bearer ', '', 1) if auth.startswith('Bearer ') else ''
         if provided == token:
             pass  # ok
         elif provided and provided in self._OLD_TOKENS and time.time() < self._OLD_TOKENS[provided]:
@@ -606,6 +647,10 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_logs(body)
         elif path == "/reset-token":
             self._handle_reset_token(body)
+        elif path == "/set-tp":
+            self._handle_set_tp(body)
+        elif path == "/generate-jwt":
+            self._handle_generate_jwt(body)
         # ── Paper Trading ──
         elif path == "/paper/balance":
             self._handle_paper_balance()
@@ -1734,6 +1779,65 @@ class RPCHandler(BaseHTTPRequestHandler):
             })
         except Exception as e:
             _error(self, 'Token reset failed', str(e), 500)
+
+    def _handle_set_tp(self, body: dict):
+        """POST /set-tp — установить Take Profit для позиции."""
+        symbol = body.get('symbol', '')
+        tp_price = float(body.get('tp_price', 0))
+        if not symbol or tp_price <= 0:
+            _json_response(self, {'success': False, 'error': 'symbol and tp_price required'}, 400)
+            return
+
+        # Fetch current position
+        from .main_async import get_positions
+        positions = get_positions() if callable(get_positions) else {}
+        pos = positions.get(symbol)
+        if not pos:
+            _json_response(self, {'success': False, 'error': f'No position for {symbol}'}, 404)
+            return
+
+        side = pos.get('side', 'Buy')
+        idx = pos.get('positionIdx', 0)
+        qty = float(pos.get('size', 0))
+        if qty <= 0:
+            _json_response(self, {'success': False, 'error': 'Position has 0 size'}, 400)
+            return
+
+        try:
+            from .api import place_take_profit
+            result = place_take_profit(symbol, idx, side, qty, tp_price)
+            _json_response(self, {
+                'success': True,
+                'symbol': symbol,
+                'tp_price': tp_price,
+                'side': side,
+            })
+        except Exception as e:
+            _json_response(self, {'success': False, 'error': str(e)}, 500)
+
+    def _handle_generate_jwt(self, body: dict):
+        """POST /generate-jwt — сгенерировать JWT токен для Android-приложения."""
+        try:
+            import jwt as pyjwt
+        except ImportError:
+            _json_response(self, {'success': False, 'error': 'PyJWT not installed. Run: pip install pyjwt'}, 500)
+            return
+
+        secret = self._get_jwt_secret()
+        expiry_hours = int(body.get('expiry_hours', 24 * 30))  # default 30 days
+        payload = {
+            'sub': 'android-app',
+            'iat': int(time.time()),
+            'exp': int(time.time() + expiry_hours * 3600),
+            'scope': 'rpc',
+        }
+        token = pyjwt.encode(payload, secret, algorithm=self._JWT_ALGORITHM)
+        _json_response(self, {
+            'success': True,
+            'token': token,
+            'expires_in_seconds': expiry_hours * 3600,
+            'algorithm': self._JWT_ALGORITHM,
+        })
 
     # ═══════════════════════════════════════════════════════════════
     # Emergency handlers
