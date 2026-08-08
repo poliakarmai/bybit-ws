@@ -42,3 +42,6 @@ graphify-out/
 .understand-anything/
 .venv/
 state.db
+.repowise/
+.claude/
+.mcp.json
