@@ -1,6 +1,13 @@
-"""Авто-SHORT по перегреву (BB Daily > 85%) + шлак-режим (дневной рост ≥80%).
+"""
+Авто-SHORT по перегреву (BB Daily > 85%) + шлак-режим (дневной рост ≥80%).
 
 Зеркало LONG-стратегии: когда цена перегрета — шорт с возвратом к Middle BB.
+
+Фаза 9 (08.08.2026) — SHORT-оптимизация:
+- max_loss_pct: 15% → 10% (раньше закрываем убыточные)
+- max_hold_hours: 48 → 24 (не даём гнить)
+- Добавлен time_based_sl: 12ч в убытке → market close
+- Junk SL: 15% → 10% от маржи (жёстче лимит)
 
 Правила:
 - BB Daily > 85% (цена у Upper или выше)
@@ -11,12 +18,13 @@ Tier A/B (обычный режим):
 - Плечо 3x, маржа $10
 - SL: +5% от входа (через trading-stop)
 - TP: Middle BB (через takeProfit в trading-stop)
+- ⚡ NEW: time_based_sl — если позиция в убытке >12ч → market close
 
-Tier C/D — шлак-режим (NEW):
+Tier C/D — шлак-режим (Фаза 9 ужесточение):
 - Дневной рост ≥ 80% — обязательный фильтр
 - БЕЗ стоп-лосса (шлак слишком волатильный, SL только жрёт маржу)
-- max_loss_pct: 15% — hard market-close при убытке >15% маржи
-- max_hold_hours: 48 — авто-закрытие через 48ч
+- max_loss_pct: 15% → 10% — hard market-close при убытке >10% маржи
+- max_hold_hours: 48 → 24 — авто-закрытие через 24ч
 - DCA-лесенка: +100% и +120% от входа (лимитные Sell)
 - TP: Middle BB (reduceOnly limit Buy)
 
@@ -48,8 +56,8 @@ def _get_bb_ws(symbol, interval='D'):
                 bb = ws_get_bb(symbol, interval)
                 if bb and bb.get('upper', 0) > 0:
                     return bb
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'WS BB fallback to REST for {symbol}: {e}')
     return get_bb_data(symbol, interval)
 from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
@@ -730,8 +738,9 @@ def check_junk_dca(positions):
         JUNK_DCA_LEVELS = getattr(junk_cfg, 'dca_levels', [1.0, 1.2])
     else:
         JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
-    MAX_LOSS_PCT = getattr(junk_cfg, 'max_loss_pct', 15) / 100 if junk_cfg is not None else 0.15
-    MAX_HOLD_HOURS = getattr(junk_cfg, 'max_hold_hours', 48) if junk_cfg is not None else 48
+    MAX_LOSS_PCT = getattr(junk_cfg, 'max_loss_pct', 10) / 100 if junk_cfg is not None else 0.10  # Фаза 9: 15→10
+    MAX_HOLD_HOURS = getattr(junk_cfg, 'max_hold_hours', 24) if junk_cfg is not None else 24  # Фаза 9: 48→24
+    TIME_SL_HOURS = getattr(junk_cfg, 'time_sl_hours', 12) if junk_cfg is not None else 12  # Фаза 9: time-based SL
 
     state = _load_state()
     now = time.time()
@@ -801,9 +810,26 @@ def check_junk_dca(positions):
                     log_event(f'⚠️ Junk-STOP {sym}: ошибка — {e}')
                 continue
 
-        # ── Max hold hours check ──
+        # ── Time-based SL (Фаза 9): позиция в убытке > TIME_SL_HOURS → закрыть ──
         entry_ts = entry.get('last_short_ts', entry.get('entered_ts', 0))
-        if entry_ts > 0:
+        if entry_ts > 0 and unrealised_pnl < 0:
+            held_hours = (now - entry_ts) / 3600
+            if held_hours > TIME_SL_HOURS:
+                try:
+                    _close_junk_position(sym, pos)
+                    msg = (f'⏱ TIME-SL JUNK {sym}: {held_hours:.0f}ч в убытке > {TIME_SL_HOURS}ч | '
+                           f'вход ${entry_price:.6f} → выход ${mark_price:.6f} | PnL ${unrealised_pnl:+.2f}')
+                    add_alert('STOP', msg)
+                    log_event(msg)
+                    actions.append(sym)
+                    del state[sym]
+                    _save_state(state)
+                except Exception as e:
+                    log_event(f'⚠️ Time-SL {sym}: ошибка — {e}')
+                continue
+
+        # ── Max hold hours check ──
+        if entry_ts > 0 and unrealised_pnl <= 0:
             held_hours = (now - entry_ts) / 3600
             if held_hours > MAX_HOLD_HOURS and unrealised_pnl <= 0:
                 try:
@@ -861,6 +887,56 @@ def check_junk_dca(positions):
                     log_event(msg)
             except Exception as e:
                 log_event(f'⚠️ Junk-DCA {sym}: исключение — {e}')
+
+    return actions
+
+
+# ── Time-based SL for regular SHORT positions (Фаза 9) ──
+
+def check_short_time_sl(positions: dict) -> list[str]:
+    """
+    Закрыть SHORT-позиции которые висят в убытке > N часов.
+    Фаза 9: ключевая причина avg_loss=$12.58 — позиции гниют.
+    """
+    import time as _time
+    from .alerts import log_event as _log, add_alert as _alert
+    from .api import place_order as _close_order
+
+    SHORT_TIME_SL_HOURS = 12  # закрыть если >12ч в убытке
+    actions = []
+    now = _time.time()
+
+    for sym, pos in positions.items():
+        if not isinstance(pos, dict) or pos.get('side') != 'Sell':
+            continue
+
+        unrealised = pos.get('unrealisedPnl', 0)
+        if unrealised >= 0:
+            continue  # в прибыли — не трогаем
+
+        # Check entry timestamp
+        entry_ts = pos.get('createdTime', 0)
+        if isinstance(entry_ts, str):
+            try:
+                entry_ts = int(entry_ts)
+            except ValueError:
+                continue
+        if not entry_ts:
+            continue
+
+        held_hours = (now - entry_ts / 1000) / 3600 if entry_ts > 1e10 else (now - entry_ts) / 3600
+
+        if held_hours > SHORT_TIME_SL_HOURS:
+            try:
+                # Market close: Sell (close SHORT) = Buy side
+                _close_order(sym, 'Buy', 'Market', pos.get('size', 0), reduce_only=True, position_idx=pos.get('positionIdx', 0))
+                msg = (f'⏱ TIME-SL SHORT {sym}: {held_hours:.0f}ч в убытке > {SHORT_TIME_SL_HOURS}ч | '
+                       f'PnL ${unrealised:+.2f} | причина: SHORT-оптимизация Фаза 9')
+                _alert('STOP', msg)
+                _log(msg)
+                actions.append(sym)
+            except Exception as e:
+                _log(f'⚠️ Time-SL SHORT {sym}: ошибка — {e}')
 
     return actions
 

@@ -57,7 +57,7 @@ from .funding_rotation import check_funding_rotation
 from .dca import check_dca
 from .reporting import should_send_summary, send_summary, check_profit_triggers
 from .auto_entry import auto_entry_scan, record_sl_hit
-from .auto_short import check_auto_short, check_junk_dca
+from .auto_short import check_auto_short, check_junk_dca, check_short_time_sl
 from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .margin_alerts import check_margin_utilization
 from .funding_entry import check_funding_signals, execute_funding_entry
@@ -387,6 +387,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     from .rpc import rpc_state
     if not rpc_state.get("paused"):
         tasks.append(run_in_thread(check_auto_short, positions or {}))
+        tasks.append(run_in_thread(check_short_time_sl, positions or {}))  # Фаза 9
 
     # Корреляции
     tasks.append(run_in_thread(check_correlation, positions))

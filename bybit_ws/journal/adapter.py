@@ -30,7 +30,7 @@ def load_from_sqlite(db_path: str | Path = DEFAULT_DB) -> dict[str, Any]:
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT * FROM trade_history WHERE closed_at IS NOT NULL ORDER BY entry_at"
+        "SELECT * FROM trade_history WHERE closed_at IS NOT NULL AND strategy != 'imported' ORDER BY entry_at"  # Фаза 9: exclude imported
     ).fetchall()
     conn.close()
 
