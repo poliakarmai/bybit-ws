@@ -1,13 +1,15 @@
 # ROADMAP — bybit-ws
 
-> План развития. Версия: 8.2. Обновлено: 2026-08-04.
+> План развития. Версия: 11.0. Обновлено: 2026-08-09.
 > Актуальный roadmap также в Obsidian: `hermes/bybit-ws-roadmap.md`.
 
-## Текущий статус (v8.2)
+## Текущий статус (v11)
 
 | Компонент | Статус |
 |-----------|--------|
 | Bollinger Grid LONG/SHORT | ✅ prod |
+| SHORT-оптимизация: World Model 33.1% + ML-фильтр | ✅ prod |
+| Android MVP: JWT + /set-tp + /generate-jwt | ✅ prod |
 | ATR-adaptive SL + ATR-based TP (3 уровня) | ✅ prod |
 | 7 фильтров входа (MTF, Orderbook, Volume, Entry Judge, Correlation, Post-trade, Risk) | ✅ prod |
 | LSTM Market Regime (82.3% точность, авто LONG/SHORT) | ✅ prod |

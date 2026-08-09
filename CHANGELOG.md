@@ -7,6 +7,25 @@
 
 ---
 
+## [11.0] — 2026-08-08
+
+### Фаза 9 — SHORT-оптимизация
+- **World Model**: точность 22.3% → 33.1% (+48%), добавлен в SHORT-скоринг
+- **SHORT ML-фильтр**: BB% порог 95→100, WM score порог ≥3, MTF-скидка TRENDING_DOWN
+- **SHORT перекос BB%**: <30% = 0 баллов (защита от входа на падении)
+- **Android MVP**: `/set-tp` эндпоинт + `/generate-jwt` для серверной авторизации
+
+### SHORT-результаты (paper trade)
+- BTC/ETH top-40, 3 месяца: WR 40% → 52%, PF 0.56 → 0.92, Sharpe -0.6 → -0.1
+- SOL/AVAX (волатильные): WR 43%, PF 1.12, Sharpe +0.27
+
+### Техническое
+- JWT auth для Android RPC-клиента
+- `gsc_audit` интеграция (pre-commit + CI)
+- gitignore: `.repowise/`, `.claude/`, `.mcp.json`
+
+---
+
 ## [10.0] — 2026-08-04
 
 ### Self-Learning v10 (20+ механик)
