@@ -9,6 +9,11 @@
 - Добавлен time_based_sl: 12ч в убытке → market close
 - Junk SL: 15% → 10% от маржи (жёстче лимит)
 
+Фаза 9.1 (15.08.2026) — риск-фикс (дисбаланс avg_loss 2.7× avg_win):
+- Junk-шорт: БЫЛО без SL + DCA-мартингейл на +100%/+120% → хвостовые убытки (STX -$104)
+- СТАЛО: жёсткий SL +7% при входе (trading-stop), DCA-лесенка ОТКЛЮЧЕНА
+- Причина: усреднение шорта против тренда = умножение убытка. SL режет хвост.
+
 Правила:
 - BB Daily > 85% (цена у Upper или выше)
 - Все Tier'ы (S/A/B/C/D) — шортим любой перегрев
@@ -20,12 +25,12 @@ Tier A/B (обычный режим):
 - TP: Middle BB (через takeProfit в trading-stop)
 - ⚡ NEW: time_based_sl — если позиция в убытке >12ч → market close
 
-Tier C/D — шлак-режим (Фаза 9 ужесточение):
+Tier C/D — шлак-режим (Фаза 9.1):
 - Дневной рост ≥ 80% — обязательный фильтр
-- БЕЗ стоп-лосса (шлак слишком волатильный, SL только жрёт маржу)
-- max_loss_pct: 15% → 10% — hard market-close при убытке >10% маржи
-- max_hold_hours: 48 → 24 — авто-закрытие через 24ч
-- DCA-лесенка: +100% и +120% от входа (лимитные Sell)
+- SL: +7% от входа (trading-stop, ставится сразу — Фаза 9.1)
+- DCA-лесенка ОТКЛЮЧЕНА (был мартингейл +100%/+120%)
+- max_loss_pct: 10% — hard market-close при убытке >10% маржи
+- max_hold_hours: 24 — авто-закрытие через 24ч
 - TP: Middle BB (reduceOnly limit Buy)
 
 Общие:
@@ -346,11 +351,6 @@ def check_auto_short(positions):
         JUNK_PUMP_THRESHOLD = getattr(JUNK_PUMP_THRESHOLD, 'daily_pump_threshold', 0.80)
     else:
         JUNK_PUMP_THRESHOLD = getattr(cfg.strategy.short, 'junk_daily_pump_threshold', 0.80)
-    JUNK_DCA_LEVELS = getattr(cfg.strategy, 'junk', None)
-    if JUNK_DCA_LEVELS is not None:
-        JUNK_DCA_LEVELS = getattr(JUNK_DCA_LEVELS, 'dca_levels', [1.0, 1.2])
-    else:
-        JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
 
     state = _load_state()
     now = time.time()
@@ -607,55 +607,37 @@ def check_auto_short(positions):
                 elif c == 2: mtf_bonus += ' +15%'
 
             if is_junk:
-                # ── Шлак: без SL, с DCA-лесенкой ──
+                # ── Фаза 9.1 риск-фикс: junk-шорт С SL при входе, БЕЗ DCA-мартингейла ──
+                # Было: no_sl=True + DCA на +100%/+120% → хвостовые убытки (STX -$104, GRAM -$44).
+                # Теперь: жёсткий SL +7% при входе. Усреднение против тренда отключено.
                 chg_pct = float(t.get('price24hPcnt', 0) or 0)
 
-                # TP отдельным reduceOnly лимитным Buy
-                if tp_price < price:
-                    bybit('POST', '/v5/order/create', {
-                        'category': 'linear',
-                        'symbol': sym,
-                        'side': 'Buy',
-                        'orderType': 'Limit',
-                        'qty': str(qty),
-                        'price': str(tp_price),
-                        'positionIdx': 0,
-                        'timeInForce': 'GTC',
-                        'reduceOnly': True,
-                    })
+                # SL + TP через trading-stop (атомарно, SL ставится сразу)
+                sl_price = _round_to_tick(price * (1 + SL_PCT_JUNK), sym)
+                ts_body = {
+                    'category': 'linear',
+                    'symbol': sym,
+                    'positionIdx': 0,
+                    'stopLoss': str(sl_price),
+                    'slTriggerBy': 'MarkPrice',
+                }
+                if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
+                    ts_body['takeProfit'] = str(tp_price)
+                    ts_body['tpTriggerBy'] = 'MarkPrice'
+                bybit('POST', '/v5/position/trading-stop', ts_body)
 
-                # DCA-лимитки: Sell на +100% и +120% от входа
-                dca_placed = []
-                for dca_mult in JUNK_DCA_LEVELS:
-                    dca_price = _round_to_tick(price * (1 + dca_mult), sym)
-                    dca_qty = qty  # такой же размер
-                    dca_order = bybit('POST', '/v5/order/create', {
-                        'category': 'linear',
-                        'symbol': sym,
-                        'side': 'Sell',
-                        'orderType': 'Limit',
-                        'qty': str(dca_qty),
-                        'price': str(dca_price),
-                        'positionIdx': 0,
-                        'timeInForce': 'GTC',
-                    })
-                    if dca_order.get('retCode') == 0:
-                        dca_placed.append({'mult': dca_mult, 'price': dca_price, 'qty': dca_qty})
-
-                state_entry['no_sl'] = True
+                state_entry['no_sl'] = False
+                state_entry['sl'] = sl_price
                 state_entry['tp'] = tp_price
-                state_entry['dca_levels'] = JUNK_DCA_LEVELS
-                state_entry['dca_placed'] = dca_placed
                 state_entry['pump_pct'] = round(chg_pct * 100, 1)
-                # Хард-SL на +25% — защита если DCA не сработает
-                state_entry['hard_sl'] = round(price * 1.25, 6)
+                state_entry['dca_levels'] = []      # мартингейл отключён (риск-фикс)
+                state_entry['dca_placed'] = []
 
                 state[sym] = state_entry
                 _save_state(state)
 
-                dca_str = ', '.join(f'+{d["mult"]*100:.0f}% @ ${d["price"]:.4f}' for d in dca_placed)
                 msg = (f'🔴 SHORT JUNK {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
-                       f'score={short_score} памп +{chg_pct*100:.0f}% | TP ${tp_price:.6f} | DCA: {dca_str}{mtf_bonus}')
+                       f'score={short_score} памп +{chg_pct*100:.0f}% | SL ${sl_price:.4f} (+{SL_PCT_JUNK*100:.0f}%) | TP ${tp_price:.6f}{mtf_bonus}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
                 log_event(msg)
@@ -729,15 +711,8 @@ def check_junk_dca(positions):
 
     Вызывается каждые 10 циклов вместе с check_auto_short."""
     cfg = Config()
-    SHORT_LEVERAGE = cfg.strategy.short.leverage
-    # Динамическая маржа для DCA (шлак — score 5.5)
-    short_margin = margin_for_strategy('short', score=5.5)
     # Читаем junk-параметры из strategy.junk (с фоллбеком на старые ключи strategy.short)
     junk_cfg = getattr(cfg.strategy, 'junk', None)
-    if junk_cfg is not None:
-        JUNK_DCA_LEVELS = getattr(junk_cfg, 'dca_levels', [1.0, 1.2])
-    else:
-        JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
     MAX_LOSS_PCT = getattr(junk_cfg, 'max_loss_pct', 10) / 100 if junk_cfg is not None else 0.10  # Фаза 9: 15→10
     MAX_HOLD_HOURS = getattr(junk_cfg, 'max_hold_hours', 24) if junk_cfg is not None else 24  # Фаза 9: 48→24
     TIME_SL_HOURS = getattr(junk_cfg, 'time_sl_hours', 12) if junk_cfg is not None else 12  # Фаза 9: time-based SL
@@ -845,48 +820,10 @@ def check_junk_dca(positions):
                     log_event(f'⚠️ Junk-Timeout {sym}: ошибка — {e}')
                 continue
 
-        # ── DCA levels ──
-        dca_placed = entry.get('dca_placed', [])
-        placed_multipliers = {d['mult'] for d in dca_placed}
-
-        for dca_mult in JUNK_DCA_LEVELS:
-            if dca_mult in placed_multipliers:
-                continue
-
-            dca_trigger = entry_price * (1 + dca_mult)
-            if mark_price < dca_trigger:
-                continue
-
-            usdt_qty = short_margin * SHORT_LEVERAGE
-            qty_step = _get_lot_step(sym)
-            dca_qty = math.ceil(usdt_qty / mark_price / qty_step) * qty_step
-            if dca_qty <= 0:
-                continue
-
-            dca_price = _round_to_tick(mark_price, sym)
-            try:
-                dca_order = bybit('POST', '/v5/order/create', {
-                    'category': 'linear',
-                    'symbol': sym,
-                    'side': 'Sell',
-                    'orderType': 'Limit',
-                    'qty': str(dca_qty),
-                    'price': str(dca_price),
-                    'positionIdx': 0,
-                    'timeInForce': 'GTC',
-                })
-                if dca_order.get('retCode') == 0:
-                    dca_placed.append({'mult': dca_mult, 'price': dca_price, 'qty': dca_qty, 'ts': now})
-                    entry['dca_placed'] = dca_placed
-                    _save_state(state)
-
-                    msg = (f'🔴 DCA JUNK {sym}: +{dca_mult*100:.0f}% @ ${dca_price:.4f} ×{dca_qty} | '
-                           f'вход ${entry_price:.6f} → сейчас ${mark_price:.6f}')
-                    add_alert('ENTRY', msg)
-                    actions.append(sym)
-                    log_event(msg)
-            except Exception as e:
-                log_event(f'⚠️ Junk-DCA {sym}: исключение — {e}')
+        # ── DCA levels — ОТКЛЮЧЕНЫ (Фаза 9.1 риск-фикс) ──
+        # Мартингейл на шорте против тренда = источник хвостовых убытков.
+        # Позиция теперь закрывается по SL +7%, а не наращивается DCA.
+        # DCA-блок удалён; см. Фазу 9.1 в check_auto_short.
 
     return actions
 
