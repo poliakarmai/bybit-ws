@@ -51,7 +51,7 @@ from .unified_sl import manage_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
 from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, tight_trailing_sl, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
-from .overbought import check_overbought, rotate_watchlist
+from .overbought import check_overbought, check_overbought_async, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl
 from .funding_rotation import check_funding_rotation
 from .dca import check_dca
@@ -396,7 +396,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     if positions:
         # Запускаем все независимые проверки параллельно (timeout 10s вместо 25s)
         pump_tasks = [
-            run_in_thread(check_overbought, positions, timeout=10),
+            check_overbought_async(positions),
             run_in_thread(check_pumps, positions, timeout=10),
             run_in_thread(check_weekly_pumps, timeout=10),
             run_in_thread(check_funding_signals, positions, timeout=10),

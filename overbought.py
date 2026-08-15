@@ -2,7 +2,7 @@
 import json, os, time
 from . import safe_run
 from . import BYBIT_CLI, DATA_DIR, SHORT_ALERT_LAST, SHORT_ALERT_COOLDOWN, WATCHLIST_UPDATED_FILE, _save_short_alerts
-from .api import get_bb_data
+from .api import get_bb_data, get_bb_data_async
 
 # Статический watchlist (fallback)
 STATIC_WATCHLIST = [
@@ -66,14 +66,10 @@ def rotate_watchlist():
     except Exception as e:
         log_event(f'⚠️ overbought: {e}')
 
-def check_overbought(positions=None):
-    """Проверить перегретые монеты (BB > 75%).
-    positions: dict символ→данные из памяти (fetch_positions), чтобы не дёргать subprocess.
-    """
+def _overbought_alerts(positions, watchlist, bb_results):
+    """Общая логика SHORT-алертов из пар (sym, bb_dict)."""
     alerts = []
-    watchlist = _load_watchlist()
-    for sym in watchlist:
-        bb = get_bb_data(sym, 'D')
+    for sym, bb in zip(watchlist, bb_results):
         if not bb:
             continue
         bb_pos = bb['bb_pos']
@@ -90,3 +86,29 @@ def check_overbought(positions=None):
             _save_short_alerts()
             alerts.append(f"🔥 {sym} на {bb_pos:.0f}% BB (${bb['cur']:.4f}, Upper ${bb['upper']:.4f}) — перегрев, кандидат на SHORT")
     return alerts
+
+
+def check_overbought(positions=None):
+    """Проверить перегретые монеты (BB > 75%). Синхронно (legacy main.py / heavy_cycle)."""
+    watchlist = _load_watchlist()
+    bb_results = [get_bb_data(sym, 'D') for sym in watchlist]
+    return _overbought_alerts(positions, watchlist, bb_results)
+
+
+async def check_overbought_async(positions=None):
+    """Проверить перегретые монеты (BB > 75%). Async: параллельные запросы.
+
+    Последовательный вызов get_bb_data по 27-40 монетам не укладывался в
+    timeout=10s (main_async.py pump_tasks) → таймаут каждый цикл, SHORT-алерты
+    на перегрев не генерировались. Здесь gather по всем монетам — одна сетевая
+    задержка вместо N, результат укладывается в секунды.
+    """
+    import asyncio
+    watchlist = _load_watchlist()
+    bb_results = await asyncio.gather(
+        *(get_bb_data_async(sym, 'D') for sym in watchlist),
+        return_exceptions=True
+    )
+    # gather с return_exceptions=True может вернуть исключения вместо dict
+    bb_results = [None if isinstance(r, BaseException) else r for r in bb_results]
+    return _overbought_alerts(positions, watchlist, bb_results)
