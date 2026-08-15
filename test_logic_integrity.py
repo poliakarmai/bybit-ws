@@ -91,7 +91,7 @@ def test_key_strategies_are_called():
         ('check_auto_short', 'auto_short', 'Auto-SHORT'),
         ('check_correlation', 'correlation', 'Корреляции'),
         ('check_pumps', 'pump_detect', 'Пампы'),
-        ('check_overbought', 'overbought', 'Перекупленность'),
+        ('check_overbought_async', 'overbought', 'Перекупленность'),
         ('check_dca', 'dca', 'DCA'),
         ('check_partial_tp', 'partial_tp', 'Partial TP'),
         ('auto_entry_scan', 'auto_entry', 'Auto-Entry LONG'),
