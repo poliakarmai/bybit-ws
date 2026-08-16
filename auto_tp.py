@@ -187,7 +187,9 @@ def auto_take_profit(positions, orders, skip_syms=None):
             continue
 
         bb = get_bb_data(sym, 'D')
-        rounding = 0 if pos_size >= 10 else 1
+        lot_step = _get_lot_step(sym)
+        _s = str(lot_step)
+        lot_decimals = len(_s.split('.')[-1]) if '.' in _s else 0
 
         # ── BB-based TP (существующая логика) ──
         bb_used = False
@@ -196,10 +198,10 @@ def auto_take_profit(positions, orders, skip_syms=None):
             near_pct, far_pct = _get_atr_split(sym)
 
             if side == 'Buy':
-                need_mid = round(pos_size * near_pct, rounding)
-                need_far = round(pos_size * far_pct, rounding)
+                need_mid = _round_qty(pos_size * near_pct, lot_step, lot_decimals)
+                need_far = _round_qty(pos_size * far_pct, lot_step, lot_decimals)
                 if need_mid < 0.5:
-                    need_far = round(pos_size, rounding)
+                    need_far = _round_qty(pos_size, lot_step, lot_decimals)
                     need_mid = 0
 
                 existing = existing_tp.get(sym, [])
@@ -207,21 +209,21 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 has_far = sum(q for q, pr in existing if abs(pr - upper) / upper < 0.02) if upper > 0 else 0
 
                 if need_mid > 0 and middle > cur and has_mid < need_mid * 0.9:
-                    gap = round(need_mid - has_mid, rounding)
+                    gap = _round_qty(need_mid - has_mid, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
                         bb_used = True
                 if upper > cur and has_far < need_far * 0.9:
-                    gap = round(need_far - has_far, rounding)
+                    gap = _round_qty(need_far - has_far, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, upper, pos_size))
                         bb_used = True
 
             elif side == 'Sell':
-                need_mid = round(pos_size * near_pct, rounding)
-                need_far = round(pos_size * far_pct, rounding)
+                need_mid = _round_qty(pos_size * near_pct, lot_step, lot_decimals)
+                need_far = _round_qty(pos_size * far_pct, lot_step, lot_decimals)
                 if need_mid < 0.5:
-                    need_far = round(pos_size, rounding)
+                    need_far = _round_qty(pos_size, lot_step, lot_decimals)
                     need_mid = 0
 
                 existing = existing_tp.get(sym, [])
@@ -229,12 +231,12 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 has_lo = sum(q for q, pr in existing if abs(pr - lower) / lower < 0.02) if lower > 0 else 0
 
                 if need_mid > 0 and middle < cur and has_mid < need_mid * 0.9:
-                    gap = round(need_mid - has_mid, rounding)
+                    gap = _round_qty(need_mid - has_mid, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
                         bb_used = True
                 if lower > 0 and lower < cur and has_lo < need_far * 0.9:
-                    gap = round(need_far - has_lo, rounding)
+                    gap = _round_qty(need_far - has_lo, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, lower, pos_size))
                         bb_used = True
@@ -250,8 +252,12 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 if uncovered >= 0.5:
                     tp_levels, regime = _get_regime_tp_levels()
                     for k, split in zip(tp_levels, ATR_TP_SPLITS):
-                        qty = round(uncovered * split, rounding)
-                        if qty < 0.5:
+                        raw_qty = uncovered * split
+                        qty = math.floor(raw_qty / lot_step) * lot_step
+                        qty = round(qty, lot_decimals)
+                        if qty < max(0.5, lot_step):
+                            if qty < lot_step:
+                                log_event(f'🔇 TP {sym}: partial qty {raw_qty:.4f} < qtyStep {lot_step}, пропускаю уровень')
                             continue
                         if side == 'Buy':
                             tp_price = entry + k * atr
@@ -281,6 +287,13 @@ def _get_lot_step(sym):
     except Exception:
         pass
     return 0.001
+
+
+def _round_qty(qty, lot_step, decimals):
+    """Округлить размер к шагу лота вниз (не превысить uncovered)."""
+    q = math.floor(qty / lot_step) * lot_step
+    return round(q, decimals)
+
 
 def apply_auto_tp(actions):
     """Применить auto-TP с retry backoff."""
