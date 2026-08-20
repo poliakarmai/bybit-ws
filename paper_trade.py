@@ -49,74 +49,59 @@ class PaperExchange:
         self.equity = initial_balance
         self.position: Optional[dict] = None
         self.trades: list[dict] = []
-        self.idx = 0
         self._commission_paid = 0.0
 
-    @property
-    def current_candle(self) -> dict | None:
-        if self.idx < len(self.klines):
-            return self.klines[self.idx]
-        return None
-
-    def advance(self):
-        """Перейти к следующей свече, проверить SL/TP."""
-        c = self.current_candle
-        if not c:
+    def advance(self, candle: dict):
+        """Проверить SL/TP существующей позиции по свече, обновить equity."""
+        pos = self.position
+        if not pos:
             return
 
-        pos = self.position
-        if pos:
-            high, low, close = c['high'], c['low'], c['close']
-            # Проверка SL
+        high, low, close = candle['high'], candle['low'], candle['close']
+        # Проверка SL
+        if pos['side'] == 'Buy':
+            if low <= pos['sl']:
+                self._close_position(pos['sl'], 'SL', candle['open_time'])
+                return
+        else:
+            if high >= pos['sl']:
+                self._close_position(pos['sl'], 'SL', candle['open_time'])
+                return
+
+        # Проверка TP
+        if pos['tp']:
             if pos['side'] == 'Buy':
-                if low <= pos['sl']:
-                    self._close_position(pos['sl'], 'SL', c['open_time'])
+                if high >= pos['tp']:
+                    self._close_position(pos['tp'], 'TP', candle['open_time'])
                     return
             else:
-                if high >= pos['sl']:
-                    self._close_position(pos['sl'], 'SL', c['open_time'])
+                if low <= pos['tp']:
+                    self._close_position(pos['tp'], 'TP', candle['open_time'])
                     return
 
-            # Проверка TP
-            if pos['tp']:
-                if pos['side'] == 'Buy':
-                    if high >= pos['tp']:
-                        self._close_position(pos['tp'], 'TP', c['open_time'])
-                        return
-                else:
-                    if low <= pos['tp']:
-                        self._close_position(pos['tp'], 'TP', c['open_time'])
-                        return
-
-            # Обновление equity по close
-            self._update_equity(close)
-
-        self.idx += 1
+        # Обновление equity по close
+        self._update_equity(close)
 
     def open_long(self, price: float, sl: float, tp: float | None, qty: float, entry_time: int):
-        cost = qty * price * (1 + TAKER_FEE + SLIPPAGE)
-        if cost > self.balance:
-            return False
-
-        self.balance -= cost
+        entry_fee = qty * price * (TAKER_FEE + SLIPPAGE)
+        self.balance -= entry_fee
         self._commission_paid += qty * price * TAKER_FEE
         self.position = {
             'side': 'Buy', 'entry': price, 'qty': qty,
             'sl': sl, 'tp': tp, 'entry_time': entry_time
         }
+        self.equity = self.balance
         return True
 
     def open_short(self, price: float, sl: float, tp: float | None, qty: float, entry_time: int):
-        cost = qty * price * (1 + TAKER_FEE + SLIPPAGE)
-        if cost > self.balance:
-            return False
-
-        self.balance -= cost
+        entry_fee = qty * price * (TAKER_FEE + SLIPPAGE)
+        self.balance -= entry_fee
         self._commission_paid += qty * price * TAKER_FEE
         self.position = {
             'side': 'Sell', 'entry': price, 'qty': qty,
             'sl': sl, 'tp': tp, 'entry_time': entry_time
         }
+        self.equity = self.balance
         return True
 
     def _close_position(self, exit_price: float, reason: str, exit_time: int):
@@ -130,11 +115,11 @@ class PaperExchange:
         else:
             gross_pnl = qty * (entry - exit_price)
 
-        fee = qty * exit_price * TAKER_FEE
-        net_pnl = gross_pnl - fee - qty * entry * SLIPPAGE
+        exit_fee = qty * exit_price * TAKER_FEE
+        net_pnl = gross_pnl - exit_fee
 
-        self.balance += qty * exit_price * (1 - TAKER_FEE)
-        self._commission_paid += qty * exit_price * TAKER_FEE
+        self.balance += net_pnl
+        self._commission_paid += exit_fee
 
         pnl_pct = (net_pnl / (qty * entry)) * 100 if qty * entry > 0 else 0
         self.trades.append({
@@ -156,7 +141,7 @@ class PaperExchange:
             unrealized = qty * (current_price - entry)
         else:
             unrealized = qty * (entry - current_price)
-        self.equity = self.balance + unrealized - qty * current_price * TAKER_FEE
+        self.equity = self.balance + unrealized
 
 
 # ═══════════════════════════════════════════════════════════
@@ -293,10 +278,12 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
     """Запустить бэктест Bollinger Grid на исторических данных."""
     end_ms = int(time.time() * 1000)
     start_ms = int((time.time() - days * 86400) * 1000)
-    limit = min(days * 24, 200)
 
     if interval in ('60', '120', '240'):
-        limit = min(days * (1440 // int(interval)), 1000)
+        per_day = 1440 // int(interval)
+        limit = min(days * per_day, 1000)
+    else:
+        limit = min(days, 200)
 
     all_klines = []
     current = end_ms
@@ -311,9 +298,23 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
         if not batch:
             break
         all_klines = batch + all_klines
-        current = int(batch[0][0]) - 1
-        if len(batch) < 200:
+        oldest = int(batch[-1][0])  # Bybit отдаёт список DESC: последний элемент — самая старая свеча
+        current = oldest - 1
+        if len(batch) < min(limit, 200) or oldest <= start_ms:
             break
+
+    # Дедупликация + фильтр по start_ms (точный --days, без дублей)
+    seen: set = set()
+    deduped = []
+    for k in all_klines:
+        ts = int(k[0])
+        if ts < start_ms:
+            continue
+        if ts in seen:
+            continue
+        seen.add(ts)
+        deduped.append(k)
+    all_klines = deduped
 
     if not all_klines:
         raise ValueError(f'Нет свечей для {symbol}')
@@ -339,10 +340,10 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
 
     warmup = 50
     for i in range(warmup, len(klines)):
-        exchange.advance()
-        exchange.idx = max(exchange.idx, i)
+        k = klines[i]
+        exchange.advance(k)
 
-        closes.append(klines[i]['close'])
+        closes.append(k['close'])
 
         if exchange.position:
             equity_curve.append(exchange.equity)
@@ -353,7 +354,6 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
             equity_curve.append(exchange.equity)
             continue
 
-        k = klines[i]
         long_score = score_coin(bb, k['turnover'], closes, 'Buy')
         short_score = score_coin(bb, k['turnover'], closes, 'Sell')
 
@@ -374,9 +374,6 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
         risk_amount = exchange.balance * (risk_pct / 100)
         sl_distance = entry * DEFAULT_SL_PCT
         qty = risk_amount / sl_distance if sl_distance > 0 else 0
-        # Cap: не больше 50% баланса — одна позиция не должна съедать весь депозит
-        max_qty = exchange.balance * 0.50 / (entry * (1 + TAKER_FEE + SLIPPAGE))
-        qty = min(qty, max_qty)
 
         if best_side == 'Buy':
             sl = entry * (1 - DEFAULT_SL_PCT)
@@ -389,8 +386,8 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
 
         equity_curve.append(exchange.equity)
 
-    # Закрываем последнюю позицию
-    if exchange.position and exchange.idx < len(klines):
+    # Закрываем последнюю позицию по цене последней свечи (EOD)
+    if exchange.position:
         exchange._close_position(klines[-1]['close'], 'EOD', klines[-1]['open_time'])
 
     # Метрики
@@ -398,7 +395,7 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
     wins = [t for t in trades if t['pnl'] > 0]
     losses = [t for t in trades if t['pnl'] <= 0]
     win_rate = len(wins) / len(trades) * 100 if trades else 0
-    total_pnl = sum(t['pnl'] for t in trades)
+    total_pnl = exchange.equity - initial_balance
     total_pnl_pct = (exchange.equity / initial_balance - 1) * 100
 
     # Max drawdown
@@ -421,8 +418,8 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
         sharpe = 0
 
     # Profit factor
-    gross_profit = sum(t['pnl'] for t in wins)
-    gross_loss = abs(sum(t['pnl'] for t in losses))
+    gross_profit = sum(t['pnl_pct'] for t in wins)
+    gross_loss = abs(sum(t['pnl_pct'] for t in losses))
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
 
     avg_win = mean([t['pnl_pct'] for t in wins]) if wins else 0
