@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .analyzer import Trade, analyze
+from .analyzer import Trade, RoundTrip, analyze, analyze_from_roundtrips
 
 logger = logging.getLogger(__name__)
 
@@ -37,40 +37,51 @@ def load_from_sqlite(db_path: str | Path = DEFAULT_DB) -> dict[str, Any]:
     if not rows:
         return {"error": "Нет закрытых сделок в trade_history"}
 
-    trades = []
+    # Фаза 9.2 (FIFO-фикс): pnl и hold_hours уже посчитаны в колонках trade_history.
+    # Каждая строка — уже закрытый roundtrip. Пересчёт через pair_trades_fifo()
+    # ломается на перекрывающихся сделках одного символа (DCA / partial TP /
+    # исторические) и инвертирует знак PnL. Строим roundtrips напрямую из колонок.
+    rts = []
+    entry_trades = []
     skipped = 0
     for r in rows:
         try:
             side = "buy" if r["side"] == "Buy" else "sell"
-            trades.append(Trade(
+            pnl = float(r["pnl"] or 0)
+            entry_px = float(r["entry_price"] or 0)
+            exit_px = float(r["exit_price"] or 0)
+            size = float(r["size"] or 0)
+            cost = entry_px * size
+            rts.append(RoundTrip(
+                symbol=r["symbol"],
+                buy_ts=float(r["entry_at"] or 0),
+                sell_ts=float(r["closed_at"] or 0),
+                qty=size,
+                buy_price=entry_px,
+                sell_price=exit_px,
+                hold_hours=float(r["hold_hours"] or 0),
+                pnl=pnl,
+                pnl_pct=(pnl / cost) if cost else 0.0,
+            ))
+            # entry-сделки — только для bias-диагностик (chasing / anchoring)
+            entry_trades.append(Trade(
                 symbol=r["symbol"],
                 side=side,
-                quantity=float(r["size"]),
-                price=float(r["entry_price"]),
+                quantity=size,
+                price=entry_px,
                 fee=float(r["fees"] or 0),
-                timestamp=float(r["entry_at"]),
+                timestamp=float(r["entry_at"] or 0),
                 market="crypto",
                 order_id=str(r["id"]),
-            ))
-            # Добавляем виртуальную сделку-закрытие для FIFO-матчинга
-            trades.append(Trade(
-                symbol=r["symbol"],
-                side="sell" if side == "buy" else "buy",
-                quantity=float(r["size"]),
-                price=float(r["exit_price"]),
-                fee=float(r["fees"] or 0),
-                timestamp=float(r["closed_at"]),
-                market="crypto",
-                order_id=f"{r['id']}_close",
             ))
         except (TypeError, ValueError) as e:
             skipped += 1
             logger.warning("Skipping row %s: %s", r["id"], e)
 
-    if not trades:
+    if not rts:
         return {"error": f"Не удалось загрузить сделки (пропущено: {skipped})"}
 
-    result = analyze(trades)
+    result = analyze_from_roundtrips(rts, entry_trades)
     result["source"] = str(db)
     result["total_db_rows"] = len(rows)
     result["skipped"] = skipped
