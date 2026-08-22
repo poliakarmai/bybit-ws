@@ -344,6 +344,7 @@ def check_auto_short(positions):
     SL_PCT = cfg.strategy.short.sl_tier_ab
     SL_PCT_JUNK = cfg.strategy.short.sl_tier_cd
     MAX_SHORTS = cfg.strategy.short.max_positions
+    SHORT_MIN_SCORE = getattr(cfg.strategy.short, 'min_score', 40)
     COOLDOWN = cfg.strategy.short.cooldown_seconds
     ENTRY_OFFSET = cfg.strategy.short.entry_offset
     JUNK_PUMP_THRESHOLD = getattr(cfg.strategy, 'junk', None)
@@ -460,6 +461,9 @@ def check_auto_short(positions):
         # ── Фаза 5.7: 9-метричный SHORT-скоринг ──
         short_sc = short_score_coin(sym, bb, t, is_junk)
         short_score = short_sc['score'] if short_sc else 35  # fallback: средний скор
+        # ── Тормоз overtrading: вход только при высоком 9-метричном скоре ──
+        if short_score < SHORT_MIN_SCORE:
+            continue
         normalized_short = min(10, max(5, short_score / 5))  # 25→5, 50→10
         short_margin = margin_for_strategy('short', score=normalized_short)
         # ── Фаза 4.3.6: MTF-конфлюенс → бонус к позиции ──

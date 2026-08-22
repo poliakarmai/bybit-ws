@@ -60,6 +60,7 @@ _DEFAULT_STRATEGY_SHORT = {
     'sl_tier_cd': 0.07,
     'bb_threshold': 85,
     'max_positions': 3,
+    'min_score': 40,       # мин 9-метричный скор для входа (тормоз overtrading)
     'cooldown_seconds': 7200,
     'max_short_pct': 20,       # макс % шортов от всех позиций
     'max_hold_hours': 72,      # авто-закрытие SHORT через 72ч если не сработал TP/SL
