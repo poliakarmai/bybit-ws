@@ -129,7 +129,10 @@ def init_pro_db():
     conn.execute("""CREATE TABLE IF NOT EXISTS pro_users (
         user_id INTEGER PRIMARY KEY, username TEXT, paid_at TEXT,
         expires_at TEXT, active INTEGER DEFAULT 1, charge_id TEXT)""")
-    conn.execute("ALTER TABLE pro_users ADD COLUMN charge_id TEXT", [])
+    try:
+        conn.execute("ALTER TABLE pro_users ADD COLUMN charge_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # колонка уже есть
     conn.commit()
     return conn
 
