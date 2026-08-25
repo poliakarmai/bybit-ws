@@ -2526,6 +2526,27 @@ def main():
     # Проверка исходов сигналов: раз в час
     app.job_queue.run_repeating(check_outcomes, interval=3600, first=60)
 
+    # Глобальный обработчик ошибок — сетевые сбои Telegram API не роняют бот в стэк
+    async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        import traceback
+        import httpx
+        from telegram.error import NetworkError, TimedOut
+        err = context.error
+        transient = (
+            NetworkError, TimedOut,
+            httpx.ReadError, httpx.ConnectError, httpx.ConnectTimeout,
+            httpx.ReadTimeout, httpx.WriteError, httpx.WriteTimeout,
+            httpx.PoolTimeout, httpx.RemoteProtocolError,
+            ConnectionError, TimeoutError,
+        )
+        if isinstance(err, transient):
+            print(f"[GridSignal] ⚠️ сетевой сбой (transient, игнор): {type(err).__name__}", flush=True)
+            return
+        tb = "".join(traceback.format_exception(type(err), err, err.__traceback__))
+        print(f"[GridSignal] ❌ ошибка update: {err}\n{tb}", flush=True)
+
+    app.add_error_handler(_error_handler)
+
     print(f"🤖 GridSignal Bot v{BOT_VERSION} запущен...")
     app.run_polling()
 
