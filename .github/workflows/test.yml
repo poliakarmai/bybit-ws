@@ -2,9 +2,9 @@ name: Test & Deploy
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 
 jobs:
   test:
@@ -20,6 +20,10 @@ jobs:
         run: python3 test_smoke.py
       - name: Module tests
         run: python3 test_modules.py
+      - name: Logic integrity tests
+        run: python3 test_logic_integrity.py
+      - name: Regression tests
+        run: python3 test_regression.py
 
   gsc-scan:
     runs-on: ubuntu-latest
