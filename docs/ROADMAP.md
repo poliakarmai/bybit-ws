@@ -127,6 +127,15 @@
 | ExchangeAdapter (ABC + Bybit/Binance/OKX адаптеры) | 🟡 | ✅ написан (Phase 6.5) |
 | Интеграция в main_async/auto_entry/auto_short | 🟡 | ⬜ подключён только в api.py (get_bb) |
 
+### Техдолг — зачистка 27.08.2026
+
+| Задача | Статус |
+|--------|--------|
+| CI: workflow master→main + logic/regression тесты | ✅ |
+| Legacy-мусор: .bak ×2, deploy.sh.old, =6.0 | ✅ удалены |
+| Risk/reward SHORT: подтверждён Фазой 9.1 (PF 0.59→2.36) | ✅ диагноз |
+| Дубли модулей: auto_sl↔unified_sl, main↔main_async (docker-entrypoint) | ⬜ техдолг — перевести docker на main_async, auto_sl на unified_sl |
+
 ### Долгий срок
 
 | Задача | Приоритет |
