@@ -102,8 +102,9 @@ def check_confluence(symbol: str, direction: str = 'LONG') -> Optional[dict]:
     tf_results = {}
     approved_tfs: List[str] = []
 
+    from .candle_cache import get_candles as _get_candles_cached
     for tf in TF_LIST:
-        candles = _fetch_candles(symbol, tf, 30)
+        candles = _get_candles_cached(symbol, tf, _fetch_candles, ttl=300)
         if not candles or len(candles) < 20:
             tf_results[tf] = None
             continue

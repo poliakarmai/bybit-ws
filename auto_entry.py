@@ -524,6 +524,12 @@ def auto_entry_scan(positions):
                 if elapsed < cooldown_sl:
                     continue
 
+            # Перманентный blacklist: символы, в которые НЕ входить вообще
+            from .symbol_blacklist import is_blacklisted as _is_blacklisted
+            if _is_blacklisted(sym):
+                log_event(f'🚫 auto_entry: {sym} в blacklist — пропускаю')
+                continue
+
             # Маржа от score с учётом агрессии режима (Фаза 5.4)
             normalized_score = min(10, s['score'] / 5)  # 25→5, 50→10
             margin = margin_for_strategy('long', score=normalized_score) * aggression

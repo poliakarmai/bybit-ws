@@ -355,7 +355,7 @@ def check_auto_short(positions):
 
     state = _load_state()
     now = time.time()
-    deadline = now + 20  # time budget — не дольше 20с на все BB-запросы
+    deadline = now + 30  # time budget — не дольше 30с (кэш MTF-свечей смягчает нагрузку)
 
     # Считаем текущие SHORT (в позиции + в стейте)
     active_shorts = sum(1 for p in positions.values()
@@ -409,6 +409,12 @@ def check_auto_short(positions):
                 state[sym]['dry_spell_since'] = 0
 
         is_junk = sym not in TIER_AB  # Tier C/D = шлак
+
+        # Перманентный blacklist: символы, в которые НЕ входить вообще (после крупных убытков и т.п.)
+        from .symbol_blacklist import is_blacklisted as _is_blacklisted
+        if _is_blacklisted(sym):
+            log_event(f'🚫 auto_short: {sym} в blacklist — пропускаю')
+            continue
 
         # Проверка BB
 
@@ -855,17 +861,17 @@ def check_short_time_sl(positions: dict) -> list[str]:
         if unrealised >= 0:
             continue  # в прибыли — не трогаем
 
-        # Check entry timestamp
-        entry_ts = pos.get('createdTime', 0)
-        if isinstance(entry_ts, str):
-            try:
-                entry_ts = int(entry_ts)
-            except ValueError:
-                continue
+        # Check entry timestamp — opened_at/entry_ts (внутренний timestamp открытия позиции).
+        # НЕ createdTime: оно = время ПЕРВОГО входа в символ, а не текущей позиции (pitfall #14).
+        entry_ts = pos.get('opened_at') or pos.get('entry_ts')
         if not entry_ts:
             continue
+        try:
+            entry_ts = float(entry_ts)
+        except (ValueError, TypeError):
+            continue
 
-        held_hours = (now - entry_ts / 1000) / 3600 if entry_ts > 1e10 else (now - entry_ts) / 3600
+        held_hours = (now - entry_ts) / 3600
 
         if held_hours > SHORT_TIME_SL_HOURS:
             try:
