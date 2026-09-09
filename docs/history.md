@@ -171,3 +171,14 @@ Walk-forward валидация ML.
 - SHORT paper trade: WR 40→52%, PF 0.56→0.92
 - Android: JWT auth, /set-tp, /generate-jwt
 - gsc_audit pre-commit hook
+
+### Фаза 9.1 — Risk-фикс junk-шортов (15.08.2026)
+- Junk-шорты SL +7% через trading-stop, DCA-мартингейл удалён
+- exit_reason по знаку closedPnl (не по цене)
+
+### Фаза 9.2 — FIFO-матчинг self-learn фикс (20.08.2026)
+- RoundTrip напрямую из pnl/hold_hours, WR 28→66%
+
+### Фаза 9.3 — Time-exit + Blacklist + Candle-cache (27.08.2026)
+- check_short_time_sl по opened_at, symbol_blacklist, candle_cache TTL 300с
+- CI master→main + logic/regression, legacy-мусор удалён

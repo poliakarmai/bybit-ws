@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-[![Phase 10](https://img.shields.io/badge/phase-10-blue)](./CHANGELOG.md)
+[![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
 
 ---
 
@@ -24,17 +24,16 @@
 
 ## Результаты (на v11)
 
-> **Важно:** это результаты конкретной инсталляции при конкретных параметрах. Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
+> **Важно:** результаты конкретной инсталляции (авто-трейдинг, `strategy='auto'`). Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
 
 | Период | Сделок | Винрейт | PnL | Примечание |
 |--------|--------|---------|-----|-----------|
-| Июнь 2026 | 89 | 71% | +$340 | |
-| Июль 2026 | 112 | 68% | +$410 | |
-| Август 2026 | 123 | 57% | ~−$100 | SHORT avg_loss ×1.75 avg_win, time exit fix deployed |
+| Август 2026 | 138 | 70% | +$10 | Фазы 9.1–9.3 |
+| Сентябрь 2026 | 47 | 75% | −$49 | до 09.09, SHORT-просадка ZECUSDT |
 
-> **Август:** PF=0.75. Корень — одна SHORT-позиция (STGUSDT) на 30 дней с убытком $167. Без неё SHORT: WR=71%, PnL=+$138. Time exit теперь в каждом цикле, макс. удержание 24ч — проблема исправлена.
+> **Срез после Фазы 9.1 (15.08+, 131 сделка):** PF **1.38**, WR 77%. LONG — PF 9.64 (WR 90%, +$240). SHORT — PF 0.70 (WR 67%): TP-выходы +$230 съедаются SL −$270 (ZECUSDT/USELESSUSDT), avg_loss $14.11 vs avg_win $4.85.
 
-*Цифры для стратегии Bollinger Grid LONG/SHORT, риск 5% на сделку, плечо до 10x*
+*Авто-трейдинг Bollinger Grid LONG/SHORT, риск 5% на сделку, плечо до 10x. Всего 301 закрытая сделка (185 auto).*
 
 ---
 

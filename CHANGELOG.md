@@ -7,6 +7,29 @@
 
 ---
 
+## [11.1] — 2026-09-09
+
+### Фаза 9.1 — Risk-фикс junk-шортов (15.08)
+- Junk-шорты (Tier C/D): SL +7% через trading-stop
+- DCA-мартингейл удалён (check_auto_short + check_junk_dca)
+- Мёртвый код вычищен (JUNK_DCA_LEVELS, short_margin, SHORT_LEVERAGE)
+- exit_reason детект по знаку closedPnl (не по цене)
+
+### Фаза 9.2 — FIFO-матчинг self-learn фикс (20.08)
+- adapter.load_from_sqlite строит RoundTrip напрямую из pnl/hold_hours
+- analyzer.compute_profile_from_roundtrips (без пересчёта FIFO)
+- WR 28% → 66% (совпадает с прямым SQL)
+
+### Фаза 9.3 — Time-exit + Blacklist + Candle-cache (27.08)
+- check_short_time_sl: createdTime → opened_at/entry_ts
+- symbol_blacklist.py — перманентный чёрный список (auto_short + auto_entry)
+- candle_cache.py — TTL-кэш MTF-свечей (300с), deadline 20→30с
+- CI: workflow master→main + logic/regression тесты
+- Legacy-мусор удалён (.bak ×2, deploy.sh.old, =6.0)
+
+### Метрики (09.09.2026)
+- 301 закрытая сделка (185 auto); PF post-9.1: 1.38 (LONG 9.64, SHORT 0.70)
+
 ## [11.0] — 2026-08-08
 
 ### Фаза 9 — SHORT-оптимизация
