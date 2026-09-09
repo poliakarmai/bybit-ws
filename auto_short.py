@@ -661,6 +661,15 @@ def check_auto_short(positions):
             else:
                 # ── Tier A/B: SL отложен на 20 мин (23.06.2026), TP сразу ──
                 sl_pct = SL_PCT_JUNK if sym not in TIER_AB else SL_PCT
+                # ── self-learn: canary/symbol sl_pct (в % → доля) переопределяет конфиг, с guard ──
+                try:
+                    from .journal.self_learn import get_canary_param, get_symbol_params
+                    _sl = get_symbol_params(sym, 'sl_pct', None)
+                    _sl = get_canary_param('sl_pct', _sl, symbol=sym, side='sell')
+                    if isinstance(_sl, (int, float)) and 0 < _sl <= 30:
+                        sl_pct = _sl / 100.0
+                except Exception:
+                    pass
                 sl_price = _round_to_tick(price * (1 + sl_pct), sym)
 
                 # TP ставим сразу, SL — через trading-stop без stopLoss
