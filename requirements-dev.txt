@@ -1,0 +1,2 @@
+# bybit-ws — dev/test dependencies
+pytest>=7.0
