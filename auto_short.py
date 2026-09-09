@@ -345,6 +345,12 @@ def check_auto_short(positions):
     SL_PCT_JUNK = cfg.strategy.short.sl_tier_cd
     MAX_SHORTS = cfg.strategy.short.max_positions
     SHORT_MIN_SCORE = getattr(cfg.strategy.short, 'min_score', 40)
+    # ── self-learn: canary min_score для SHORT (default = из конфига) ──
+    try:
+        from .journal.self_learn import get_canary_param
+        SHORT_MIN_SCORE = get_canary_param('min_score', SHORT_MIN_SCORE, side='sell')
+    except Exception:
+        pass
     COOLDOWN = cfg.strategy.short.cooldown_seconds
     ENTRY_OFFSET = cfg.strategy.short.entry_offset
     JUNK_PUMP_THRESHOLD = getattr(cfg.strategy, 'junk', None)

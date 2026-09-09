@@ -251,7 +251,15 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 uncovered = pos_size - existing_qty
                 if uncovered >= 0.5:
                     tp_levels, regime = _get_regime_tp_levels()
+                    # ── self-learn: canary/symbol tp_mult применяется к ATR-множителю (default 1.0 = без изменений) ──
+                    try:
+                        from .journal.self_learn import get_canary_param, get_symbol_params
+                        _tp_mult = get_canary_param('tp_mult', 1.0, symbol=sym)
+                        _tp_mult = get_symbol_params(sym, 'tp_mult', _tp_mult)
+                    except Exception:
+                        _tp_mult = 1.0
                     for k, split in zip(tp_levels, ATR_TP_SPLITS):
+                        k = k * _tp_mult
                         raw_qty = uncovered * split
                         qty = math.floor(raw_qty / lot_step) * lot_step
                         qty = round(qty, lot_decimals)
