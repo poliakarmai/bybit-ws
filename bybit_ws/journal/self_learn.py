@@ -50,7 +50,7 @@ CANARY_ENTRY_PCT = 0.10
 CANARY_WINDOW_HOURS = 6
 CANARY_WR_DROP_THRESHOLD = 0.10
 CANARY_MATCH_WINDOW = 3600
-CANARY_IDLE_TIMEOUT_HOURS = 3  # NEW: авто-откат без сделок
+CANARY_IDLE_TIMEOUT_HOURS = 24  # canary живёт весь self-learn цикл (24ч); 3ч убивал его до набора статистики → вечный idle_rollback, 0 промоушенов
 
 # ── Self-learn timing ───────────────────────────────
 SELF_LEARN_INTERVAL_SEC = 24 * 3600  # v10: 24ч cooldown (было 6ч)
