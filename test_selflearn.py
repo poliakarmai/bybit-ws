@@ -33,11 +33,13 @@ class TestRegimeTpLevels(unittest.TestCase):
 
     def test_returns_three_positive_multipliers(self):
         from bybit_ws.auto_tp import _get_regime_tp_levels
-        levels, regime = _get_regime_tp_levels()
+        # mock predict_regime — не дёргаем LSTM/torch (без env → ложный "HMAC mismatch" на fallback-ключе)
+        with mock.patch("bybit_ws.lstm_regime.predict_regime", return_value={"regime": "NEUTRAL"}):
+            levels, regime = _get_regime_tp_levels()
         self.assertEqual(len(levels), 3, f"ожидали 3 TP-уровня, получили {levels}")
+        self.assertEqual(regime, "NEUTRAL")
         for k in levels:
             self.assertGreater(k, 0, "ATR-множитель TP должен быть >0")
-        self.assertIsInstance(regime, str)
 
 
 class TestCanaryGate(unittest.TestCase):
