@@ -606,6 +606,14 @@ def check_auto_short(positions):
                 log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?") if order else "no response"}')
                 continue
 
+            # ── Canary: маркируем SHORT-вход для матчинга при закрытии ──
+            try:
+                from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
+                if should_use_canary():
+                    mark_canary_entry(sym, 'sell', time.time())
+            except Exception:
+                pass
+
             state_entry = {
                 'last_short_ts': now,
                 'entry_price': price,

@@ -119,5 +119,29 @@ class TestFinalizeCanary(unittest.TestCase):
         self.assertFalse(state["promoted"])
 
 
+class TestBanditBestParams(unittest.TestCase):
+    """self_learn.py:2588 — get_bandit_best_params: guard по trades."""
+
+    def _sl(self):
+        from bybit_ws.journal import self_learn as sl
+        return sl
+
+    def test_returns_empty_when_insufficient_trades(self):
+        sl = self._sl()
+        fake = mock.MagicMock()
+        fake.bandits = {"RANGING": mock.MagicMock()}
+        fake.bandits["RANGING"].get_best_arm.return_value = {"trades": 5, "params": {"min_score": 30}}
+        with mock.patch.object(sl, "load_ensemble", return_value=fake):
+            self.assertEqual(sl.get_bandit_best_params("RANGING"), {})
+
+    def test_returns_params_when_enough_trades(self):
+        sl = self._sl()
+        fake = mock.MagicMock()
+        fake.bandits = {"RANGING": mock.MagicMock()}
+        fake.bandits["RANGING"].get_best_arm.return_value = {"trades": 50, "params": {"min_score": 35, "tp_mult": 0.8}}
+        with mock.patch.object(sl, "load_ensemble", return_value=fake):
+            self.assertEqual(sl.get_bandit_best_params("RANGING"), {"min_score": 35, "tp_mult": 0.8})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

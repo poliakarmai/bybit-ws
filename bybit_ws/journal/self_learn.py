@@ -2586,6 +2586,22 @@ def load_ensemble() -> ParameterEnsemble:
     return ParameterEnsemble()
 
 
+def get_bandit_best_params(regime: str = None, min_trades: int = 20) -> dict:
+    """Best arm bandit для режима → params (min_score/sl_pct/tp_mult), если достаточно сделок.
+
+    Источник выученных per-regime параметров. Приоритет в runtime:
+    canary (активный A/B) > symbol_profile (per-symbol) > bandit (per-regime) > default.
+    Возвращает {} если данных мало (trades < min_trades) — тогда применяется default.
+    """
+    ens = load_ensemble()
+    if regime not in ens.bandits:
+        regime = "RANGING"
+    best = ens.bandits[regime].get_best_arm()
+    if not best or best.get("trades", 0) < min_trades:
+        return {}
+    return best.get("params", {}) or {}
+
+
 # ══════════════════════════════════════════════════════
 # V9: ONLINE MICRO-UPDATES (after each trade)
 # ══════════════════════════════════════════════════════

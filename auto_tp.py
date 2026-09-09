@@ -251,10 +251,13 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 uncovered = pos_size - existing_qty
                 if uncovered >= 0.5:
                     tp_levels, regime = _get_regime_tp_levels()
-                    # ── self-learn: canary/symbol tp_mult применяется к ATR-множителю (default 1.0 = без изменений) ──
+                    # ── self-learn: canary/bandit/symbol tp_mult применяется к ATR-множителю (default 1.0 = без изменений) ──
                     try:
-                        from .journal.self_learn import get_canary_param, get_symbol_params
+                        from .journal.self_learn import get_canary_param, get_symbol_params, get_bandit_best_params
                         _tp_mult = get_canary_param('tp_mult', 1.0, symbol=sym)
+                        _bp = get_bandit_best_params(regime)
+                        if _bp and 'tp_mult' in _bp:
+                            _tp_mult = _bp['tp_mult']
                         _tp_mult = get_symbol_params(sym, 'tp_mult', _tp_mult)
                     except Exception:
                         _tp_mult = 1.0

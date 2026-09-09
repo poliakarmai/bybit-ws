@@ -486,9 +486,13 @@ def auto_entry_scan(positions):
         # v4: Per-symbol min_score: canary → symbol_profile → session → optuna → global
         sym_min_score = _optuna_min_scores.get(sym, min_score)
         try:
-            from bybit_ws.journal.self_learn import get_canary_param, get_symbol_params, get_session_modifier
+            from bybit_ws.journal.self_learn import get_canary_param, get_symbol_params, get_session_modifier, get_bandit_best_params
             sym_min_score = get_canary_param('min_score', sym_min_score, symbol=sym, side='buy')
-            # Per-symbol profile override
+            # Bandit best arm (per-regime baseline, если достаточно сделок)
+            _bp = get_bandit_best_params(regime_name)
+            if _bp and 'min_score' in _bp:
+                sym_min_score = _bp['min_score']
+            # Per-symbol profile override (специфичнее bandit)
             sym_min_score = get_symbol_params(sym, 'min_score', sym_min_score)
             # Session modifier
             sym_min_score = int(sym_min_score * get_session_modifier('min_score'))
