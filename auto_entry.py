@@ -32,6 +32,21 @@ AUTO_ENTRY_WATCH = [
 
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
 MIN_SCORE = 25  # порог для авто-входа (из 50)
+
+# ── Anti-overtrading / anti-chasing guard'ы ──
+MAX_DAILY_TRADES = 6      # дневной лимит LONG-входов (overtrading-защита)
+CHASE_PCT = 3.0           # блок входа, если монета выросла >3%
+CHASE_LOOKBACK = 5        # ...за последние 5 дневных свечей
+_daily_entries = {'date': '', 'count': 0}
+
+
+def _count_today_entries() -> int:
+    """Счётчик LONG-входов за сегодня (in-memory, сброс при смене даты)."""
+    global _daily_entries
+    today = time.strftime('%Y-%m-%d')
+    if _daily_entries['date'] != today:
+        _daily_entries = {'date': today, 'count': 0}
+    return _daily_entries['count']
 ML_ENABLED = os.getenv('BYBIT_ML_ENABLED', '1') == '1'  # фича-флаг: отключить весь ML
 
 # ── Фаза 5.4: LSTM-режим → адаптивные параметры ──
@@ -714,6 +729,29 @@ def auto_entry_scan(positions):
             except Exception:
                 pass
 
+            # ── Anti-chasing: блок LONG, если монета уже разогналась >CHASE_PCT% ──
+            try:
+                from bybit_ws.chase_guard import is_chasing
+                _k = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit={CHASE_LOOKBACK + 3}')
+                if _k and _k.get('retCode') == 0:
+                    _closes = [float(c[4]) for c in reversed(_k['result'].get('list', []))]
+                    if is_chasing(_closes, CHASE_PCT, CHASE_LOOKBACK):
+                        log_event(f'⛔ CHASE BLOCK {sym}: рост >{CHASE_PCT}% за {CHASE_LOOKBACK} свечей')
+                        continue
+            except Exception:
+                pass
+
+            # ── Anti-overtrading: дневной лимит LONG-входов ──
+            try:
+                from bybit_ws.trade_limits import allow_by_daily_count
+                _today = _count_today_entries()
+                _ok, _reason = allow_by_daily_count(_today, MAX_DAILY_TRADES)
+                if not _ok:
+                    log_event(f'⛔ DAILY LIMIT {sym}: {_reason} ({_today}/{MAX_DAILY_TRADES})')
+                    continue
+            except Exception:
+                pass
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}
@@ -759,6 +797,9 @@ def auto_entry_scan(positions):
                     )
                 except Exception:
                     pass
+                # Инкремент дневного счётчика входов (anti-overtrading)
+                _count_today_entries()
+                _daily_entries['count'] += 1
                 # ── Canary: маркируем вход для последующего матчинга при закрытии ──
                 try:
                     from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
