@@ -60,7 +60,7 @@ def _sign_request(method, path, body=None):
         log_event('⚠️ api: sign attempted without credentials')
         return None, None, None
     ts = str(int(time.time() * 1000))
-    recv = '5000'
+    recv = '30000'  # Bybit ноды дрейфуют 5-15с: 5000мс даёт retCode 10002 (server timestamp); 30с покрывает skew
     if method == 'GET' and '?' in path:
         # For GET, sign the query string (without leading ?)
         body_str = path.split('?', 1)[1]
