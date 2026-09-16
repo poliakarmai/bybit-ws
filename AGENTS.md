@@ -44,11 +44,38 @@ bybit-ws/
 ├── deploy.sh             ← Атомарный деплой (smoke 52 + canary 8)
 ├── test_smoke.py         ← 52 интеграционных тестов
 ├── paper_trade.py        ← Бэктестинг на исторических данных
+├── bybit_ws/experiments/ ← Experiment Tree: воспроизводимые бэктесты + sandbox
+│   ├── engine.py          ← Детерминированный backtest-движок (кэш свечей, run-манифест)
+│   ├── backtest_runner.py ← CLI reproducible backtest (--symbol/--days/--params)
+│   ├── parallel_sandbox.py← N вариантов на одном окне, сравнительная таблица
+│   └── store.py           ← ExperimentStore (таблицы experiment/run, experiments.db)
 └── docs/
     ├── SELF_LEARN.md       ← Документация модуля самообучения (v10)
     ├── history.md          ← История фаз
-    └── PRD-one-click.md    ← One-click trading архитектура
+    ├── PRD-one-click.md    ← One-click trading архитектура
+    ├── experiment-tree-design.md ← Дизайн experiment tree (модель, DDL, связь с кодом)
+    └── experiment-tree-TZ.md     ← ТЗ на реализацию
 ```
+
+## Experiment Tree (эксперименты, v1)
+
+Воспроизводимый стенд для поиска эджа стратегии офлайн (по мотивам OpenResearch).
+Выносит проверку гипотез с live-аккаунта на детерминированные бэктесты + sandbox.
+
+- **Дизайн:** `docs/experiment-tree-design.md`, ТЗ: `docs/experiment-tree-TZ.md`.
+- **Модель:** `experiment` (узел дерева, parent-лайндж) → `run` (immutable прогон
+  backtest/canary/live с run-манифестом). БД: `~/.local/share/bybit-ws/experiments/experiments.db`
+  (sandbox — `sandbox.db`). Боевой `state.db` НЕ трогается.
+- **Воспроизводимость:** фиксированное окно (`--end-date`) + кэш свечей по ключу
+  `(symbol, interval, start_ms, end_ms)` → байт-в-байт одинаковые метрики.
+
+```bash
+python3 -m bybit_ws.experiments.backtest_runner --symbol SOLUSDT --days 180 --no-db
+python3 -m bybit_ws.experiments.parallel_sandbox --symbol SOLUSDT --days 180 --no-db
+```
+
+> **Граница v1:** хук «промоушен победителя → self_learn» не реализован (требует
+> правки live-контура). Сейчас стенд — офлайн-поиск, не автопилот.
 
 ## Self-Learning v10 (ключевое)
 
