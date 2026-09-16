@@ -51,6 +51,7 @@ bybit-ws/
 │   ├── validation.py      ← Слой 0: DSR + PBO + permutation test (гейт анти-overfit)
 │   ├── triple_barrier.py  ← Слой 1: triple-barrier лейблы {TP/SL/time} для meta-labeling
 │   ├── regime.py          ← Слой 2: Gaussian HMM (режимы) + BOCPD (смена режима)
+│   ├── bandit.py          ← Слой 3: regime-aware Thompson Sampling (reset на change-point)
 │   └── store.py           ← ExperimentStore (таблицы experiment/run, experiments.db)
 └── docs/
     ├── SELF_LEARN.md       ← Документация модуля самообучения (v10)
