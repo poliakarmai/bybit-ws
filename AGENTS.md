@@ -49,6 +49,7 @@ bybit-ws/
 │   ├── backtest_runner.py ← CLI reproducible backtest (--symbol/--days/--params)
 │   ├── parallel_sandbox.py← N вариантов на одном окне, сравнительная таблица
 │   ├── validation.py      ← Слой 0: DSR + PBO + permutation test (гейт анти-overfit)
+│   ├── triple_barrier.py  ← Слой 1: triple-barrier лейблы {TP/SL/time} для meta-labeling
 │   └── store.py           ← ExperimentStore (таблицы experiment/run, experiments.db)
 └── docs/
     ├── SELF_LEARN.md       ← Документация модуля самообучения (v10)
