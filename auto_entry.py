@@ -550,8 +550,14 @@ def auto_entry_scan(positions):
                 continue
 
             # Маржа от score с учётом агрессии режима (Фаза 5.4)
+            # Volatility filter: block high-vol symbols, scale margin (fail-open)
+            from .volatility_filter import is_high_volatility, volatility_scale
+            blocked, ratio, reason = is_high_volatility(sym)
+            if blocked:
+                log_event(f'🚫 VOL-FILTER {sym}: {reason}')
+                continue
             normalized_score = min(10, s['score'] / 5)  # 25→5, 50→10
-            margin = margin_for_strategy('long', score=normalized_score) * aggression
+            margin = margin_for_strategy('long', score=normalized_score) * aggression * volatility_scale(sym)
             if margin <= 0:
                 continue
 

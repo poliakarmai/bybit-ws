@@ -476,8 +476,14 @@ def check_auto_short(positions):
         # ── Тормоз overtrading: вход только при высоком 9-метричном скоре ──
         if short_score < SHORT_MIN_SCORE:
             continue
+        # Volatility filter: block high-vol symbols, scale margin (fail-open)
+        from .volatility_filter import is_high_volatility, volatility_scale
+        blocked, ratio, reason = is_high_volatility(sym)
+        if blocked:
+            log_event(f'🚫 VOL-FILTER {sym}: {reason}')
+            continue
         normalized_short = min(10, max(5, short_score / 5))  # 25→5, 50→10
-        short_margin = margin_for_strategy('short', score=normalized_short)
+        short_margin = margin_for_strategy('short', score=normalized_short) * volatility_scale(sym)
         # ── Фаза 4.3.6: MTF-конфлюенс → бонус к позиции ──
         if isinstance(mtf_conf, dict):
             mtf_c = mtf_conf.get('confluence', 0)
