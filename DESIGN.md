@@ -1,6 +1,6 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
-> **Версия:** 3.10.1 | **Дата:** 13.06.2026 | **Автор:** Alexey Polyakov
+> **Версия:** 3.11.0 | **Дата:** 17.09.2026 | **Автор:** Alexey Polyakov
 >
 > Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API + MCP для внешнего управления.
 >
@@ -48,6 +48,7 @@
 │    ├── atr_sizer.py   ⚡ ATR Risk Sizing               │
 │    ├── x10_limits.py  ⚡ X10 daily loss stop           │
 │    ├── position_sizing.py 📐 динамическая маржа v3.8   │
+│    ├── volatility_filter.py 🛡 Volatility Regime Filter │
 │    ├── rpc.py          HTTP-RPC сервер (:8766)         │
 │    ├── cost_tracker.py учёт комиссий и PnL             │
 │    └── reporting.py    сводки и трейд-журнал           │

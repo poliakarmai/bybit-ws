@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-09-09 (v11 — Фазы 9.1–9.3: junk-шорт фикс + FIFO-матчинг + time-exit/blacklist/candle-cache)
+> Обновлено: 2026-09-17 (v11.2 — Volatility Regime Filter + монотонный SL + TP qtyStep фикс)
 
 ## Что это
 
@@ -31,6 +31,7 @@ bybit-ws/
 ├── auto_entry.py          ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
 ├── auto_sl.py             ← ATR-adaptive SL (legacy, заменён unified_sl)
 ├── auto_tp.py             ← ATR-based TP (1×/2×/3× ATR)
+├── volatility_filter.py   ← Volatility Regime Filter (off-by-default: блок входа при ATR-скачке + vol-scaled sizing)
 ├── risk_manager.py       ← Risk + BlackSwan (v2: alert only) + emergency_close
 ├── entry_judge.py        ← Cross-model judge (DeepSeek, fail-closed)
 ├── lstm_regime.py         ← LSTM-классификатор режима (82.3% точность, 5 классов)

@@ -7,6 +7,19 @@
 
 ---
 
+## [11.2] — 2026-09-17
+
+### Fixed
+- **TP «Qty invalid» на дешёвых монетах (FLOW/GRAM)** — `auto_tp._get_lot_step()` звал несуществующий `fetch_instruments_info` → ImportError → дефолт `0.001` вместо реального `qtyStep` (0.1) → Bybit отклонял ордер → 4 фейла → PERM_SKIP 24ч. Теперь прямой `instruments-info`, дефолт `0.1`.
+- **Float-шум в qty-строке** — `place_take_profit` форматирует `f'{qty:.8f}'.rstrip('0').rstrip('.')`.
+- **Монотонный trailing SL** — `unified_sl._calc_tight_trail`/`_calc_breakeven` пересчитывали SL=mark×0.99 без сверки с текущим SL → SL ехал вниз при микро-падении mark (осцилляция $0.0088↔$0.0089). Добавлен guard: LONG только вверх, SHORT только вниз.
+- **BTC kline-таймауты** — `bybit_async` timeout 15→30с (retries внутри рассчитаны до ~60с).
+
+### Added
+- **Volatility Regime Filter** (`volatility_filter.py`) — off-by-default safety gate: блок новых входов при `ATR > N×baseline` + vol-scaled позишн-сайзинг (риск в $ = константа). Конфиг `volatility_filter.{enabled,atr_ratio_threshold,baseline_days,min_scale}`. Fail-open на ошибку/нет сети. 10 тестов.
+
+---
+
 ## [11.1] — 2026-09-09
 
 ### Фаза 9.1 — Risk-фикс junk-шортов (15.08)
