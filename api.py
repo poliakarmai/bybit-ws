@@ -381,7 +381,9 @@ def place_take_profit(symbol, positionIdx, side, qty, tp_price):
     Docs: https://bybit-exchange.github.io/docs/v5/order#create-order
     """
     tp_side = 'Sell' if side == 'Buy' else 'Buy'
-    qty_str = str(int(qty)) if qty == int(qty) else str(qty)
+    # Питфол 01.09.2026: float-шум в str(qty) -> Bybit «Qty invalid».
+    # Форматируем через f-string с rstrip, чтобы убрать 18.900000000000002 -> 18.9.
+    qty_str = f'{qty:.8f}'.rstrip('0').rstrip('.') or '0'
     body = {'category': 'linear', 'symbol': symbol, 'side': tp_side,
             'positionIdx': positionIdx, 'orderType': 'Limit', 'qty': qty_str,
             'price': str(tp_price), 'reduceOnly': True, 'timeInForce': 'GTC'}
@@ -594,7 +596,7 @@ async def bybit_async(method, path, body=None, retries=None):
     try:
         return await asyncio.wait_for(
             loop.run_in_executor(None, bybit, method, path, body, retries),
-            timeout=15.0
+            timeout=30.0
         )
     except asyncio.TimeoutError:
         log_event(f'bybit-async executor timeout: {method} {path[:60]}')

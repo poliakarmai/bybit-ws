@@ -288,16 +288,23 @@ def auto_take_profit(positions, orders, skip_syms=None):
 
 
 def _get_lot_step(sym):
-    """Получить минимальный шаг лота для символа (lotSizeFilter.qtyStep)."""
+    """Получить минимальный шаг лота для символа (lotSizeFilter.qtyStep).
+
+    Питфол 17.09.2026: старый код звал несуществующий fetch_instruments_info
+    -> ImportError -> всегда дефолт 0.001. Для монет с qtyStep=0.1 (FLOW/GRAM)
+    qty округлялся неверно -> Bybit отклонял «Qty invalid». Теперь прямой
+    запрос instruments-info (паттерн из dca.py/auto_short.py/utils.py).
+    """
     try:
-        from .api import fetch_instruments_info
-        info = fetch_instruments_info()
-        if info and sym in info:
-            lot_filter = info[sym].get('lotSizeFilter', {})
-            return float(lot_filter.get('qtyStep', 0.001))
+        from .api import bybit
+        data = bybit('GET', f'/v5/market/instruments-info?category=linear&symbol={sym}')
+        if data and data.get('retCode') == 0:
+            instruments = data['result'].get('list', [])
+            if instruments:
+                return float(instruments[0].get('lotSizeFilter', {}).get('qtyStep', 0.1))
     except Exception:
         pass
-    return 0.001
+    return 0.1
 
 
 def _round_qty(qty, lot_step, decimals):
