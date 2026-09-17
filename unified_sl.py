@@ -101,8 +101,15 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
 
 
 def _calc_tight_trail(p: dict, is_long: bool, mark: float, entry: float):
-    """Tight trailing: +3% → SL=entry+2%, затем mark×0.99"""
+    """Tight trailing: +3% → SL=mark×0.99 (LONG) / mark×1.01 (SHORT).
+
+    Монотонность (17.09.2026): SL двигается ТОЛЬКО в прибыльную сторону —
+    LONG вверх (target > current_sl), SHORT вниз (target < current_sl).
+    Раньше target=mark×0.99 пересчитывался каждый цикл без сверки с текущим
+    SL → при микро-падении mark SL ехал вниз (осцилляция $0.0088↔$0.0089).
+    """
     pnl_pct = ((mark - entry) / entry * 100) if is_long else ((entry - mark) / entry * 100)
+    current_sl = p.get('stopLoss')
 
     if pnl_pct < 3:
         return None, ''
@@ -110,12 +117,12 @@ def _calc_tight_trail(p: dict, is_long: bool, mark: float, entry: float):
     if is_long:
         # LONG: SL подтягиваем вверх
         target = round(mark * 0.99, 4)
-        if target > entry * 1.02:  # минимум +2% от входа
+        if target > entry * 1.02 and (current_sl is None or target > current_sl):
             return target, f'tight trail LONG +{pnl_pct:.1f}%'
     else:
         # SHORT: SL подтягиваем вниз
         target = round(mark * 1.01, 4)
-        if target < entry * 0.98:  # минимум -2% от входа
+        if target < entry * 0.98 and (current_sl is None or target < current_sl):
             return target, f'tight trail SHORT +{pnl_pct:.1f}%'
 
     return None, ''
@@ -170,18 +177,25 @@ def _calc_hard_trail(sym: str, is_long: bool, mark: float, entry: float, current
 
 
 def _calc_breakeven(p: dict, is_long: bool, mark: float, entry: float):
-    """Breakeven: +10% → SL = entry + 1% (LONG) / -10% → SL = entry - 1% (SHORT)"""
+    """Breakeven: +10% → SL = entry + 1% (LONG) / -10% → SL = entry - 1% (SHORT).
+
+    Монотонность (17.09.2026): не откатывать SL, уже подтянутый tight/simple
+    trail'ом выше entry*1.01 — иначе BE откатит SL вниз.
+    """
     pnl_pct = ((mark - entry) / entry * 100) if is_long else ((entry - mark) / entry * 100)
+    current_sl = p.get('stopLoss')
 
     if pnl_pct < 10:
         return None, ''
 
     if is_long and mark > entry * 1.03:
         target = round(entry * 1.01, 4)
-        return target, f'BE LONG +{pnl_pct:.1f}%'
+        if current_sl is None or target > current_sl:
+            return target, f'BE LONG +{pnl_pct:.1f}%'
     elif not is_long and mark < entry * 0.97:
         target = round(entry * 0.99, 4)
-        return target, f'BE SHORT +{pnl_pct:.1f}%'
+        if current_sl is None or target < current_sl:
+            return target, f'BE SHORT +{pnl_pct:.1f}%'
 
     return None, ''
 
