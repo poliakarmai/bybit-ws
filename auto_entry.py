@@ -248,6 +248,33 @@ def _count_down_days(sym: str) -> int:
         log_event(f'⚠️ count_down_days({sym}): {e}')  # ticker parse error — return 0 (no down days detected)
     return 0
 
+def _calc_rsi(sym: str, period: int = 14) -> float:
+    """Compute RSI(14) from daily klines for telemetry. Returns 50 on failure."""
+    try:
+        data = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit={period + 5}')
+        if not data or data.get('retCode') != 0:
+            return 50.0
+        candles = data['result'].get('list', [])
+        if len(candles) < period + 1:
+            return 50.0
+        # candles are newest-first from API; reverse to oldest-first
+        closes = [float(c[4]) for c in reversed(candles[:period + 1])]
+        gains = 0
+        losses = 0
+        for i in range(1, period + 1):
+            diff = closes[i] - closes[i - 1]
+            if diff > 0:
+                gains += diff
+            else:
+                losses += abs(diff)
+        if losses == 0:
+            return 100.0
+        rs = (gains / period) / (losses / period)
+        return round(100 - (100 / (1 + rs)), 1)
+    except Exception:
+        return 50.0
+
+
 
 def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     """9-метричный LONG-скоринг (v4.0). Возвращает {score, breakdown, ...} или None если не подходит."""
@@ -575,6 +602,9 @@ def auto_entry_scan(positions):
             bb2 = get_bb_data(sym, 'D')
             if not bb2:
                 continue
+            # Compute RSI for entry diagnostics (if not already in scored result)
+            if s.get('rsi') is None:
+                s['rsi'] = _calc_rsi(sym)
             # Per-symbol оптимальный дисконт × режимный множитель (Фаза 5.2 + 5.4)
             sym_discount = _get_symbol_param(sym, 'entry_discount', 1.0)
             price = round(bb2['lower'] * sym_discount * entry_discount_mult, 4)
@@ -799,6 +829,13 @@ def auto_entry_scan(positions):
                         symbol=sym, side='Buy', strategy='bollinger_grid',
                         entry_price=price, size=qty,
                         bb_pct=s.get('bb_pos'), rsi=s.get('rsi'),
+                        entry_reason=entry_reason,
+                    )
+                    # Persist diagnostics for retrieval when trade closes
+                    sync_db.save_entry_diagnostic(
+                        sym, 'Buy',
+                        bb_pct=s.get('bb_pos'),
+                        rsi=s.get('rsi'),
                         entry_reason=entry_reason,
                     )
                 except Exception:

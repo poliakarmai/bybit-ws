@@ -628,6 +628,19 @@ def check_auto_short(positions):
                 'is_junk': is_junk,
             }
 
+            # ── Телеметрия входа (17.09.2026): диагностика для trade_history при закрытии ──
+            try:
+                from bybit_ws.state_db import sync_db
+                from .auto_entry import _calc_rsi as _calc_rsi_tel
+                sync_db.save_entry_diagnostic(
+                    sym, 'Sell',
+                    bb_pct=round(bb_pct, 1),
+                    rsi=_calc_rsi_tel(sym),
+                    entry_reason=('junk' if is_junk else 'tier_ab'),
+                )
+            except Exception:
+                pass
+
             # ── MTF-бонус (один раз, для обеих веток) ──
             mtf_bonus = ''
             if isinstance(mtf_conf, dict):

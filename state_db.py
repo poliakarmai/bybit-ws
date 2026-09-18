@@ -430,6 +430,31 @@ class StateDB:
         except (json.JSONDecodeError, TypeError):
             return row[0]
 
+
+    # ── entry diagnostics ─────────────────────────────────────
+
+    def save_entry_diagnostic(self, symbol, side, bb_pct=None, rsi=None, entry_reason=None):
+        """Сохранить контекст входа (телеметрия) — переживает закрытие позиции.
+
+        Ключ: entry_diag:{symbol}:{side} (Buy/Sell).
+        Используется _import_bybit_trades для записи bb_pct/rsi/entry_reason в trade_history.
+        """
+        key = f"entry_diag:{symbol}:{side}"
+        self.set_kv(key, {
+            'bb_pct': bb_pct,
+            'rsi': rsi,
+            'entry_reason': entry_reason,
+            'ts': int(time.time()),
+        })
+
+    def get_entry_diagnostic(self, symbol, side):
+        """Получить и удалить контекст входа (pop-семантика)."""
+        key = f"entry_diag:{symbol}:{side}"
+        val = self.get_kv(key)
+        if val is not None:
+            self.conn.execute("DELETE FROM kv_store WHERE key=?", (key,))
+            self.conn.commit()
+        return val if isinstance(val, dict) else None
     # ── maintenance ────────────────────────────────────────────
 
     def vacuum(self):
