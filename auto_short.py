@@ -361,7 +361,7 @@ def check_auto_short(positions):
 
     state = _load_state()
     now = time.time()
-    deadline = now + 30  # time budget — не дольше 30с (кэш MTF-свечей смягчает нагрузку)
+    deadline = now + 45  # time budget — не дольше 45с (внешний timeout=50с в main_async)
 
     # Считаем текущие SHORT (в позиции + в стейте)
     active_shorts = sum(1 for p in positions.values()
@@ -402,6 +402,7 @@ def check_auto_short(positions):
 
         # Проверка кулдауна
         if sym in state and now - state[sym].get('last_short_ts', 0) < COOLDOWN:
+            log_event(f'🚫 auto_short: {sym} в кулдауне — пропускаю')
             continue
 
         # Фаза 6.8: Throttle dry spells — пропускаем «сухие» символы
@@ -409,6 +410,7 @@ def check_auto_short(positions):
             dry_count = state[sym].get('dry_spell_count', 0)
             dry_since = state[sym].get('dry_spell_since', 0)
             if dry_count >= DRY_SPELL_THRESHOLD and now - dry_since < DRY_SPELL_COOLDOWN:
+                log_event(f'🚫 auto_short: {sym} dry-spell throttle ({dry_count} холостых) — пропускаю')
                 continue
             if dry_since and now - dry_since >= DRY_SPELL_COOLDOWN:
                 state[sym]['dry_spell_count'] = 0
@@ -457,6 +459,7 @@ def check_auto_short(positions):
         else:
             # Tier A/B — обычный фильтр BB
             if bb_pct < BB_SHORT_THRESHOLD:
+                log_event(f'🚫 auto_short: {sym} BB={bb_pct:.0f}% < {BB_SHORT_THRESHOLD}% — пропускаю')
                 continue
 
         # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр для SHORT ──
@@ -475,6 +478,7 @@ def check_auto_short(positions):
         short_score = short_sc['score'] if short_sc else 35  # fallback: средний скор
         # ── Тормоз overtrading: вход только при высоком 9-метричном скоре ──
         if short_score < SHORT_MIN_SCORE:
+            log_event(f'🚫 auto_short: {sym} score={short_score} < {SHORT_MIN_SCORE} — пропускаю (overtrading)')
             continue
         # Volatility filter: block high-vol symbols, scale margin (fail-open)
         from .volatility_filter import is_high_volatility, volatility_scale

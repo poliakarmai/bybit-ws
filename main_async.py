@@ -380,7 +380,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     # Авто-шорты (если не на паузе)
     from .rpc import rpc_state
     if not rpc_state.get("paused"):
-        tasks.append(run_in_thread(check_auto_short, positions or {}))
+        tasks.append(run_in_thread(check_auto_short, positions or {}, timeout=50))
         tasks.append(run_in_thread(check_short_time_sl, positions or {}))  # Фаза 9
 
     # Корреляции
@@ -393,7 +393,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             check_overbought_async(positions),
             run_in_thread(check_pumps, positions, timeout=10),
             run_in_thread(check_weekly_pumps, timeout=10),
-            run_in_thread(check_funding_signals, positions, timeout=10),
+            run_in_thread(check_funding_signals, positions, timeout=20),
             run_in_thread(check_funding_rotation, positions, timeout=10),
         ]
         pump_results = await asyncio.gather(*pump_tasks, return_exceptions=True)
