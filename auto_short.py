@@ -462,6 +462,13 @@ def check_auto_short(positions):
                 log_event(f'🚫 auto_short: {sym} BB={bb_pct:.0f}% < {BB_SHORT_THRESHOLD}% — пропускаю')
                 continue
 
+        # ── Shadow logger: фиксируем BB-кандидата + L2 imbalance (post-mortem мгновенных SL) ──
+        try:
+            from .shadow_logger import log_candidate
+            log_candidate(sym, 'Sell', last_price, bb_pct=round(bb_pct, 1))
+        except Exception:
+            pass
+
         # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр для SHORT ──
         mtf_conf = _check_short_mtf(sym)
         if mtf_conf is False:
