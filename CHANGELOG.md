@@ -7,6 +7,16 @@
 
 ---
 
+## [11.3] — 2026-09-25
+
+### Fixed
+- **BB-кеш шорт-скана** — `auto_short._get_bb_ws` кеширует Daily BB (TTL 30 мин) → убирает повторные kline-запросы. Фиксит `TIMEOUT check_auto_short` (1778 раз/2 дня): 80 кандидатов × REST без кеша не укладывались в deadline. deadline 45→75с, timeout 50→90с.
+- **positions snapshot TIMEOUT** — `asyncio.wait_for` 20→35с (внутренний `bybit_async` уже 30с, `recv_window` 30000).
+- **Funding Momentum таймаут** — `_get_bb_and_funding` кеш (TTL 5 мин) + `check_funding_signals` timeout 20→40с. Фиксит 4521 исторических таймаутов.
+
+### Changed
+- **Техдолг: дубли модулей** — убраны мёртвые импорты `auto_sl`/`trailing_sl` из `main_async.py` (реальный вызов — только `unified_sl.manage_sl`), `docker-entrypoint.sh` переведён с заглушки `main.py` на `main_async`. `trailing_sl.py`/`auto_sl.py` помечены `@deprecated` (не удалены — на них ссылаются тесты).
+
 ## [11.2] — 2026-09-17
 
 ### Fixed

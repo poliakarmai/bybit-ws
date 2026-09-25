@@ -1,7 +1,7 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-09-17 (v11.2 — Volatility Regime Filter + монотонный SL + TP qtyStep фикс)
+> Обновлено: 2026-09-25 (v11.3 — BB-кеш шорт-скана, positions/funding timeout фиксы, техдолг deprecated)
 
 ## Что это
 
