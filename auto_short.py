@@ -52,18 +52,32 @@ from . import DATA_DIR
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
 
+# BB-кэш (TTL 30 мин) — убирает повторные kline-запросы в цикле скана (фикс таймаута check_auto_short)
+_BB_CACHE = {}
+_BB_CACHE_TTL = 1800.0  # 30 мин — Daily BB меняется раз в сутки
+
+
 def _get_bb_ws(symbol, interval='D'):
-    """Получить BB: сначала WS-кеш, fallback на REST."""
+    """Получить BB: сначала кэш → WS-кэш → fallback REST."""
+    _key = (symbol, interval)
+    _now = time.time()
+    _c = _BB_CACHE.get(_key)
+    if _c is not None and _now - _c[0] < _BB_CACHE_TTL:
+        return _c[1]
     if _WS_BB_ENABLED:
         try:
             from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
             if ws_alive() and not ws_stale(300):
                 bb = ws_get_bb(symbol, interval)
                 if bb and bb.get('upper', 0) > 0:
+                    _BB_CACHE[_key] = (_now, bb)
                     return bb
         except Exception as e:
             log_event(f'WS BB fallback to REST for {symbol}: {e}')
-    return get_bb_data(symbol, interval)
+    bb = get_bb_data(symbol, interval)
+    if bb and bb.get('upper', 0) > 0:
+        _BB_CACHE[_key] = (_now, bb)
+    return bb
 from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
 from .state_db import db  # SQLite dual-write
@@ -361,7 +375,7 @@ def check_auto_short(positions):
 
     state = _load_state()
     now = time.time()
-    deadline = now + 45  # time budget — не дольше 45с (внешний timeout=50с в main_async)
+    deadline = now + 75  # time budget — не дольше 75с (внешний timeout=90с в main_async)
 
     # Считаем текущие SHORT (в позиции + в стейте)
     active_shorts = sum(1 for p in positions.values()

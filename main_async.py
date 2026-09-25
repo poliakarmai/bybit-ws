@@ -380,7 +380,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     # Авто-шорты (если не на паузе)
     from .rpc import rpc_state
     if not rpc_state.get("paused"):
-        tasks.append(run_in_thread(check_auto_short, positions or {}, timeout=50))
+        tasks.append(run_in_thread(check_auto_short, positions or {}, timeout=90))
         tasks.append(run_in_thread(check_short_time_sl, positions or {}))  # Фаза 9
 
     # Корреляции
