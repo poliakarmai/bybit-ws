@@ -46,6 +46,9 @@ FUNDING_TIERS = {
 ONE_WAY = {'XRPUSDT', 'ONDOUSDT', 'WLFIUSDT', 'ENJUSDT', 'ESPORTSUSDT',
            'AVAXUSDT', 'APTUSDT', 'SUIUSDT'}
 
+_BB_FUND_CACHE = {}
+_BB_FUND_CACHE_TTL = 300.0  # 5 min — funding updates ~8h, Daily BB ~24h
+
 
 def _load_state():
     try:
@@ -65,6 +68,10 @@ def _save_state(state):
 
 def _get_bb_and_funding(sym):
     """Получить Daily BB%, ставку фондинга и тренд (3-дневное изменение)."""
+    now = time.time()
+    _c = _BB_FUND_CACHE.get(sym)
+    if _c is not None and now - _c[0] < _BB_FUND_CACHE_TTL:
+        return _c[1]
     try:
         # BB Daily
         kline = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=20')
@@ -87,7 +94,7 @@ def _get_bb_and_funding(sym):
         ticker = bybit('GET', f'/v5/market/tickers?category=linear&symbol={sym}')
         funding_rate = float(ticker.get('result', {}).get('list', [{}])[0].get('fundingRate', 0))
 
-        return {
+        result = {
             'lower': round(lower, 8),
             'middle': round(sma, 8),
             'upper': round(upper, 8),
@@ -96,6 +103,8 @@ def _get_bb_and_funding(sym):
             'price': closes[0],
             'trend_3d': round(trend_3d, 4),
         }
+        _BB_FUND_CACHE[sym] = (now, result)
+        return result
     except Exception:
         return None
 

@@ -391,7 +391,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             check_overbought_async(positions),
             run_in_thread(check_pumps, positions, timeout=10),
             run_in_thread(check_weekly_pumps, timeout=10),
-            run_in_thread(check_funding_signals, positions, timeout=20),
+            run_in_thread(check_funding_signals, positions, timeout=40),
             run_in_thread(check_funding_rotation, positions, timeout=10),
         ]
         pump_results = await asyncio.gather(*pump_tasks, return_exceptions=True)
@@ -691,10 +691,10 @@ async def async_main_loop():
             try:
                 new_positions, new_orders, _last_rest_sync = await asyncio.wait_for(
                     async_positions_snapshot_ws(_last_rest_sync, _REST_SYNC_INTERVAL),
-                    timeout=20.0
+                    timeout=35.0
                 )
             except asyncio.TimeoutError:
-                log_event(f'⚠️ positions snapshot TIMEOUT (20s), using empty')
+                log_event(f'⚠️ positions snapshot TIMEOUT (35s), using empty')
                 new_positions, new_orders = {}, {}
             except Exception as e:
                 log_event(f'⚠️ positions snapshot error: {e}')
