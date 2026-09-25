@@ -46,10 +46,8 @@ from .state_db import adb, StateDB
 sync_db = StateDB()
 
 # Синхронные модули (вызываются через executor)
-from .auto_sl import check_and_fix_sl, check_breakeven_sl  # legacy — kept for reference
 from .unified_sl import manage_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
-from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, tight_trailing_sl, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
 from .overbought import check_overbought, check_overbought_async, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl

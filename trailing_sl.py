@@ -1,4 +1,5 @@
 """Trailing SL для разогнанных позиций."""
+# DEPRECATED: superseded by unified_sl.manage_sl(). Kept only for legacy tests. Do NOT add new callers.
 import os
 from . import TRAIL_SL_PERCENT
 from .api import get_bb_data, place_stop_loss

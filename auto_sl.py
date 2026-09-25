@@ -9,6 +9,7 @@ SL = entry ± k × ATR(14), где k зависит от волатильнос�
 
 Fallback на BB-based если ATR недоступен.
 """
+# DEPRECATED: superseded by unified_sl.manage_sl(). Kept only for legacy tests. Do NOT add new callers.
 import os, json, time
 from .api import bybit, fetch_positions, get_bb_data
 from .config import Config
