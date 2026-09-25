@@ -85,7 +85,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Bollinger Grid** LONG/SHORT на дневном таймфрейме
 - **9-метричный скоринг**: BB%, объём, падающие дни, фондинг, волатильность, качество + ML Gate
 - **LSTM-классификатор** рынка (82.3% точность, 5 режимов)
-- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek)
+- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek → Qwen → Nemotron, fail-closed)
 - **Auto-TP**: 20% на Middle BB + 80% на Upper BB
 - **Unified SL**: 5 механизмов → один приоритетный (tight > simple > hard > BE > default)
 
@@ -117,7 +117,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Composite Score**: WR+PF+Sharpe+MaxDD+AvgHold с adaptive per-regime весами и exponential decay
 - **Micro-updates**: обучение после каждой сделки с outlier-защитой (>3σ)
 - **Canary mode**: Bayesian A/B тест, адаптивный 5-20%, авто-rollback
-- **Entry Judge**: cross-model validation (DeepSeek), fail-closed
+- **Entry Judge**: cross-model validation (DeepSeek → Qwen → Nemotron), fail-closed
 - **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% точность)
 - **LSTM World Model**: multi-task OHLCV prediction для скоринга входов
 
