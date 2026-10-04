@@ -7,7 +7,6 @@ Priority: tight_trail > simple_trail > hard_trail > breakeven > auto_sl > defaul
 import time
 from .api import place_stop_loss, get_bb_data
 from .alerts import log_event
-from .manual_positions import is_manual_position, is_auto_sltp
 from . import TRAIL_SL_PERCENT
 
 # Throttle: не чаще чем раз в N секунд на позицию (по имени символа)
@@ -38,8 +37,6 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
     alerts = []
 
     for sym, p in positions.items():
-        if is_manual_position(sym) and not is_auto_sltp(sym):
-            continue
 
         entry = p.get('entry', 0)
         mark = p.get('mark', 0)

@@ -22,7 +22,7 @@ import os
 import sqlite3
 import statistics
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DB = os.path.expanduser("~/.local/share/bybit-ws/state.db")
 RPC = "http://127.0.0.1:8766/balance"
@@ -151,6 +151,10 @@ def report(days: int | None, nav: float | None) -> str:
     mdd = _max_drawdown({d: v[0] for d, v in daily.items()})
     sharpe = _sharpe(dvals)
     sortino = _sortino(dvals)
+    # Sortino 90d: only last 90 days
+    cutoff_90 = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%d')
+    daily_90 = [v[0] for k, v in daily.items() if k >= cutoff_90]
+    sortino_90 = _sortino(daily_90) if daily_90 else 0.0
     annual_ret = statistics.mean(dvals) * 365 if dvals else 0.0
     calmar = annual_ret / abs(mdd) if mdd < 0 else 0.0
     expectancy = _expectancy(pnls)
@@ -177,6 +181,7 @@ def report(days: int | None, nav: float | None) -> str:
     O.append(f"| Profit factor | {total['pf']:.2f} |")
     O.append(f"| Sharpe (annualized) | {sharpe:.2f} |")
     O.append(f"| Sortino (annualized) | {sortino:.2f} |")
+    O.append(f"| Sortino (90d) | {sortino_90:.2f} |")
     O.append(f"| Calmar (ret/MDD) | {calmar:.2f} |")
     O.append(f"| Expectancy (сделка) | {_fmt_money(expectancy)} |")
     O.append(f"| Max drawdown | {_fmt_money(mdd)} |")

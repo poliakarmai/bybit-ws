@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS counterfactual_entries (
+    symbol TEXT,
+    side TEXT,
+    score INTEGER,
+    bb_pos REAL,
+    entry_price REAL,
+    confidence REAL,
+    issues TEXT,
+    ts INTEGER
+);
 """
 
 
@@ -465,6 +475,28 @@ class StateDB:
             self.conn.execute("DELETE FROM kv_store WHERE key=?", (key,))
             self.conn.commit()
         return val if isinstance(val, dict) else None
+
+    # ── counterfactual entries ───────────────────────────────────────
+
+    def log_counterfactual(self, symbol, side, score, bb_pos, entry_price, confidence, issues):
+        """Log a rejected entry signal for counterfactual PnL analysis."""
+        self.conn.execute("""INSERT INTO counterfactual_entries
+            (symbol, side, score, bb_pos, entry_price, confidence, issues, ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, side, score, bb_pos, entry_price, confidence, issues, int(time.time())))
+        self.conn.commit()
+
+    def get_counterfactual(self, since=None):
+        """Get counterfactual entries, optionally filtered by timestamp."""
+        q = "SELECT * FROM counterfactual_entries"
+        params = []
+        if since:
+            q += " WHERE ts > ?"
+            params.append(since)
+        q += " ORDER BY ts DESC"
+        rows = self.conn.execute(q, params).fetchall()
+        return [self._row_dict(r, "counterfactual_entries") for r in rows]
+
     # ── maintenance ────────────────────────────────────────────
 
     def vacuum(self):
