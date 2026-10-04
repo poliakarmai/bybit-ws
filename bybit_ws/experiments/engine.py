@@ -180,6 +180,7 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
     min_score = int(params.get("min_score", MIN_SCORE))
     bb_period = int(params.get("bb_period", 20))
     bb_std = float(params.get("bb_std_mult", 2.0))
+    atr_ratio_threshold = params.get("atr_ratio_threshold", None)
 
     exchange = PaperExchange(symbol, klines, initial_balance)
     closes: list[float] = []
@@ -219,6 +220,19 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
         risk_amount = exchange.balance * (risk_pct / 100)
         sl_distance = entry * sl_pct
         qty = risk_amount / sl_distance if sl_distance > 0 else 0.0
+
+        # Volatility gate: skip entry if ATR spikes above baseline * threshold
+        if atr_ratio_threshold is not None:
+            try:
+                start_j = max(0, i - 20)
+                baseline_vals = [calc_atr(klines, j) for j in range(start_j, i)]
+                baseline_atr = mean(baseline_vals) if baseline_vals else 0.0
+            except Exception:
+                baseline_atr = 0.0
+            ratio = atr / baseline_atr if baseline_atr and baseline_atr > 0 else 0.0
+            if ratio > atr_ratio_threshold:
+                equity_curve.append(exchange.equity)
+                continue
 
         if best_side == "Buy":
             sl = entry * (1 - sl_pct)
