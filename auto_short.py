@@ -338,6 +338,30 @@ def short_score_coin(sym: str, bb_data: dict, ticker: dict, is_junk: bool) -> di
     }
 
 
+def should_disable_short(window: int = 30, min_pf: float = 1.0) -> bool:
+    """Отключить авто-SHORT если PF на последних N закрытых SHORT-сделок < min_pf.
+
+    ponytail: скользящее окно по closed_at DESC. < window сделок → не отключаем
+    (мало данных). Ошибка чтения → fail-open (не блокируем торговлю).
+    """
+    try:
+        trades = db.get_trades(limit=window * 3)  # запас на LONG/ручные
+        shorts = [
+            t for t in trades
+            if t.get('side') == 'Sell' and not t.get('manual')
+        ][:window]
+        if len(shorts) < window:
+            return False
+        gross_profit = sum(t.get('pnl') or 0 for t in shorts if (t.get('pnl') or 0) > 0)
+        gross_loss = abs(sum(t.get('pnl') or 0 for t in shorts if (t.get('pnl') or 0) < 0))
+        if gross_loss <= 0:
+            return False  # нет убыточных → PF бесконечен
+        return (gross_profit / gross_loss) < min_pf
+    except Exception as e:
+        log_event(f'⚠️ should_disable_short error: {e}')
+        return False
+
+
 def check_auto_short(positions):
     """Сканировать перегретые монеты и ставить SHORT.
     Вызывается каждые 10 циклов (5 мин)."""
