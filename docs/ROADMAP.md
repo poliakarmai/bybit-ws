@@ -76,7 +76,7 @@
 |--------|-----------|--------|
 | SHORT в TRENDING_DOWN: калибровка параметров | 🔴 | ✅ max_loss 15→10%, max_hold 48→24ч |
 | Time-based SL: закрытие убыточных >12ч | 🔴 | ✅ check_short_time_sl() в основном цикле |
-| Исключение imported-сделок из self-learn | 🔴 | ✅ WHERE strategy != 'imported' |
+| Исключение imported-сделок из self-learn | 🔴 | ✅ strategy != 'imported' + manual=0 (v11.4) |
 | Винрейт SHORT: анализ + улучшение | 🔴 | ✅ анализ: без STGUSDT +$146 |
 | World Model качество > 33% | 🟡 | ✅ 22.3% → 33.1% (400 эпох, λ=0.01) |
 
