@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS trade_history (
     dca_count INTEGER DEFAULT 0,
     partial_tp_count INTEGER DEFAULT 0,
     exit_reason TEXT,
-    hold_hours REAL
+    hold_hours REAL,
+    manual INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_trade_symbol ON trade_history(symbol);
 CREATE INDEX IF NOT EXISTS idx_trade_closed ON trade_history(closed_at);
@@ -143,8 +144,15 @@ class StateDB:
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
         return self._conn
+
+    def _migrate(self):
+        """Добавить колонку manual в существующую БД (migration)."""
+        cols = [d[1] for d in self.conn.execute("PRAGMA table_info(trade_history)")]
+        if 'manual' not in cols:
+            self.conn.execute("ALTER TABLE trade_history ADD COLUMN manual INTEGER DEFAULT 0")
 
     # ── trade_history ─────────────────────────────────────────
 
@@ -160,14 +168,16 @@ class StateDB:
     def add_trade(self, symbol, side, strategy, entry_price, exit_price,
                   size, pnl, fees=0, entry_at=None, closed_at=None,
                   bb_pct=None, rsi=None, entry_reason=None,
-                  dca_count=0, partial_tp_count=0, exit_reason=None, hold_hours=None):
+                  dca_count=0, partial_tp_count=0, exit_reason=None, hold_hours=None,
+                  manual=0):
         self.conn.execute("""INSERT INTO trade_history
             (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at,
-             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours, manual)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, side, strategy, entry_price, exit_price, size, pnl,
              fees, entry_at or int(time.time()), closed_at or int(time.time()),
-             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours))
+             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours,
+             int(manual)))
         self.conn.commit()
         return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 

@@ -163,6 +163,11 @@ def _import_bybit_trades(data_dir):
                         else:
                             exit_reason = 'Unknown'
                         diag = sync_db.get_entry_diagnostic(sym, 'Buy' if side == 'buy' else 'Sell') or {}
+                        try:
+                            from .manual_positions import is_manual_position
+                            _manual = 1 if is_manual_position(sym) else 0
+                        except Exception:
+                            _manual = 0
                         sync_db.add_trade(
                             symbol=sym, side='Buy' if side == 'buy' else 'Sell',
                             strategy='auto', entry_price=float(item.get('avgEntryPrice', 0)),
@@ -172,6 +177,7 @@ def _import_bybit_trades(data_dir):
                             exit_reason=exit_reason, hold_hours=hold_h,
                             bb_pct=diag.get('bb_pct'), rsi=diag.get('rsi'),
                             entry_reason=diag.get('entry_reason'),
+                            manual=_manual,
                         )
                     except Exception:
                         pass

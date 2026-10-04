@@ -1467,6 +1467,14 @@ class RPCHandler(BaseHTTPRequestHandler):
             return _error(self, 'Order failed', err_msg, status, error_code)
 
         order_id = order_result.get('result', {}).get('orderId', 'unknown')
+
+        # ── Пометить как ручную позицию: бот не вмешивается + self-learn исключает ──
+        try:
+            from .manual_positions import mark_manual_position
+            mark_manual_position(symbol, side=side, note='manual via /enter')
+        except Exception:
+            pass
+
         result = {
             'status': 'ok',
             'symbol': symbol,
