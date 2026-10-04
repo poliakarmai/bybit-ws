@@ -133,6 +133,7 @@ let wsReconnectTimer = null;
 function fmt(n, d) { return Number(n||0).toFixed(d||2); }
 function pnlClass(v) { return v >= 0 ? 'pos' : 'neg'; }
 function pnlSign(v) { return v >= 0 ? '+' : ''; }
+function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 // ── WebSocket: real-time позиции + монитор ──
 function connectWS() {
@@ -186,7 +187,7 @@ function applyPositions(data) {
 
     const side = p.side === 'Buy' ? '🟢' : '🔴';
     posHTML += `<div class="row">
-      <span class="sym">${side} ${p.symbol}</span>
+      <span class="sym">${side} ${esc(p.symbol)}</span>
       <span style="font-size:10px;color:#8b949e;">${p.leverage}x · вх $${fmt(entry,4)} · м $${fmt(mark,4)}</span>
       <span class="pnl ${pnlClass(upnl)}">${pnlSign(upnl)}$${fmt(upnl,2)}</span>
     </div>`;
@@ -261,7 +262,7 @@ async function refreshFull() {
     // Alerts
     const alerts = data.alerts || [];
     document.getElementById('alerts').innerHTML = alerts.length > 0
-      ? alerts.slice(-5).reverse().map(a => `<div class="metric">${typeof a==='string'?a:(a.msg||'')}</div>`).join('')
+      ? alerts.slice(-5).reverse().map(a => `<div class="metric">${esc(typeof a==='string'?a:(a.msg||''))}</div>`).join('')
       : '<div class="metric">—</div>';
 
     // Risk (daily PnL)
@@ -295,13 +296,13 @@ async function refreshFull() {
       if (longs.length > 0) {
         sigHTML += '<div style="color:var(--green);margin-bottom:4px;">📈 LONG:</div>';
         for (const s of longs.slice(0, 3)) {
-          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pct||'?'}%</div>`;
+          sigHTML += `<div class="signal-row"><span class="sym">${esc(s.symbol)}</span> score=${s.score} BB=${s.bb_pct||'?'}%</div>`;
         }
       }
       if (shorts.length > 0) {
         sigHTML += '<div style="color:var(--red);margin-bottom:4px;margin-top:6px;">📉 SHORT:</div>';
         for (const s of shorts.slice(0, 3)) {
-          sigHTML += `<div class="signal-row"><span class="sym">${s.symbol}</span> score=${s.score} BB=${s.bb_pct||'?'}%</div>`;
+          sigHTML += `<div class="signal-row"><span class="sym">${esc(s.symbol)}</span> score=${s.score} BB=${s.bb_pct||'?'}%</div>`;
         }
       }
       document.getElementById('signals').innerHTML = sigHTML || '<div class="metric">Нет сигналов</div>';
@@ -328,8 +329,8 @@ function renderOrders(orders, kind) {
   for (const o of filtered.slice(0, 20)) {
     const kindClr = o.kind === 'TP' ? 'var(--green)' : o.kind === 'SL' ? 'var(--red)' : 'var(--yellow)';
     html += `<div class="row">
-      <span class="sym">${o.symbol}</span>
-      <span style="width:45px;color:${kindClr}">${o.kind}</span>
+      <span class="sym">${esc(o.symbol)}</span>
+      <span style="width:45px;color:${kindClr}">${esc(o.kind)}</span>
       <span style="width:65px">$${fmt(o.price, 4)}</span>
       <span style="width:45px">${fmt(o.qty, 0)}</span>
     </div>`;
