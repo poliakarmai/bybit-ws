@@ -816,7 +816,7 @@ def check_junk_dca(positions):
     junk_cfg = getattr(cfg.strategy, 'junk', None)
     MAX_LOSS_PCT = getattr(junk_cfg, 'max_loss_pct', 10) / 100 if junk_cfg is not None else 0.10  # Фаза 9: 15→10
     MAX_HOLD_HOURS = getattr(junk_cfg, 'max_hold_hours', 24) if junk_cfg is not None else 24  # Фаза 9: 48→24
-    TIME_SL_HOURS = getattr(junk_cfg, 'time_sl_hours', 12) if junk_cfg is not None else 12  # Фаза 9: time-based SL
+    TIME_SL_HOURS = getattr(junk_cfg, 'time_sl_hours', 6) if junk_cfg is not None else 6  # Фаза 9: time-based SL (04.10: 12→6ч)
 
     state = _load_state()
     now = time.time()
@@ -940,7 +940,7 @@ def check_short_time_sl(positions: dict) -> list[str]:
     from .alerts import log_event as _log, add_alert as _alert
     from .api import place_order as _close_order
 
-    SHORT_TIME_SL_HOURS = 12  # закрыть если >12ч в убытке
+    SHORT_TIME_SL_HOURS = 6  # закрыть если >6ч в убытке (04.10: 12→6ч)
     actions = []
     now = _time.time()
 

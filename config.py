@@ -56,8 +56,8 @@ _DEFAULT_STRATEGY_SHORT = {
     'leverage': 3,
     'margin': 10,
     'entry_offset': 0.02,
-    'sl_tier_ab': 0.10,   # +10% SL для SHORT Tier A/B (23.06.2026: +5% → +10%)
-    'sl_tier_cd': 0.07,
+    'sl_tier_ab': 0.06,   # +6% SL для SHORT Tier A/B (04.10.2026: 10% → 6%, подтянут к TP avg_win +5.1%)
+    'sl_tier_cd': 0.05,   # +5% SL junk (04.10.2026: 7% → 5%)
     'bb_threshold': 85,
     'max_positions': 3,
     'min_score': 40,       # мин 9-метричный скор для входа (тормоз overtrading)
