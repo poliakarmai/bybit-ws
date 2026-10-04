@@ -143,6 +143,7 @@
 | DQN → PPO | 🟢 |
 | — Feature Store / Data Pipeline для RL | 📋 (pre-req) |
 | Grafana HTTPS (нужен домен) | 🟢 |
+| Межбиржевой funding-спред (Bybit vs Binance/OKX) → сигнал в check_funding_signals | 🟡 |
 
 ## История фаз
 

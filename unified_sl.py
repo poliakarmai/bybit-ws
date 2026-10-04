@@ -72,7 +72,7 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
                         sl_target, sl_desc = _calc_breakeven(p, is_long, mark, entry)
                     if sl_target is None:
                         # ── Priority 5: Default fix (ensure SL exists) ──
-                        sl_target, sl_desc = _calc_default_sl(p, is_long, mark, entry, leverage)
+                        sl_target, sl_desc = _calc_default_sl(sym, p, is_long, mark, entry, leverage)
 
         if sl_target is None:
             continue
@@ -200,15 +200,34 @@ def _calc_breakeven(p: dict, is_long: bool, mark: float, entry: float):
     return None, ''
 
 
-def _calc_default_sl(p: dict, is_long: bool, mark: float, entry: float, leverage: float):
-    """Default SL: -10% от входа если SL не установлен"""
+def _calc_default_sl(sym: str, p: dict, is_long: bool, mark: float, entry: float, leverage: float):
+    """Default SL: ATR-адаптивный (1.5×ATR(14), clamp 3–10%), fallback −10%.
+
+    04.10.2026: динамический шаг по волатильности вместо фикс −10%.
+    Волатильная монета (SAND +65%/нед) → шире SL (до 10%), спокойная (BTC) → уже (3–5%).
+    """
     current_sl = p.get('stopLoss')
     if current_sl is not None:
         return None, ''
 
+    atr = 0.0
+    try:
+        from .auto_tp import _get_atr_value
+        atr = _get_atr_value(sym)
+    except Exception:
+        atr = 0.0
+
+    if atr > 0 and entry > 0:
+        dist = max(0.03, min(0.10, 1.5 * atr / entry))
+        if is_long:
+            target = round(entry * (1 - dist), 4)
+        else:
+            target = round(entry * (1 + dist), 4)
+        return target, f'ATR SL {dist*100:.1f}%'
+
+    # fallback: фикс −10% (нет ATR / ошибка сети)
     if is_long:
         target = round(entry * 0.90, 4)
     else:
         target = round(entry * 1.10, 4)
-
     return target, 'default -10%'
