@@ -11,7 +11,7 @@ import time
 from . import TP_FAIL_COUNT, TP_FAIL_BACKOFF, TP_FAIL_DELAYS, TP_MAX_FAILS, TP_PERM_SKIP, TP_PERM_SKIP_SIZES, TP_SKIP_FILE
 from .api import get_bb_data
 from .alerts import log_event
-from .manual_positions import is_manual_position
+from .manual_positions import is_manual_position, is_auto_sltp
 from .file_utils import safe_json_write
 
 import json, os, math
@@ -164,7 +164,7 @@ def auto_take_profit(positions, orders, skip_syms=None):
     bb_covered = set()  # символы получившие TP через BB
 
     for sym, p in positions.items():
-        if is_manual_position(sym):
+        if is_manual_position(sym) and not is_auto_sltp(sym):
             continue
 
         # PERM_SKIP: проверяем рост позиции ИЛИ time-decay (загружен при init)

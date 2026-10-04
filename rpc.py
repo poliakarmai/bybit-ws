@@ -1468,10 +1468,10 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         order_id = order_result.get('result', {}).get('orderId', 'unknown')
 
-        # ── Пометить как ручную позицию: бот не вмешивается + self-learn исключает ──
+        # ── Пометить как ручную: self-learn исключает, но SL/TP бот ставит сам ──
         try:
             from .manual_positions import mark_manual_position
-            mark_manual_position(symbol, side=side, note='manual via /enter')
+            mark_manual_position(symbol, side=side, note='manual via /enter', auto_sltp=True)
         except Exception:
             pass
 

@@ -45,8 +45,8 @@ def is_manual_position(sym):
     return entry.get('manual', False)
 
 
-def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None):
-    """Пометить позицию как ручную — монитор её не трогает.
+def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, auto_sltp=False):
+    """Пометить позицию как ручную — монитор её не трогает (кроме auto_sltp).
 
     Args:
         sym: символ (например 'NEARUSDT')
@@ -54,11 +54,13 @@ def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None):
         side: 'Buy' или 'Sell'
         note: заметка (например 'x10 wide-SL')
         leverage: плечо (опционально)
+        auto_sltp: True → SL/TP бот ставит сам (по стратегии), но self-learn исключает
     """
     state = _load_state()
     entry_data = state.get(sym, {})
     entry_data['manual'] = True
     entry_data['manual_ts'] = time.time()
+    entry_data['auto_sltp'] = bool(auto_sltp)
     if entry is not None:
         entry_data['manual_entry'] = entry
     if side:
@@ -69,6 +71,12 @@ def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None):
         entry_data['manual_leverage'] = leverage
     state[sym] = entry_data
     _save_state(state)
+
+
+def is_auto_sltp(sym):
+    """True если ручная позиция помечена auto_sltp — бот ставит SL/TP сам."""
+    state = _load_state()
+    return state.get(sym, {}).get('auto_sltp', False)
 
 
 def unmark_manual_position(sym):
