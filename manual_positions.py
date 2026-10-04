@@ -71,6 +71,13 @@ def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, au
         entry_data['manual_leverage'] = leverage
     state[sym] = entry_data
     _save_state(state)
+    # логируем причину ручного входа → trade_history.entry_reason (через entry_diag)
+    if note:
+        try:
+            from .state_db import db
+            db.save_entry_diagnostic(sym, side, entry_reason=note)
+        except Exception as e:
+            log_event(f'⚠️ mark_manual_position entry_reason: {e}')
 
 
 def is_auto_sltp(sym):

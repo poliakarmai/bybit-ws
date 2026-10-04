@@ -1471,7 +1471,8 @@ class RPCHandler(BaseHTTPRequestHandler):
         # ── Пометить как ручную: self-learn исключает, но SL/TP бот ставит сам ──
         try:
             from .manual_positions import mark_manual_position
-            mark_manual_position(symbol, side=side, note='manual via /enter', auto_sltp=True)
+            _reason = (body.get('reason') or 'manual').strip()[:100]
+            mark_manual_position(symbol, side=side, note=_reason, auto_sltp=True)
         except Exception:
             pass
 
