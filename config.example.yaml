@@ -34,10 +34,10 @@ api:
 
   # Базовый URL API
   # Тип: строка (URL)
-  #   mainnet:  https://api.bytick.com
+  #   mainnet:  https://api.bybit.com
   #   testnet:  https://api-testnet.bybit.com
-  # По умолчанию: https://api.bytick.com
-  base_url: "https://api.bytick.com"
+  # По умолчанию: https://api.bybit.com
+  base_url: "https://api.bybit.com"
 
   # Режим тестовой сети (true = testnet, false = mainnet)
   # При testnet=true base_url автоматически меняется на api-testnet.bybit.com

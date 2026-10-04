@@ -201,7 +201,7 @@ _DEFAULT_POSITION_SIZING = {
 _DEFAULT_API = {
     'key': '${BYBIT_API_KEY}',
     'secret': '${BYBIT_API_SECRET}',
-    'base_url': 'https://api.bytick.com',
+    'base_url': 'https://api.bybit.com',
     'retry_count': 3,
     'retry_backoff': [1, 3, 10],   # seconds
     'timeout': 30,
@@ -252,7 +252,7 @@ def _generate_example() -> str:
 api:
   key: "${{BYBIT_API_KEY}}"
   secret: "${{BYBIT_API_SECRET}}"
-  base_url: "https://api.bytick.com"
+  base_url: "https://api.bybit.com"
 
 strategy:
   long:

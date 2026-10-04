@@ -10,7 +10,7 @@ from .alerts import log_event
 # === Credentials (читаются один раз при импорте) ===
 _API_KEY = None
 _API_SECRET = None
-_BASE_URL = 'https://api.bytick.com'
+_BASE_URL = 'https://api.bybit.com'
 
 def _load_credentials():
     global _API_KEY, _API_SECRET
