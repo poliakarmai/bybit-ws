@@ -165,8 +165,8 @@ def _check_short_mtf(sym: str):
             confidence = regime_data.get('confidence', 0)
             if regime == 'TRENDING_DOWN' and confidence >= 25:
                 min_tfs = 1
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_short non-critical: {e}')
     
     try:
         conf = check_confluence(sym, 'SHORT')
@@ -363,8 +363,8 @@ def check_auto_short(positions):
     try:
         from .journal.self_learn import get_canary_param
         SHORT_MIN_SCORE = get_canary_param('min_score', SHORT_MIN_SCORE, side='sell')
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_short non-critical: {e}')
     COOLDOWN = cfg.strategy.short.cooldown_seconds
     ENTRY_OFFSET = cfg.strategy.short.entry_offset
     JUNK_PUMP_THRESHOLD = getattr(cfg.strategy, 'junk', None)
@@ -480,8 +480,8 @@ def check_auto_short(positions):
         try:
             from .shadow_logger import log_candidate
             log_candidate(sym, 'Sell', last_price, bb_pct=round(bb_pct, 1))
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f'⚠️ auto_short non-critical: {e}')
 
         # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр для SHORT ──
         mtf_conf = _check_short_mtf(sym)
@@ -564,8 +564,8 @@ def check_auto_short(positions):
                 if available_usdt < required:
                     log_event(f'💰 LOW FUNDS SHORT {sym}: need ${required:.1f}, have ${available_usdt:.1f} — skipping')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── Orderbook imbalance filter (27.06) ──
             try:
@@ -574,8 +574,8 @@ def check_auto_short(positions):
                 if not ob_ok:
                     log_event(f'📊 OB BLOCK {sym}: {ob_reason}')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── Volume confirmation filter (28.06) ──
             try:
@@ -584,8 +584,8 @@ def check_auto_short(positions):
                 if not vol_ok:
                     log_event(f'📊 VOL BLOCK {sym}: {vol_reason}')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
             try:
@@ -614,8 +614,8 @@ def check_auto_short(positions):
                 if not conc_ok:
                     log_event(f'⚠️ CONC BLOCK SHORT {sym}: {conc_reason}')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
@@ -642,8 +642,8 @@ def check_auto_short(positions):
                 from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
                 if should_use_canary():
                     mark_canary_entry(sym, 'sell', time.time())
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             state_entry = {
                 'last_short_ts': now,
@@ -663,8 +663,8 @@ def check_auto_short(positions):
                     rsi=_calc_rsi_tel(sym),
                     entry_reason=('junk' if is_junk else 'tier_ab'),
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── MTF-бонус (один раз, для обеих веток) ──
             mtf_bonus = ''
@@ -720,8 +720,8 @@ def check_auto_short(positions):
                     _sl = get_canary_param('sl_pct', _sl, symbol=sym, side='sell')
                     if isinstance(_sl, (int, float)) and 0 < _sl <= 30:
                         sl_pct = _sl / 100.0
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_event(f'⚠️ auto_short non-critical: {e}')
                 sl_price = _round_to_tick(price * (1 + sl_pct), sym)
 
                 # TP ставим сразу, SL — через trading-stop без stopLoss
