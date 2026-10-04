@@ -89,6 +89,24 @@ def _sharpe(daily: list[float]) -> float:
     return statistics.mean(daily) / sd * math.sqrt(365)
 
 
+def _sortino(daily: list[float]) -> float:
+    """Sortino ratio (downside deviation, target=0)."""
+    if len(daily) < 2:
+        return 0.0
+    downside = [d for d in daily if d < 0]
+    if not downside:
+        return float("inf")
+    dd = math.sqrt(sum(d * d for d in downside) / len(daily))
+    if dd <= 0:
+        return 0.0
+    return statistics.mean(daily) / dd * math.sqrt(365)
+
+
+def _expectancy(pnls: list[float]) -> float:
+    """Матожидание на сделку ($)."""
+    return statistics.mean(pnls) if pnls else 0.0
+
+
 def _fmt_money(v: float) -> str:
     return f"${v:+,.2f}"
 
@@ -132,6 +150,10 @@ def report(days: int | None, nav: float | None) -> str:
     dvals = [v[0] for v in daily.values()]
     mdd = _max_drawdown({d: v[0] for d, v in daily.items()})
     sharpe = _sharpe(dvals)
+    sortino = _sortino(dvals)
+    annual_ret = statistics.mean(dvals) * 365 if dvals else 0.0
+    calmar = annual_ret / abs(mdd) if mdd < 0 else 0.0
+    expectancy = _expectancy(pnls)
     avg_hold = statistics.mean(holds) if holds else 0.0
 
     if nav is None:
@@ -154,6 +176,9 @@ def report(days: int | None, nav: float | None) -> str:
     O.append(f"| Win rate | {total['wr']:.1f}% |")
     O.append(f"| Profit factor | {total['pf']:.2f} |")
     O.append(f"| Sharpe (annualized) | {sharpe:.2f} |")
+    O.append(f"| Sortino (annualized) | {sortino:.2f} |")
+    O.append(f"| Calmar (ret/MDD) | {calmar:.2f} |")
+    O.append(f"| Expectancy (сделка) | {_fmt_money(expectancy)} |")
     O.append(f"| Max drawdown | {_fmt_money(mdd)} |")
     O.append(f"| Средний холд | {avg_hold:.1f} ч |")
     O.append("")
