@@ -18,7 +18,7 @@ from .config import Config
 def _vf_cfg() -> dict:
     """Загрузить секцию volatility_filter из конфига."""
     try:
-        return Config().cfg.get('volatility_filter', {}) or {}
+        return Config().get('volatility_filter', {}) or {}
     except Exception:
         return {}
 
