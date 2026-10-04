@@ -13,6 +13,7 @@ import json
 import subprocess
 import math
 from typing import Optional
+from bybit_ws.api import bybit
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -61,7 +62,7 @@ def run_bybit(*args: str) -> dict:
 
 def get_top_tickers(limit: int = 50) -> list:
     """Получить топ-N монет по обороту."""
-    result = run_bybit('raw', 'GET', '/v5/market/tickers?category=linear')
+    result = bybit('GET', '/v5/market/tickers?category=linear')
     if result.get('retCode') != 0:
         return []
     tickers = result.get('result', {}).get('list', [])
@@ -78,8 +79,8 @@ def get_top_tickers(limit: int = 50) -> list:
 
 def get_candles(symbol: str, interval: str = 'D', limit: int = 30) -> Optional[list]:
     """Получить свечи (от старых к новым)."""
-    result = run_bybit('raw', 'GET',
-                       f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}')
+    result = bybit('GET',
+                   f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}')
     if result.get('retCode') != 0:
         return None
     try:
@@ -730,7 +731,7 @@ if __name__ == '__main__':
         ticker = next((t for t in tickers if t['symbol'] == args.symbol.upper()), None)
         if not ticker:
             # fallback: прямой запрос
-            r = run_bybit('raw', 'GET', f'/v5/market/tickers?category=linear&symbol={args.symbol.upper()}')
+            r = bybit('GET', f'/v5/market/tickers?category=linear&symbol={args.symbol.upper()}')
             if r.get('retCode') == 0:
                 tlist = r.get('result', {}).get('list', [])
                 if tlist:
