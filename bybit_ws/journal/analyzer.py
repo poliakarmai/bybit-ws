@@ -212,17 +212,15 @@ def pair_trades_fifo(trades: list[Trade]) -> list[RoundTrip]:
 
 # ── Profile computation ─────────────────────────────────────────────────────
 
-def compute_profile(trades: list[Trade]) -> JournalProfile:
-    """Строит торговый профиль."""
-    if not trades:
-        return JournalProfile()
+def compute_profile_from_roundtrips(rts: list[RoundTrip], total_trades: int | None = None) -> JournalProfile:
+    """Строит профиль из уже готовых roundtrips (pnl посчитан, без FIFO-матчинга).
 
-    rts = pair_trades_fifo(trades)
+    Используется когда pnl берётся напрямую из БД (trade_history.pnl), а не
+    пересчитывается через pair_trades_fifo() — который ломается на перекрывающихся
+    сделках одного символа (DCA / partial TP / исторические), инвертируя знак PnL.
+    """
     if not rts:
-        return JournalProfile(total_trades=len(trades))
-
-    ts_list = [t.timestamp for t in trades]
-    span_hours = max(1, (max(ts_list) - min(ts_list)) / 3600.0)
+        return JournalProfile(total_trades=total_trades or 0)
 
     wins = [rt for rt in rts if rt.pnl > 0]
     losses = [rt for rt in rts if rt.pnl < 0]
@@ -265,7 +263,7 @@ def compute_profile(trades: list[Trade]) -> JournalProfile:
     ]
 
     return JournalProfile(
-        total_trades=len(trades),
+        total_trades=total_trades if total_trades is not None else len(rts),
         total_roundtrips=len(rts),
         avg_hold_hours=avg_hold,
         win_rate=win_rate,
@@ -275,6 +273,14 @@ def compute_profile(trades: list[Trade]) -> JournalProfile:
         top_symbols=top_symbols,
         roundtrips_sample=sample,
     )
+
+
+def compute_profile(trades: list[Trade]) -> JournalProfile:
+    """Строит торговый профиль (legacy: FIFO-матчинг по сырым entry+close сделкам)."""
+    if not trades:
+        return JournalProfile()
+    rts = pair_trades_fifo(trades)
+    return compute_profile_from_roundtrips(rts, len(trades))
 
 
 # ── Bias diagnostics ────────────────────────────────────────────────────────
@@ -453,14 +459,29 @@ def check_anchoring(trades: list[Trade]) -> BiasReport:
 # ── Full analysis ───────────────────────────────────────────────────────────
 
 def analyze(trades: list[Trade]) -> dict[str, Any]:
-    """Полный анализ торговой истории.
+    """Полный анализ торговой истории (legacy: FIFO по сырым entry+close сделкам).
 
     Returns:
         {"profile": {...}, "biases": [...], "alerts": [...]}
     """
     profile = compute_profile(trades)
     rts = pair_trades_fifo(trades)
+    return _build_result(profile, rts, trades)
 
+
+def analyze_from_roundtrips(rts: list[RoundTrip], trades: list[Trade] | None = None) -> dict[str, Any]:
+    """Полный анализ из уже готовых roundtrips (pnl берётся из БД, без FIFO).
+
+    Используется adapter'ом для trade_history, где pnl/hold_hours уже посчитаны
+    в колонках — пересчёт через FIFO искажает WR и инвертирует знак PnL.
+    """
+    trades = trades or []
+    profile = compute_profile_from_roundtrips(rts, len(rts))
+    return _build_result(profile, rts, trades)
+
+
+def _build_result(profile: JournalProfile, rts: list[RoundTrip], trades: list[Trade]) -> dict[str, Any]:
+    """Собирает biases + alerts вокруг готового профиля."""
     biases = [
         check_disposition(rts),
         check_overtrading(trades, rts),

@@ -46,18 +46,16 @@ from .state_db import adb, StateDB
 sync_db = StateDB()
 
 # Синхронные модули (вызываются через executor)
-from .auto_sl import check_and_fix_sl, check_breakeven_sl  # legacy — kept for reference
 from .unified_sl import manage_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
-from .trailing_sl import trailing_sl, trailing_sl_x10, simple_trailing_sl, tight_trailing_sl, apply_trailing_sl
 from .pump_detect import check_pumps, check_weekly_pumps
-from .overbought import check_overbought, rotate_watchlist
+from .overbought import check_overbought, check_overbought_async, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl
 from .funding_rotation import check_funding_rotation
 from .dca import check_dca
 from .reporting import should_send_summary, send_summary, check_profit_triggers
 from .auto_entry import auto_entry_scan, record_sl_hit
-from .auto_short import check_auto_short, check_junk_dca
+from .auto_short import check_auto_short, check_junk_dca, check_short_time_sl, should_disable_short
 from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .margin_alerts import check_margin_utilization
 from .funding_entry import check_funding_signals, execute_funding_entry
@@ -151,25 +149,25 @@ def _import_bybit_trades(data_dir):
                     try:
                         entry_ts_raw = int(item.get('createdTime', 0))
                         hold_h = (ts_val - entry_ts_raw/1000) / 3600 if entry_ts_raw else None
-                        entry_px = float(item.get('avgEntryPrice', 0))
-                        exit_px = float(item.get('avgExitPrice', 0))
+                        if hold_h is not None and hold_h <= 0:
+                            hold_h = None  # мусор (createdTime≈closedTime) — не пишем 0.0
                         # Bybit returns stopLoss/takeProfit=null for closed positions.
-                        # Detect exit reason from price movement instead.
-                        if entry_px > 0 and exit_px > 0:
-                            if side == 'sell':  # SHORT
-                                if exit_px > entry_px:
-                                    exit_reason = 'SL'
-                                else:
-                                    exit_reason = 'TP'
-                            else:  # LONG
-                                if exit_px < entry_px:
-                                    exit_reason = 'SL'
-                                else:
-                                    exit_reason = 'TP'
-                            if hold_h and hold_h > 48:
-                                exit_reason = 'Time'
+                        # Детект по знаку PnL — надёжнее avgEntry/avgExit: те бывают
+                        # null/перепутаны при DCA и массовых закрытиях (давали «TP» на убытке).
+                        if hold_h and hold_h > 48:
+                            exit_reason = 'Time'
+                        elif pnl > 0:
+                            exit_reason = 'TP'
+                        elif pnl < 0:
+                            exit_reason = 'SL'
                         else:
                             exit_reason = 'Unknown'
+                        diag = sync_db.get_entry_diagnostic(sym, 'Buy' if side == 'buy' else 'Sell') or {}
+                        try:
+                            from .manual_positions import is_manual_position
+                            _manual = 1 if is_manual_position(sym) else 0
+                        except Exception:
+                            _manual = 0
                         sync_db.add_trade(
                             symbol=sym, side='Buy' if side == 'buy' else 'Sell',
                             strategy='auto', entry_price=float(item.get('avgEntryPrice', 0)),
@@ -177,6 +175,9 @@ def _import_bybit_trades(data_dir):
                             entry_at=int(entry_ts_raw / 1000) if entry_ts_raw else None,
                             closed_at=int(ts_val),
                             exit_reason=exit_reason, hold_hours=hold_h,
+                            bb_pct=diag.get('bb_pct'), rsi=diag.get('rsi'),
+                            entry_reason=diag.get('entry_reason'),
+                            manual=_manual,
                         )
                     except Exception:
                         pass
@@ -184,16 +185,13 @@ def _import_bybit_trades(data_dir):
                     entry_ts = int(item.get('createdTime', 0)) / 1000
                     try:
                         hold_h = (ts_val - entry_ts) / 3600 if entry_ts > 0 else 0
-                        entry_px = float(item.get('avgEntryPrice', 0))
-                        exit_px = float(item.get('avgExitPrice', 0))
-                        # Bybit returns stopLoss/takeProfit=null. Detect from price.
-                        if entry_px > 0 and exit_px > 0:
-                            if side == 'sell':
-                                exit_reason = 'SL' if exit_px > entry_px else 'TP'
-                            else:
-                                exit_reason = 'SL' if exit_px < entry_px else 'TP'
-                            if hold_h > 48:
-                                exit_reason = 'Time'
+                        # Bybit returns stopLoss/takeProfit=null. Детект по знаку PnL.
+                        if hold_h > 48:
+                            exit_reason = 'Time'
+                        elif pnl > 0:
+                            exit_reason = 'TP'
+                        elif pnl < 0:
+                            exit_reason = 'SL'
                         else:
                             exit_reason = 'Unknown'
                         _record_exit(sym, side, pnl, exit_reason, hold_h,
@@ -386,7 +384,11 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     # Авто-шорты (если не на паузе)
     from .rpc import rpc_state
     if not rpc_state.get("paused"):
-        tasks.append(run_in_thread(check_auto_short, positions or {}))
+        if should_disable_short():
+            log_event('🚫 SHORT-входы отключены: PF < 1.0 на последних 30 сделках')
+        else:
+            tasks.append(run_in_thread(check_auto_short, positions or {}, timeout=90))
+        tasks.append(run_in_thread(check_short_time_sl, positions or {}))  # Фаза 9
 
     # Корреляции
     tasks.append(run_in_thread(check_correlation, positions))
@@ -395,10 +397,10 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     if positions:
         # Запускаем все независимые проверки параллельно (timeout 10s вместо 25s)
         pump_tasks = [
-            run_in_thread(check_overbought, positions, timeout=10),
+            check_overbought_async(positions),
             run_in_thread(check_pumps, positions, timeout=10),
             run_in_thread(check_weekly_pumps, timeout=10),
-            run_in_thread(check_funding_signals, positions, timeout=10),
+            run_in_thread(check_funding_signals, positions, timeout=40),
             run_in_thread(check_funding_rotation, positions, timeout=10),
         ]
         pump_results = await asyncio.gather(*pump_tasks, return_exceptions=True)
@@ -698,10 +700,10 @@ async def async_main_loop():
             try:
                 new_positions, new_orders, _last_rest_sync = await asyncio.wait_for(
                     async_positions_snapshot_ws(_last_rest_sync, _REST_SYNC_INTERVAL),
-                    timeout=20.0
+                    timeout=35.0
                 )
             except asyncio.TimeoutError:
-                log_event(f'⚠️ positions snapshot TIMEOUT (20s), using empty')
+                log_event(f'⚠️ positions snapshot TIMEOUT (35s), using empty')
                 new_positions, new_orders = {}, {}
             except Exception as e:
                 log_event(f'⚠️ positions snapshot error: {e}')

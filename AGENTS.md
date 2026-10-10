@@ -1,27 +1,25 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-08-04 (v10 — 123 закрытых сделок, PF=0.75, WR=57%. SHORT avg_loss=$12.58 — требуется доработка)
+> Обновлено: 2026-10-04 (v11.4 — self-learn manual-фильтр: ручные входы исключены из обучения)
 
 ## Что это
 
 Трейдинг-монитор Bybit фьючерсов. Стратегия: **Bollinger Grid** (LONG/SHORT).  
-Systemd-сервис `bybit-ws-async`, ~45 MB RAM, SQLite — SSOT.
+Systemd-сервис `bybit-ws-async`, ~185 MB RAM (с LSTM/torch), SQLite — SSOT.
 
-## Текущее состояние (04.08.2026)
+## Текущее состояние (04.10.2026)
 
 | Метрика | Значение | Примечание |
 |---------|----------|-----------|
-| Закрытых сделок | 123 | (всего 246 с открытыми) |
-| Win Rate | 56.9% | |
-| Profit Factor | 0.75 | ⚠️ <1.0 — avg_loss 1.75× avg_win |
-| Sharpe | -0.045 | |
-| Max Drawdown | $284 | |
-| LONG WR / avg_loss | 41% / $5.67 | |
-| SHORT WR / avg_loss | 70% / **$12.58** | ⚠️ Редкие крупные убытки |
-| Режим | TRENDING_DOWN | LSTM 82.3% точность |
+| Закрытых сделок (все) | 390 | 274 auto + 47 historical + 30 imported + 31 legacy + 8 x10 |
+| **Авто (manual=0 → self-learn)** | **243 / +$210 / WR 74% / PF 1.34** | ручные входы исключены из обучения |
+| Ручные (manual=1) | 31 / −$410 | AKEUSDT + ZECUSDT (входы пользователя, не бот) |
+| LONG (авто) | 162 / +$297 / WR 78% / PF 1.83 | основная прибыль |
+| SHORT (авто) | 81 / −$87 / WR 67% / PF 0.65 | ⚠️ avg_loss $9.65 vs avg_win $4.54 — дисбаланс остался |
+| Режим | TRENDING_DOWN | LSTM conf 41% |
 
-> **Корневая проблема:** SHORT-стратегия даёт 70% винрейт но убивает редкими крупными убытками ($12.58 vs $5.11 avg_win). Self-learning корректирует min_score/sl_pct/tp_mult, но не может исправить фундаментальный дисбаланс risk/reward в SHORT. Требуется доработка стратегии, не параметров.
+> **manual-фильтр (04.10.2026):** `trade_history.manual` отделяет авто-входы от ручных. Ручной вход через `/enter` → `mark_manual_position()` → при закрытии `manual=1` → self-learn исключает. Раньше ручные сделки пользователя (AKE −$367, ZEC −$44) загрязняли выборку: self-learn «думал», что стратегия убыточна (−$201), хотя чистые авто-сделки прибыльны (+$210). Адаптер грузит `manual=0`. SHORT остаётся проблемной стороной (PF 0.65) — но это реальная авто-асимметрия SL/TP, не ручной шум.
 
 ## Структура (core)
 
@@ -32,6 +30,7 @@ bybit-ws/
 ├── auto_entry.py          ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
 ├── auto_sl.py             ← ATR-adaptive SL (legacy, заменён unified_sl)
 ├── auto_tp.py             ← ATR-based TP (1×/2×/3× ATR)
+├── volatility_filter.py   ← Volatility Regime Filter (off-by-default: блок входа при ATR-скачке + vol-scaled sizing)
 ├── risk_manager.py       ← Risk + BlackSwan (v2: alert only) + emergency_close
 ├── entry_judge.py        ← Cross-model judge (DeepSeek, fail-closed)
 ├── lstm_regime.py         ← LSTM-классификатор режима (82.3% точность, 5 классов)
@@ -45,11 +44,43 @@ bybit-ws/
 ├── deploy.sh             ← Атомарный деплой (smoke 52 + canary 8)
 ├── test_smoke.py         ← 52 интеграционных тестов
 ├── paper_trade.py        ← Бэктестинг на исторических данных
+├── bybit_ws/experiments/ ← Experiment Tree: воспроизводимые бэктесты + sandbox
+│   ├── engine.py          ← Детерминированный backtest-движок (кэш свечей, run-манифест)
+│   ├── backtest_runner.py ← CLI reproducible backtest (--symbol/--days/--params)
+│   ├── parallel_sandbox.py← N вариантов на одном окне, сравнительная таблица
+│   ├── validation.py      ← Слой 0: DSR + PBO + permutation test (гейт анти-overfit)
+│   ├── triple_barrier.py  ← Слой 1: triple-barrier лейблы {TP/SL/time} для meta-labeling
+│   ├── regime.py          ← Слой 2: Gaussian HMM (режимы) + BOCPD (смена режима)
+│   ├── bandit.py          ← Слой 3: regime-aware Thompson Sampling (reset на change-point)
+│   ├── meta_label.py      ← Слой 4: meta-labeling (логистическая регрессия поверх сигналов)
+│   └── store.py           ← ExperimentStore (таблицы experiment/run, experiments.db)
 └── docs/
     ├── SELF_LEARN.md       ← Документация модуля самообучения (v10)
     ├── history.md          ← История фаз
-    └── PRD-one-click.md    ← One-click trading архитектура
+    ├── PRD-one-click.md    ← One-click trading архитектура
+    ├── experiment-tree-design.md ← Дизайн experiment tree (модель, DDL, связь с кодом)
+    └── experiment-tree-TZ.md     ← ТЗ на реализацию
 ```
+
+## Experiment Tree (эксперименты, v1)
+
+Воспроизводимый стенд для поиска эджа стратегии офлайн (по мотивам OpenResearch).
+Выносит проверку гипотез с live-аккаунта на детерминированные бэктесты + sandbox.
+
+- **Дизайн:** `docs/experiment-tree-design.md`, ТЗ: `docs/experiment-tree-TZ.md`.
+- **Модель:** `experiment` (узел дерева, parent-лайндж) → `run` (immutable прогон
+  backtest/canary/live с run-манифестом). БД: `~/.local/share/bybit-ws/experiments/experiments.db`
+  (sandbox — `sandbox.db`). Боевой `state.db` НЕ трогается.
+- **Воспроизводимость:** фиксированное окно (`--end-date`) + кэш свечей по ключу
+  `(symbol, interval, start_ms, end_ms)` → байт-в-байт одинаковые метрики.
+
+```bash
+python3 -m bybit_ws.experiments.backtest_runner --symbol SOLUSDT --days 180 --no-db
+python3 -m bybit_ws.experiments.parallel_sandbox --symbol SOLUSDT --days 180 --no-db
+```
+
+> **Граница v1:** хук «промоушен победителя → self_learn» не реализован (требует
+> правки live-контура). Сейчас стенд — офлайн-поиск, не автопилот.
 
 ## Self-Learning v10 (ключевое)
 

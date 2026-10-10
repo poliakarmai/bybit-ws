@@ -2,9 +2,9 @@ name: Test & Deploy
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 
 jobs:
   test:
@@ -15,11 +15,17 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install deps
-        run: pip install -r requirements.txt 2>/dev/null || true
+        run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Smoke tests
         run: python3 test_smoke.py
       - name: Module tests
         run: python3 test_modules.py
+      - name: Logic integrity tests
+        run: python3 test_logic_integrity.py
+      - name: Regression tests
+        run: python3 test_regression.py
+      - name: Self-learn tests
+        run: python3 test_selflearn.py
 
   gsc-scan:
     runs-on: ubuntu-latest

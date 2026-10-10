@@ -193,8 +193,23 @@ def should_enter(
     if verdict.get("verdict") == "pass":
         return True, f"judge pass (confidence: {verdict.get('confidence', 0):.0%})"
 
-    issues = verdict.get("blocking_issues", ["unknown"])
-    return False, f"judge blocked: {'; '.join(issues[:3])}"
+    blocking_issues = verdict.get("blocking_issues", ["unknown"])
+    issues_str = '; '.join(blocking_issues[:3])
+
+    # Log counterfactual entry (best-effort, never raises)
+    try:
+        from state_db import db
+        db.log_counterfactual(
+            symbol, side, score, bb_pos, entry_price,
+            verdict.get('confidence', 0.0), issues_str)
+    except Exception as e:
+        try:
+            from alerts import log_event
+            log_event(f"counterfactual log failed: {e}")
+        except Exception:
+            pass
+
+    return False, f"judge blocked: {issues_str}"
 
 
 # Кеш результатов (на время жизни процесса, TTL=60s)

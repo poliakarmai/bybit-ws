@@ -26,6 +26,11 @@ COPY config.example.yaml /root/.config/bybit-ws/config.example.yaml
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
+# Non-root user (GS031 fix)
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8766
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

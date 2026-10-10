@@ -1,1 +1,1 @@
-/home/openclaw/bybit-ws/lstm_world_model.py
+../lstm_world_model.py

@@ -11,7 +11,7 @@ import time
 from . import TP_FAIL_COUNT, TP_FAIL_BACKOFF, TP_FAIL_DELAYS, TP_MAX_FAILS, TP_PERM_SKIP, TP_PERM_SKIP_SIZES, TP_SKIP_FILE
 from .api import get_bb_data
 from .alerts import log_event
-from .manual_positions import is_manual_position
+from .manual_positions import is_manual_position, is_auto_sltp
 from .file_utils import safe_json_write
 
 import json, os, math
@@ -164,7 +164,7 @@ def auto_take_profit(positions, orders, skip_syms=None):
     bb_covered = set()  # символы получившие TP через BB
 
     for sym, p in positions.items():
-        if is_manual_position(sym):
+        if is_manual_position(sym) and not is_auto_sltp(sym):
             continue
 
         # PERM_SKIP: проверяем рост позиции ИЛИ time-decay (загружен при init)
@@ -187,7 +187,9 @@ def auto_take_profit(positions, orders, skip_syms=None):
             continue
 
         bb = get_bb_data(sym, 'D')
-        rounding = 0 if pos_size >= 10 else 1
+        lot_step = _get_lot_step(sym)
+        _s = str(lot_step)
+        lot_decimals = len(_s.split('.')[-1]) if '.' in _s else 0
 
         # ── BB-based TP (существующая логика) ──
         bb_used = False
@@ -196,10 +198,10 @@ def auto_take_profit(positions, orders, skip_syms=None):
             near_pct, far_pct = _get_atr_split(sym)
 
             if side == 'Buy':
-                need_mid = round(pos_size * near_pct, rounding)
-                need_far = round(pos_size * far_pct, rounding)
+                need_mid = _round_qty(pos_size * near_pct, lot_step, lot_decimals)
+                need_far = _round_qty(pos_size * far_pct, lot_step, lot_decimals)
                 if need_mid < 0.5:
-                    need_far = round(pos_size, rounding)
+                    need_far = _round_qty(pos_size, lot_step, lot_decimals)
                     need_mid = 0
 
                 existing = existing_tp.get(sym, [])
@@ -207,21 +209,21 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 has_far = sum(q for q, pr in existing if abs(pr - upper) / upper < 0.02) if upper > 0 else 0
 
                 if need_mid > 0 and middle > cur and has_mid < need_mid * 0.9:
-                    gap = round(need_mid - has_mid, rounding)
+                    gap = _round_qty(need_mid - has_mid, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
                         bb_used = True
                 if upper > cur and has_far < need_far * 0.9:
-                    gap = round(need_far - has_far, rounding)
+                    gap = _round_qty(need_far - has_far, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, upper, pos_size))
                         bb_used = True
 
             elif side == 'Sell':
-                need_mid = round(pos_size * near_pct, rounding)
-                need_far = round(pos_size * far_pct, rounding)
+                need_mid = _round_qty(pos_size * near_pct, lot_step, lot_decimals)
+                need_far = _round_qty(pos_size * far_pct, lot_step, lot_decimals)
                 if need_mid < 0.5:
-                    need_far = round(pos_size, rounding)
+                    need_far = _round_qty(pos_size, lot_step, lot_decimals)
                     need_mid = 0
 
                 existing = existing_tp.get(sym, [])
@@ -229,12 +231,12 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 has_lo = sum(q for q, pr in existing if abs(pr - lower) / lower < 0.02) if lower > 0 else 0
 
                 if need_mid > 0 and middle < cur and has_mid < need_mid * 0.9:
-                    gap = round(need_mid - has_mid, rounding)
+                    gap = _round_qty(need_mid - has_mid, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, middle, pos_size))
                         bb_used = True
                 if lower > 0 and lower < cur and has_lo < need_far * 0.9:
-                    gap = round(need_far - has_lo, rounding)
+                    gap = _round_qty(need_far - has_lo, lot_step, lot_decimals)
                     if gap > 0:
                         actions.append((sym, p['positionIdx'], side, gap, lower, pos_size))
                         bb_used = True
@@ -249,9 +251,24 @@ def auto_take_profit(positions, orders, skip_syms=None):
                 uncovered = pos_size - existing_qty
                 if uncovered >= 0.5:
                     tp_levels, regime = _get_regime_tp_levels()
+                    # ── self-learn: canary/bandit/symbol tp_mult применяется к ATR-множителю (default 1.0 = без изменений) ──
+                    try:
+                        from .journal.self_learn import get_canary_param, get_symbol_params, get_bandit_best_params
+                        _tp_mult = get_canary_param('tp_mult', 1.0, symbol=sym)
+                        _bp = get_bandit_best_params(regime)
+                        if _bp and 'tp_mult' in _bp:
+                            _tp_mult = _bp['tp_mult']
+                        _tp_mult = get_symbol_params(sym, 'tp_mult', _tp_mult)
+                    except Exception:
+                        _tp_mult = 1.0
                     for k, split in zip(tp_levels, ATR_TP_SPLITS):
-                        qty = round(uncovered * split, rounding)
-                        if qty < 0.5:
+                        k = k * _tp_mult
+                        raw_qty = uncovered * split
+                        qty = math.floor(raw_qty / lot_step) * lot_step
+                        qty = round(qty, lot_decimals)
+                        if qty < max(0.5, lot_step):
+                            if qty < lot_step:
+                                log_event(f'🔇 TP {sym}: partial qty {raw_qty:.4f} < qtyStep {lot_step}, пропускаю уровень')
                             continue
                         if side == 'Buy':
                             tp_price = entry + k * atr
@@ -271,16 +288,30 @@ def auto_take_profit(positions, orders, skip_syms=None):
 
 
 def _get_lot_step(sym):
-    """Получить минимальный шаг лота для символа (lotSizeFilter.qtyStep)."""
+    """Получить минимальный шаг лота для символа (lotSizeFilter.qtyStep).
+
+    Питфол 17.09.2026: старый код звал несуществующий fetch_instruments_info
+    -> ImportError -> всегда дефолт 0.001. Для монет с qtyStep=0.1 (FLOW/GRAM)
+    qty округлялся неверно -> Bybit отклонял «Qty invalid». Теперь прямой
+    запрос instruments-info (паттерн из dca.py/auto_short.py/utils.py).
+    """
     try:
-        from .api import fetch_instruments_info
-        info = fetch_instruments_info()
-        if info and sym in info:
-            lot_filter = info[sym].get('lotSizeFilter', {})
-            return float(lot_filter.get('qtyStep', 0.001))
+        from .api import bybit
+        data = bybit('GET', f'/v5/market/instruments-info?category=linear&symbol={sym}')
+        if data and data.get('retCode') == 0:
+            instruments = data['result'].get('list', [])
+            if instruments:
+                return float(instruments[0].get('lotSizeFilter', {}).get('qtyStep', 0.1))
     except Exception:
         pass
-    return 0.001
+    return 0.1
+
+
+def _round_qty(qty, lot_step, decimals):
+    """Округлить размер к шагу лота вниз (не превысить uncovered)."""
+    q = math.floor(qty / lot_step) * lot_step
+    return round(q, decimals)
+
 
 def apply_auto_tp(actions):
     """Применить auto-TP с retry backoff."""

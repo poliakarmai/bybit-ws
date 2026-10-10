@@ -24,14 +24,29 @@ def _get_bb_ws(symbol, interval='D'):
     return get_bb_data(symbol, interval)
 
 AUTO_ENTRY_WATCH = [
-    'BTCUSDT','ETHUSDT','SOLUSDT','LTCUSDT','XRPUSDT','ADAUSDT','DOGEUSDT',
-    'HYPEUSDT','NEARUSDT','SUIUSDT','TONUSDT','WLDUSDT','LINKUSDT',
-    'AAVEUSDT','AVAXUSDT','DOTUSDT','INJUSDT','ONDOUSDT','ARBUSDT',
-    'ENAUSDT','FETUSDT','APTUSDT','ATOMUSDT','RUNUSDT',
+    'BTCUSDT','ETHUSDT','LTCUSDT','XRPUSDT','ADAUSDT','DOGEUSDT',
+    'NEARUSDT','SUIUSDT','WLDUSDT','LINKUSDT',
+    'AAVEUSDT','AVAXUSDT','INJUSDT','ONDOUSDT','ARBUSDT',
+    'ENAUSDT','FETUSDT','APTUSDT','ATOMUSDT',
 ]
 
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
 MIN_SCORE = 25  # порог для авто-входа (из 50)
+
+# ── Anti-overtrading / anti-chasing guard'ы ──
+MAX_DAILY_TRADES = 6      # дневной лимит LONG-входов (overtrading-защита)
+CHASE_PCT = 3.0           # блок входа, если монета выросла >3%
+CHASE_LOOKBACK = 5        # ...за последние 5 дневных свечей
+_daily_entries = {'date': '', 'count': 0}
+
+
+def _count_today_entries() -> int:
+    """Счётчик LONG-входов за сегодня (in-memory, сброс при смене даты)."""
+    global _daily_entries
+    today = time.strftime('%Y-%m-%d')
+    if _daily_entries['date'] != today:
+        _daily_entries = {'date': today, 'count': 0}
+    return _daily_entries['count']
 ML_ENABLED = os.getenv('BYBIT_ML_ENABLED', '1') == '1'  # фича-флаг: отключить весь ML
 
 # ── Фаза 5.4: LSTM-режим → адаптивные параметры ──
@@ -232,6 +247,33 @@ def _count_down_days(sym: str) -> int:
     except Exception as e:
         log_event(f'⚠️ count_down_days({sym}): {e}')  # ticker parse error — return 0 (no down days detected)
     return 0
+
+def _calc_rsi(sym: str, period: int = 14) -> float:
+    """Compute RSI(14) from daily klines for telemetry. Returns 50 on failure."""
+    try:
+        data = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit={period + 5}')
+        if not data or data.get('retCode') != 0:
+            return 50.0
+        candles = data['result'].get('list', [])
+        if len(candles) < period + 1:
+            return 50.0
+        # candles are newest-first from API; reverse to oldest-first
+        closes = [float(c[4]) for c in reversed(candles[:period + 1])]
+        gains = 0
+        losses = 0
+        for i in range(1, period + 1):
+            diff = closes[i] - closes[i - 1]
+            if diff > 0:
+                gains += diff
+            else:
+                losses += abs(diff)
+        if losses == 0:
+            return 100.0
+        rs = (gains / period) / (losses / period)
+        return round(100 - (100 / (1 + rs)), 1)
+    except Exception:
+        return 50.0
+
 
 
 def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
@@ -486,9 +528,13 @@ def auto_entry_scan(positions):
         # v4: Per-symbol min_score: canary → symbol_profile → session → optuna → global
         sym_min_score = _optuna_min_scores.get(sym, min_score)
         try:
-            from bybit_ws.journal.self_learn import get_canary_param, get_symbol_params, get_session_modifier
+            from bybit_ws.journal.self_learn import get_canary_param, get_symbol_params, get_session_modifier, get_bandit_best_params
             sym_min_score = get_canary_param('min_score', sym_min_score, symbol=sym, side='buy')
-            # Per-symbol profile override
+            # Bandit best arm (per-regime baseline, если достаточно сделок)
+            _bp = get_bandit_best_params(regime_name)
+            if _bp and 'min_score' in _bp:
+                sym_min_score = _bp['min_score']
+            # Per-symbol profile override (специфичнее bandit)
             sym_min_score = get_symbol_params(sym, 'min_score', sym_min_score)
             # Session modifier
             sym_min_score = int(sym_min_score * get_session_modifier('min_score'))
@@ -524,9 +570,21 @@ def auto_entry_scan(positions):
                 if elapsed < cooldown_sl:
                     continue
 
+            # Перманентный blacklist: символы, в которые НЕ входить вообще
+            from .symbol_blacklist import is_blacklisted as _is_blacklisted
+            if _is_blacklisted(sym):
+                log_event(f'🚫 auto_entry: {sym} в blacklist — пропускаю')
+                continue
+
             # Маржа от score с учётом агрессии режима (Фаза 5.4)
+            # Volatility filter: block high-vol symbols, scale margin (fail-open)
+            from .volatility_filter import is_high_volatility, volatility_scale
+            blocked, ratio, reason = is_high_volatility(sym)
+            if blocked:
+                log_event(f'🚫 VOL-FILTER {sym}: {reason}')
+                continue
             normalized_score = min(10, s['score'] / 5)  # 25→5, 50→10
-            margin = margin_for_strategy('long', score=normalized_score) * aggression
+            margin = margin_for_strategy('long', score=normalized_score) * aggression * volatility_scale(sym)
             if margin <= 0:
                 continue
 
@@ -544,6 +602,9 @@ def auto_entry_scan(positions):
             bb2 = get_bb_data(sym, 'D')
             if not bb2:
                 continue
+            # Compute RSI for entry diagnostics (if not already in scored result)
+            if s.get('rsi') is None:
+                s['rsi'] = _calc_rsi(sym)
             # Per-symbol оптимальный дисконт × режимный множитель (Фаза 5.2 + 5.4)
             sym_discount = _get_symbol_param(sym, 'entry_discount', 1.0)
             price = round(bb2['lower'] * sym_discount * entry_discount_mult, 4)
@@ -704,6 +765,29 @@ def auto_entry_scan(positions):
             except Exception:
                 pass
 
+            # ── Anti-chasing: блок LONG, если монета уже разогналась >CHASE_PCT% ──
+            try:
+                from bybit_ws.chase_guard import is_chasing
+                _k = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit={CHASE_LOOKBACK + 3}')
+                if _k and _k.get('retCode') == 0:
+                    _closes = [float(c[4]) for c in reversed(_k['result'].get('list', []))]
+                    if is_chasing(_closes, CHASE_PCT, CHASE_LOOKBACK):
+                        log_event(f'⛔ CHASE BLOCK {sym}: рост >{CHASE_PCT}% за {CHASE_LOOKBACK} свечей')
+                        continue
+            except Exception:
+                pass
+
+            # ── Anti-overtrading: дневной лимит LONG-входов ──
+            try:
+                from bybit_ws.trade_limits import allow_by_daily_count
+                _today = _count_today_entries()
+                _ok, _reason = allow_by_daily_count(_today, MAX_DAILY_TRADES)
+                if not _ok:
+                    log_event(f'⛔ DAILY LIMIT {sym}: {_reason} ({_today}/{MAX_DAILY_TRADES})')
+                    continue
+            except Exception:
+                pass
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}
@@ -747,8 +831,18 @@ def auto_entry_scan(positions):
                         bb_pct=s.get('bb_pos'), rsi=s.get('rsi'),
                         entry_reason=entry_reason,
                     )
+                    # Persist diagnostics for retrieval when trade closes
+                    sync_db.save_entry_diagnostic(
+                        sym, 'Buy',
+                        bb_pct=s.get('bb_pos'),
+                        rsi=s.get('rsi'),
+                        entry_reason=entry_reason,
+                    )
                 except Exception:
                     pass
+                # Инкремент дневного счётчика входов (anti-overtrading)
+                _count_today_entries()
+                _daily_entries['count'] += 1
                 # ── Canary: маркируем вход для последующего матчинга при закрытии ──
                 try:
                     from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary

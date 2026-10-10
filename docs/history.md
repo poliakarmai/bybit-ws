@@ -151,3 +151,34 @@ Walk-forward валидация ML.
 - log_event fallback на stderr
 - AGENTS.md с разделом Systemd Pitfalls
 - Позиции + PnL + ASCII-бары + equity + риск
+
+### v9 — Адаптивный TP/SL + BlackSwan v2 (01.08.2026)
+- TP/SL по LSTM-режиму: RANGING ближе, TRENDING дальше
+- BlackSwan v2: только алерт (без авто-закрытия), порог -$150
+- Anti-ludomania: 3 убытка/час → блок 30 мин
+- Entry Judge: кросс-модельная валидация
+
+### v10 — Self-Learning v10 (04.08.2026)
+- 20+ механик: Thompson Sampling, Ensemble, Drift Detector, Causal
+- 24ч cooldown, decay 0.005, 6 regime params
+- time_exit в main loop (каждый цикл) — защита от zombie-позиций
+- Composite, Bandit, Monte Carlo логи из SQLite (были пустые)
+- PF=0.75 → STGUSDT 730ч ($167) — root cause найдена
+
+### v11 — Фаза 9: SHORT-оптимизация + Android MVP (08.08.2026)
+- World Model 22.3% → 33.1%, добавлен в SHORT-скоринг
+- SHORT: BB% 95→100, WM ≥3, MTF-скидка TRENDING_DOWN
+- SHORT paper trade: WR 40→52%, PF 0.56→0.92
+- Android: JWT auth, /set-tp, /generate-jwt
+- gsc_audit pre-commit hook
+
+### Фаза 9.1 — Risk-фикс junk-шортов (15.08.2026)
+- Junk-шорты SL +7% через trading-stop, DCA-мартингейл удалён
+- exit_reason по знаку closedPnl (не по цене)
+
+### Фаза 9.2 — FIFO-матчинг self-learn фикс (20.08.2026)
+- RoundTrip напрямую из pnl/hold_hours, WR 28→66%
+
+### Фаза 9.3 — Time-exit + Blacklist + Candle-cache (27.08.2026)
+- check_short_time_sl по opened_at, symbol_blacklist, candle_cache TTL 300с
+- CI master→main + logic/regression, legacy-мусор удалён

@@ -1,6 +1,18 @@
-"""Авто-SHORT по перегреву (BB Daily > 85%) + шлак-режим (дневной рост ≥80%).
+"""
+Авто-SHORT по перегреву (BB Daily > 85%) + шлак-режим (дневной рост ≥80%).
 
 Зеркало LONG-стратегии: когда цена перегрета — шорт с возвратом к Middle BB.
+
+Фаза 9 (08.08.2026) — SHORT-оптимизация:
+- max_loss_pct: 15% → 10% (раньше закрываем убыточные)
+- max_hold_hours: 48 → 24 (не даём гнить)
+- Добавлен time_based_sl: 12ч в убытке → market close
+- Junk SL: 15% → 10% от маржи (жёстче лимит)
+
+Фаза 9.1 (15.08.2026) — риск-фикс (дисбаланс avg_loss 2.7× avg_win):
+- Junk-шорт: БЫЛО без SL + DCA-мартингейл на +100%/+120% → хвостовые убытки (STX -$104)
+- СТАЛО: жёсткий SL +7% при входе (trading-stop), DCA-лесенка ОТКЛЮЧЕНА
+- Причина: усреднение шорта против тренда = умножение убытка. SL режет хвост.
 
 Правила:
 - BB Daily > 85% (цена у Upper или выше)
@@ -11,13 +23,14 @@ Tier A/B (обычный режим):
 - Плечо 3x, маржа $10
 - SL: +5% от входа (через trading-stop)
 - TP: Middle BB (через takeProfit в trading-stop)
+- ⚡ NEW: time_based_sl — если позиция в убытке >12ч → market close
 
-Tier C/D — шлак-режим (NEW):
+Tier C/D — шлак-режим (Фаза 9.1):
 - Дневной рост ≥ 80% — обязательный фильтр
-- БЕЗ стоп-лосса (шлак слишком волатильный, SL только жрёт маржу)
-- max_loss_pct: 15% — hard market-close при убытке >15% маржи
-- max_hold_hours: 48 — авто-закрытие через 48ч
-- DCA-лесенка: +100% и +120% от входа (лимитные Sell)
+- SL: +7% от входа (trading-stop, ставится сразу — Фаза 9.1)
+- DCA-лесенка ОТКЛЮЧЕНА (был мартингейл +100%/+120%)
+- max_loss_pct: 10% — hard market-close при убытке >10% маржи
+- max_hold_hours: 24 — авто-закрытие через 24ч
 - TP: Middle BB (reduceOnly limit Buy)
 
 Общие:
@@ -39,18 +52,32 @@ from . import DATA_DIR
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
 
+# BB-кэш (TTL 30 мин) — убирает повторные kline-запросы в цикле скана (фикс таймаута check_auto_short)
+_BB_CACHE = {}
+_BB_CACHE_TTL = 1800.0  # 30 мин — Daily BB меняется раз в сутки
+
+
 def _get_bb_ws(symbol, interval='D'):
-    """Получить BB: сначала WS-кеш, fallback на REST."""
+    """Получить BB: сначала кэш → WS-кэш → fallback REST."""
+    _key = (symbol, interval)
+    _now = time.time()
+    _c = _BB_CACHE.get(_key)
+    if _c is not None and _now - _c[0] < _BB_CACHE_TTL:
+        return _c[1]
     if _WS_BB_ENABLED:
         try:
             from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
             if ws_alive() and not ws_stale(300):
                 bb = ws_get_bb(symbol, interval)
                 if bb and bb.get('upper', 0) > 0:
+                    _BB_CACHE[_key] = (_now, bb)
                     return bb
-        except Exception:
-            pass
-    return get_bb_data(symbol, interval)
+        except Exception as e:
+            log_event(f'WS BB fallback to REST for {symbol}: {e}')
+    bb = get_bb_data(symbol, interval)
+    if bb and bb.get('upper', 0) > 0:
+        _BB_CACHE[_key] = (_now, bb)
+    return bb
 from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
 from .state_db import db  # SQLite dual-write
@@ -138,8 +165,8 @@ def _check_short_mtf(sym: str):
             confidence = regime_data.get('confidence', 0)
             if regime == 'TRENDING_DOWN' and confidence >= 25:
                 min_tfs = 1
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f'⚠️ auto_short non-critical: {e}')
     
     try:
         conf = check_confluence(sym, 'SHORT')
@@ -311,6 +338,43 @@ def short_score_coin(sym: str, bb_data: dict, ticker: dict, is_junk: bool) -> di
     }
 
 
+def should_disable_short(window: int = 30, min_pf: float = 1.0,
+                         stale_hours: "float | None" = None) -> bool:
+    """Отключить авто-SHORT если PF на последних N закрытых SHORT-сделок < min_pf.
+
+    ponytail: скользящее окно по closed_at DESC. < window сделок → не отключаем
+    (мало данных). Ошибка чтения → fail-open (не блокируем торговлю).
+
+    Stale-reset (фикс 10.10.2026): если последняя SHORT-сделка старше stale_hours,
+    НЕ блокируем — иначе circular lock: guard глушит SHORT → новых SHORT-сделок нет →
+    окно из 30 застывает → PF не меняется → блок навсегда. Порог настраивается через
+    env BYBIT_SHORT_GUARD_STALE_HOURS.
+    """
+    try:
+        if stale_hours is None:
+            stale_hours = float(os.environ.get('BYBIT_SHORT_GUARD_STALE_HOURS', '24'))
+        trades = db.get_trades(limit=window * 3)  # запас на LONG/ручные
+        shorts = [
+            t for t in trades
+            if t.get('side') == 'Sell' and not t.get('manual')
+        ][:window]
+        if len(shorts) < window:
+            return False
+        # Stale-reset: окно не двигалось stale_hours → даём SHORT шанс заново
+        if stale_hours > 0:
+            last_closed = max((t.get('closed_at') or 0) for t in shorts)
+            if last_closed and (time.time() - last_closed) > stale_hours * 3600:
+                return False
+        gross_profit = sum(t.get('pnl') or 0 for t in shorts if (t.get('pnl') or 0) > 0)
+        gross_loss = abs(sum(t.get('pnl') or 0 for t in shorts if (t.get('pnl') or 0) < 0))
+        if gross_loss <= 0:
+            return False  # нет убыточных → PF бесконечен
+        return (gross_profit / gross_loss) < min_pf
+    except Exception as e:
+        log_event(f'⚠️ should_disable_short error: {e}')
+        return False
+
+
 def check_auto_short(positions):
     """Сканировать перегретые монеты и ставить SHORT.
     Вызывается каждые 10 циклов (5 мин)."""
@@ -331,6 +395,13 @@ def check_auto_short(positions):
     SL_PCT = cfg.strategy.short.sl_tier_ab
     SL_PCT_JUNK = cfg.strategy.short.sl_tier_cd
     MAX_SHORTS = cfg.strategy.short.max_positions
+    SHORT_MIN_SCORE = getattr(cfg.strategy.short, 'min_score', 40)
+    # ── self-learn: canary min_score для SHORT (default = из конфига) ──
+    try:
+        from .journal.self_learn import get_canary_param
+        SHORT_MIN_SCORE = get_canary_param('min_score', SHORT_MIN_SCORE, side='sell')
+    except Exception as e:
+        log_event(f'⚠️ auto_short non-critical: {e}')
     COOLDOWN = cfg.strategy.short.cooldown_seconds
     ENTRY_OFFSET = cfg.strategy.short.entry_offset
     JUNK_PUMP_THRESHOLD = getattr(cfg.strategy, 'junk', None)
@@ -338,15 +409,10 @@ def check_auto_short(positions):
         JUNK_PUMP_THRESHOLD = getattr(JUNK_PUMP_THRESHOLD, 'daily_pump_threshold', 0.80)
     else:
         JUNK_PUMP_THRESHOLD = getattr(cfg.strategy.short, 'junk_daily_pump_threshold', 0.80)
-    JUNK_DCA_LEVELS = getattr(cfg.strategy, 'junk', None)
-    if JUNK_DCA_LEVELS is not None:
-        JUNK_DCA_LEVELS = getattr(JUNK_DCA_LEVELS, 'dca_levels', [1.0, 1.2])
-    else:
-        JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
 
     state = _load_state()
     now = time.time()
-    deadline = now + 20  # time budget — не дольше 20с на все BB-запросы
+    deadline = now + 75  # time budget — не дольше 75с (внешний timeout=90с в main_async)
 
     # Считаем текущие SHORT (в позиции + в стейте)
     active_shorts = sum(1 for p in positions.values()
@@ -387,6 +453,7 @@ def check_auto_short(positions):
 
         # Проверка кулдауна
         if sym in state and now - state[sym].get('last_short_ts', 0) < COOLDOWN:
+            log_event(f'🚫 auto_short: {sym} в кулдауне — пропускаю')
             continue
 
         # Фаза 6.8: Throttle dry spells — пропускаем «сухие» символы
@@ -394,12 +461,19 @@ def check_auto_short(positions):
             dry_count = state[sym].get('dry_spell_count', 0)
             dry_since = state[sym].get('dry_spell_since', 0)
             if dry_count >= DRY_SPELL_THRESHOLD and now - dry_since < DRY_SPELL_COOLDOWN:
+                log_event(f'🚫 auto_short: {sym} dry-spell throttle ({dry_count} холостых) — пропускаю')
                 continue
             if dry_since and now - dry_since >= DRY_SPELL_COOLDOWN:
                 state[sym]['dry_spell_count'] = 0
                 state[sym]['dry_spell_since'] = 0
 
         is_junk = sym not in TIER_AB  # Tier C/D = шлак
+
+        # Перманентный blacklist: символы, в которые НЕ входить вообще (после крупных убытков и т.п.)
+        from .symbol_blacklist import is_blacklisted as _is_blacklisted
+        if _is_blacklisted(sym):
+            log_event(f'🚫 auto_short: {sym} в blacklist — пропускаю')
+            continue
 
         # Проверка BB
 
@@ -436,7 +510,15 @@ def check_auto_short(positions):
         else:
             # Tier A/B — обычный фильтр BB
             if bb_pct < BB_SHORT_THRESHOLD:
+                log_event(f'🚫 auto_short: {sym} BB={bb_pct:.0f}% < {BB_SHORT_THRESHOLD}% — пропускаю')
                 continue
+
+        # ── Shadow logger: фиксируем BB-кандидата + L2 imbalance (post-mortem мгновенных SL) ──
+        try:
+            from .shadow_logger import log_candidate
+            log_candidate(sym, 'Sell', last_price, bb_pct=round(bb_pct, 1))
+        except Exception as e:
+            log_event(f'⚠️ auto_short non-critical: {e}')
 
         # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр для SHORT ──
         mtf_conf = _check_short_mtf(sym)
@@ -452,8 +534,18 @@ def check_auto_short(positions):
         # ── Фаза 5.7: 9-метричный SHORT-скоринг ──
         short_sc = short_score_coin(sym, bb, t, is_junk)
         short_score = short_sc['score'] if short_sc else 35  # fallback: средний скор
+        # ── Тормоз overtrading: вход только при высоком 9-метричном скоре ──
+        if short_score < SHORT_MIN_SCORE:
+            log_event(f'🚫 auto_short: {sym} score={short_score} < {SHORT_MIN_SCORE} — пропускаю (overtrading)')
+            continue
+        # Volatility filter: block high-vol symbols, scale margin (fail-open)
+        from .volatility_filter import is_high_volatility, volatility_scale
+        blocked, ratio, reason = is_high_volatility(sym)
+        if blocked:
+            log_event(f'🚫 VOL-FILTER {sym}: {reason}')
+            continue
         normalized_short = min(10, max(5, short_score / 5))  # 25→5, 50→10
-        short_margin = margin_for_strategy('short', score=normalized_short)
+        short_margin = margin_for_strategy('short', score=normalized_short) * volatility_scale(sym)
         # ── Фаза 4.3.6: MTF-конфлюенс → бонус к позиции ──
         if isinstance(mtf_conf, dict):
             mtf_c = mtf_conf.get('confluence', 0)
@@ -509,8 +601,8 @@ def check_auto_short(positions):
                 if available_usdt < required:
                     log_event(f'💰 LOW FUNDS SHORT {sym}: need ${required:.1f}, have ${available_usdt:.1f} — skipping')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── Orderbook imbalance filter (27.06) ──
             try:
@@ -519,8 +611,8 @@ def check_auto_short(positions):
                 if not ob_ok:
                     log_event(f'📊 OB BLOCK {sym}: {ob_reason}')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── Volume confirmation filter (28.06) ──
             try:
@@ -529,8 +621,8 @@ def check_auto_short(positions):
                 if not vol_ok:
                     log_event(f'📊 VOL BLOCK {sym}: {vol_reason}')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
             try:
@@ -559,8 +651,8 @@ def check_auto_short(positions):
                 if not conc_ok:
                     log_event(f'⚠️ CONC BLOCK SHORT {sym}: {conc_reason}')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
@@ -582,6 +674,14 @@ def check_auto_short(positions):
                 log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?") if order else "no response"}')
                 continue
 
+            # ── Canary: маркируем SHORT-вход для матчинга при закрытии ──
+            try:
+                from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
+                if should_use_canary():
+                    mark_canary_entry(sym, 'sell', time.time())
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
+
             state_entry = {
                 'last_short_ts': now,
                 'entry_price': price,
@@ -589,6 +689,19 @@ def check_auto_short(positions):
                 'bb_pct': round(bb_pct, 1),
                 'is_junk': is_junk,
             }
+
+            # ── Телеметрия входа (17.09.2026): диагностика для trade_history при закрытии ──
+            try:
+                from bybit_ws.state_db import sync_db
+                from .auto_entry import _calc_rsi as _calc_rsi_tel
+                sync_db.save_entry_diagnostic(
+                    sym, 'Sell',
+                    bb_pct=round(bb_pct, 1),
+                    rsi=_calc_rsi_tel(sym),
+                    entry_reason=('junk' if is_junk else 'tier_ab'),
+                )
+            except Exception as e:
+                log_event(f'⚠️ auto_short non-critical: {e}')
 
             # ── MTF-бонус (один раз, для обеих веток) ──
             mtf_bonus = ''
@@ -599,55 +712,37 @@ def check_auto_short(positions):
                 elif c == 2: mtf_bonus += ' +15%'
 
             if is_junk:
-                # ── Шлак: без SL, с DCA-лесенкой ──
+                # ── Фаза 9.1 риск-фикс: junk-шорт С SL при входе, БЕЗ DCA-мартингейла ──
+                # Было: no_sl=True + DCA на +100%/+120% → хвостовые убытки (STX -$104, GRAM -$44).
+                # Теперь: жёсткий SL +7% при входе. Усреднение против тренда отключено.
                 chg_pct = float(t.get('price24hPcnt', 0) or 0)
 
-                # TP отдельным reduceOnly лимитным Buy
-                if tp_price < price:
-                    bybit('POST', '/v5/order/create', {
-                        'category': 'linear',
-                        'symbol': sym,
-                        'side': 'Buy',
-                        'orderType': 'Limit',
-                        'qty': str(qty),
-                        'price': str(tp_price),
-                        'positionIdx': 0,
-                        'timeInForce': 'GTC',
-                        'reduceOnly': True,
-                    })
+                # SL + TP через trading-stop (атомарно, SL ставится сразу)
+                sl_price = _round_to_tick(price * (1 + SL_PCT_JUNK), sym)
+                ts_body = {
+                    'category': 'linear',
+                    'symbol': sym,
+                    'positionIdx': 0,
+                    'stopLoss': str(sl_price),
+                    'slTriggerBy': 'MarkPrice',
+                }
+                if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
+                    ts_body['takeProfit'] = str(tp_price)
+                    ts_body['tpTriggerBy'] = 'MarkPrice'
+                bybit('POST', '/v5/position/trading-stop', ts_body)
 
-                # DCA-лимитки: Sell на +100% и +120% от входа
-                dca_placed = []
-                for dca_mult in JUNK_DCA_LEVELS:
-                    dca_price = _round_to_tick(price * (1 + dca_mult), sym)
-                    dca_qty = qty  # такой же размер
-                    dca_order = bybit('POST', '/v5/order/create', {
-                        'category': 'linear',
-                        'symbol': sym,
-                        'side': 'Sell',
-                        'orderType': 'Limit',
-                        'qty': str(dca_qty),
-                        'price': str(dca_price),
-                        'positionIdx': 0,
-                        'timeInForce': 'GTC',
-                    })
-                    if dca_order.get('retCode') == 0:
-                        dca_placed.append({'mult': dca_mult, 'price': dca_price, 'qty': dca_qty})
-
-                state_entry['no_sl'] = True
+                state_entry['no_sl'] = False
+                state_entry['sl'] = sl_price
                 state_entry['tp'] = tp_price
-                state_entry['dca_levels'] = JUNK_DCA_LEVELS
-                state_entry['dca_placed'] = dca_placed
                 state_entry['pump_pct'] = round(chg_pct * 100, 1)
-                # Хард-SL на +25% — защита если DCA не сработает
-                state_entry['hard_sl'] = round(price * 1.25, 6)
+                state_entry['dca_levels'] = []      # мартингейл отключён (риск-фикс)
+                state_entry['dca_placed'] = []
 
                 state[sym] = state_entry
                 _save_state(state)
 
-                dca_str = ', '.join(f'+{d["mult"]*100:.0f}% @ ${d["price"]:.4f}' for d in dca_placed)
                 msg = (f'🔴 SHORT JUNK {sym}: вход ${price:.6f} лимит ${limit_price:.6f} ×{qty} ({SHORT_LEVERAGE}x) | '
-                       f'score={short_score} памп +{chg_pct*100:.0f}% | TP ${tp_price:.6f} | DCA: {dca_str}{mtf_bonus}')
+                       f'score={short_score} памп +{chg_pct*100:.0f}% | SL ${sl_price:.4f} (+{SL_PCT_JUNK*100:.0f}%) | TP ${tp_price:.6f}{mtf_bonus}')
                 add_alert('ENTRY', msg)
                 actions.append(sym)
                 log_event(msg)
@@ -655,6 +750,15 @@ def check_auto_short(positions):
             else:
                 # ── Tier A/B: SL отложен на 20 мин (23.06.2026), TP сразу ──
                 sl_pct = SL_PCT_JUNK if sym not in TIER_AB else SL_PCT
+                # ── self-learn: canary/symbol sl_pct (в % → доля) переопределяет конфиг, с guard ──
+                try:
+                    from .journal.self_learn import get_canary_param, get_symbol_params
+                    _sl = get_symbol_params(sym, 'sl_pct', None)
+                    _sl = get_canary_param('sl_pct', _sl, symbol=sym, side='sell')
+                    if isinstance(_sl, (int, float)) and 0 < _sl <= 30:
+                        sl_pct = _sl / 100.0
+                except Exception as e:
+                    log_event(f'⚠️ auto_short non-critical: {e}')
                 sl_price = _round_to_tick(price * (1 + sl_pct), sym)
 
                 # TP ставим сразу, SL — через trading-stop без stopLoss
@@ -721,17 +825,11 @@ def check_junk_dca(positions):
 
     Вызывается каждые 10 циклов вместе с check_auto_short."""
     cfg = Config()
-    SHORT_LEVERAGE = cfg.strategy.short.leverage
-    # Динамическая маржа для DCA (шлак — score 5.5)
-    short_margin = margin_for_strategy('short', score=5.5)
     # Читаем junk-параметры из strategy.junk (с фоллбеком на старые ключи strategy.short)
     junk_cfg = getattr(cfg.strategy, 'junk', None)
-    if junk_cfg is not None:
-        JUNK_DCA_LEVELS = getattr(junk_cfg, 'dca_levels', [1.0, 1.2])
-    else:
-        JUNK_DCA_LEVELS = getattr(cfg.strategy.short, 'junk_dca_levels', [1.0, 1.2])
-    MAX_LOSS_PCT = getattr(junk_cfg, 'max_loss_pct', 15) / 100 if junk_cfg is not None else 0.15
-    MAX_HOLD_HOURS = getattr(junk_cfg, 'max_hold_hours', 48) if junk_cfg is not None else 48
+    MAX_LOSS_PCT = getattr(junk_cfg, 'max_loss_pct', 10) / 100 if junk_cfg is not None else 0.10  # Фаза 9: 15→10
+    MAX_HOLD_HOURS = getattr(junk_cfg, 'max_hold_hours', 24) if junk_cfg is not None else 24  # Фаза 9: 48→24
+    TIME_SL_HOURS = getattr(junk_cfg, 'time_sl_hours', 6) if junk_cfg is not None else 6  # Фаза 9: time-based SL (04.10: 12→6ч)
 
     state = _load_state()
     now = time.time()
@@ -801,9 +899,26 @@ def check_junk_dca(positions):
                     log_event(f'⚠️ Junk-STOP {sym}: ошибка — {e}')
                 continue
 
-        # ── Max hold hours check ──
+        # ── Time-based SL (Фаза 9): позиция в убытке > TIME_SL_HOURS → закрыть ──
         entry_ts = entry.get('last_short_ts', entry.get('entered_ts', 0))
-        if entry_ts > 0:
+        if entry_ts > 0 and unrealised_pnl < 0:
+            held_hours = (now - entry_ts) / 3600
+            if held_hours > TIME_SL_HOURS:
+                try:
+                    _close_junk_position(sym, pos)
+                    msg = (f'⏱ TIME-SL JUNK {sym}: {held_hours:.0f}ч в убытке > {TIME_SL_HOURS}ч | '
+                           f'вход ${entry_price:.6f} → выход ${mark_price:.6f} | PnL ${unrealised_pnl:+.2f}')
+                    add_alert('STOP', msg)
+                    log_event(msg)
+                    actions.append(sym)
+                    del state[sym]
+                    _save_state(state)
+                except Exception as e:
+                    log_event(f'⚠️ Time-SL {sym}: ошибка — {e}')
+                continue
+
+        # ── Max hold hours check ──
+        if entry_ts > 0 and unrealised_pnl <= 0:
             held_hours = (now - entry_ts) / 3600
             if held_hours > MAX_HOLD_HOURS and unrealised_pnl <= 0:
                 try:
@@ -819,48 +934,60 @@ def check_junk_dca(positions):
                     log_event(f'⚠️ Junk-Timeout {sym}: ошибка — {e}')
                 continue
 
-        # ── DCA levels ──
-        dca_placed = entry.get('dca_placed', [])
-        placed_multipliers = {d['mult'] for d in dca_placed}
+        # ── DCA levels — ОТКЛЮЧЕНЫ (Фаза 9.1 риск-фикс) ──
+        # Мартингейл на шорте против тренда = источник хвостовых убытков.
+        # Позиция теперь закрывается по SL +7%, а не наращивается DCA.
+        # DCA-блок удалён; см. Фазу 9.1 в check_auto_short.
 
-        for dca_mult in JUNK_DCA_LEVELS:
-            if dca_mult in placed_multipliers:
-                continue
+    return actions
 
-            dca_trigger = entry_price * (1 + dca_mult)
-            if mark_price < dca_trigger:
-                continue
 
-            usdt_qty = short_margin * SHORT_LEVERAGE
-            qty_step = _get_lot_step(sym)
-            dca_qty = math.ceil(usdt_qty / mark_price / qty_step) * qty_step
-            if dca_qty <= 0:
-                continue
+# ── Time-based SL for regular SHORT positions (Фаза 9) ──
 
-            dca_price = _round_to_tick(mark_price, sym)
+def check_short_time_sl(positions: dict) -> list[str]:
+    """
+    Закрыть SHORT-позиции которые висят в убытке > N часов.
+    Фаза 9: ключевая причина avg_loss=$12.58 — позиции гниют.
+    """
+    import time as _time
+    from .alerts import log_event as _log, add_alert as _alert
+    from .api import place_order as _close_order
+
+    SHORT_TIME_SL_HOURS = 6  # закрыть если >6ч в убытке (04.10: 12→6ч)
+    actions = []
+    now = _time.time()
+
+    for sym, pos in positions.items():
+        if not isinstance(pos, dict) or pos.get('side') != 'Sell':
+            continue
+
+        unrealised = pos.get('unrealisedPnl', 0)
+        if unrealised >= 0:
+            continue  # в прибыли — не трогаем
+
+        # Check entry timestamp — opened_at/entry_ts (внутренний timestamp открытия позиции).
+        # НЕ createdTime: оно = время ПЕРВОГО входа в символ, а не текущей позиции (pitfall #14).
+        entry_ts = pos.get('opened_at') or pos.get('entry_ts')
+        if not entry_ts:
+            continue
+        try:
+            entry_ts = float(entry_ts)
+        except (ValueError, TypeError):
+            continue
+
+        held_hours = (now - entry_ts) / 3600
+
+        if held_hours > SHORT_TIME_SL_HOURS:
             try:
-                dca_order = bybit('POST', '/v5/order/create', {
-                    'category': 'linear',
-                    'symbol': sym,
-                    'side': 'Sell',
-                    'orderType': 'Limit',
-                    'qty': str(dca_qty),
-                    'price': str(dca_price),
-                    'positionIdx': 0,
-                    'timeInForce': 'GTC',
-                })
-                if dca_order.get('retCode') == 0:
-                    dca_placed.append({'mult': dca_mult, 'price': dca_price, 'qty': dca_qty, 'ts': now})
-                    entry['dca_placed'] = dca_placed
-                    _save_state(state)
-
-                    msg = (f'🔴 DCA JUNK {sym}: +{dca_mult*100:.0f}% @ ${dca_price:.4f} ×{dca_qty} | '
-                           f'вход ${entry_price:.6f} → сейчас ${mark_price:.6f}')
-                    add_alert('ENTRY', msg)
-                    actions.append(sym)
-                    log_event(msg)
+                # Market close: Sell (close SHORT) = Buy side
+                _close_order(sym, 'Buy', 'Market', pos.get('size', 0), reduce_only=True, position_idx=pos.get('positionIdx', 0))
+                msg = (f'⏱ TIME-SL SHORT {sym}: {held_hours:.0f}ч в убытке > {SHORT_TIME_SL_HOURS}ч | '
+                       f'PnL ${unrealised:+.2f} | причина: SHORT-оптимизация Фаза 9')
+                _alert('STOP', msg)
+                _log(msg)
+                actions.append(sym)
             except Exception as e:
-                log_event(f'⚠️ Junk-DCA {sym}: исключение — {e}')
+                _log(f'⚠️ Time-SL SHORT {sym}: ошибка — {e}')
 
     return actions
 

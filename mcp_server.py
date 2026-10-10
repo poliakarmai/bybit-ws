@@ -145,10 +145,11 @@ def _fmt_positions(positions: list) -> str:
         total += pnl
         side = p.get("side", "?")
         emoji = "🟢" if pnl > 0 else "🔴"
+        sl = p.get("stop_loss", p.get("stopLoss")) or "—"
         lines.append(
             f"{emoji} {p['symbol']:12s} {side:4s} {p.get('leverage',1)}x  "
             f"entry=${float(p['entry']):.4f}  mark=${float(p['mark']):.4f}  "
-            f"PnL=${pnl:+.2f}  SL=${p.get('stopLoss','?')}"
+            f"PnL=${pnl:+.2f}  SL=${sl}"
         )
     lines.append(f"\nTotal unrealized PnL: ${total:+.2f}")
     return "\n".join(lines)

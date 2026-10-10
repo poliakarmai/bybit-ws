@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-[![Phase 10](https://img.shields.io/badge/phase-10-blue)](./CHANGELOG.md)
+[![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
 
 ---
 
@@ -22,19 +22,19 @@
 
 ---
 
-## Результаты (на v10)
+## Результаты (на v11.4)
 
-> **Важно:** это результаты конкретной инсталляции при конкретных параметрах. Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
+> **Важно:** результаты конкретной инсталляции (авто-трейдинг, `strategy='auto'`, `manual=0`). Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
 
-| Период | Сделок | Винрейт | PnL | Примечание |
-|--------|--------|---------|-----|-----------|
-| Июнь 2026 | 89 | 71% | +$340 | |
-| Июль 2026 | 112 | 68% | +$410 | |
-| Август 2026 | 123 | 57% | ~−$100 | SHORT avg_loss ×1.75 avg_win, time exit fix deployed |
+| Метрика | Значение |
+|--------|----------|
+| Авто-сделки (manual=0) | 243 / +$210 / WR 74% / PF 1.34 |
+| LONG | 162 / +$297 / WR 78% / PF 1.83 |
+| SHORT | 81 / −$87 / WR 67% / PF 0.65 |
 
-> **Август:** PF=0.75. Корень — одна SHORT-позиция (STGUSDT) на 30 дней с убытком $167. Без неё SHORT: WR=71%, PnL=+$138. Time exit теперь в каждом цикле, макс. удержание 24ч — проблема исправлена.
+> **Срез после Фазы 9.1 (15.08+, manual=0):** LONG — PF **1.83** (WR 78%, +$297) — основная прибыль. SHORT — PF 0.65 (WR 67%): avg_loss $9.65 vs avg_win $4.54 — дисбаланс остался. Ручные входы (AKE −$367, ZEC −$44) исключены из self-learn через `trade_history.manual`.
 
-*Цифры для стратегии Bollinger Grid LONG/SHORT, риск 5% на сделку, плечо до 10x*
+*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 390 закрытых сделок (274 auto: 243 авто-чистых + 31 ручных).*
 
 ---
 
@@ -86,7 +86,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Bollinger Grid** LONG/SHORT на дневном таймфрейме
 - **9-метричный скоринг**: BB%, объём, падающие дни, фондинг, волатильность, качество + ML Gate
 - **LSTM-классификатор** рынка (82.3% точность, 5 режимов)
-- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek)
+- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek → Qwen → Nemotron, fail-closed)
 - **Auto-TP**: 20% на Middle BB + 80% на Upper BB
 - **Unified SL**: 5 механизмов → один приоритетный (tight > simple > hard > BE > default)
 
@@ -118,7 +118,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Composite Score**: WR+PF+Sharpe+MaxDD+AvgHold с adaptive per-regime весами и exponential decay
 - **Micro-updates**: обучение после каждой сделки с outlier-защитой (>3σ)
 - **Canary mode**: Bayesian A/B тест, адаптивный 5-20%, авто-rollback
-- **Entry Judge**: cross-model validation (DeepSeek), fail-closed
+- **Entry Judge**: cross-model validation (DeepSeek → Qwen → Nemotron), fail-closed
 - **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% точность)
 - **LSTM World Model**: multi-task OHLCV prediction для скоринга входов
 

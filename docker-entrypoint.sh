@@ -16,4 +16,4 @@ echo "🚀 Bybit Bollinger Grid Monitor v3.3"
 echo "   RPC: http://0.0.0.0:8766"
 echo "   Health: http://0.0.0.0:8766/health"
 
-exec python3 -m bybit_ws.main
+exec python3 -m bybit_ws.main_async

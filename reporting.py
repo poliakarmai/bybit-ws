@@ -31,12 +31,59 @@ def should_send_summary():
         log_event(f'⚠️ reporting: {e}')
     return f"{'☀️ Утренняя' if hour == 9 else '🌙 Вечерняя'} сводка"
 
+def _rpc_token():
+    try:
+        import sqlite3
+        con = sqlite3.connect(os.path.join(DATA_DIR, 'state.db'))
+        row = con.execute("SELECT value FROM kv_store WHERE key='rpc_auth_token'").fetchone()
+        con.close()
+        return row[0] if row else ''
+    except Exception:
+        return ''
+
+
+def _rpc_get(path):
+    try:
+        import json
+        import urllib.request
+        token = _rpc_token()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:8766{path}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+
 def send_summary(label):
     try:
-        r = safe_run([BYBIT_CLI, 'balance'], timeout=10)
-        balance_out = r.stdout.strip()
-        r = safe_run([BYBIT_CLI, 'positions'], timeout=10)
-        pos_out = r.stdout.strip()
+        bal = _rpc_get('/balance')
+        pos = _rpc_get('/positions')
+        if not bal:
+            return
+        balance_out = (
+            f"USDT: ${float(bal.get('balance', 0)):,.2f} · "
+            f"equity ${float(bal.get('equity', 0)):,.2f}"
+        )
+        if isinstance(pos, list):
+            if not pos:
+                pos_out = "открытых позиций нет"
+            else:
+                parts = []
+                for p in pos:
+                    side = "SHORT" if p.get('side') == 'Sell' else "LONG"
+                    arrow = "🔻" if side == "SHORT" else "🟢"
+                    upnl = float(p.get('upnl') or 0)
+                    parts.append(
+                        f"{arrow} {p.get('symbol')} · {side} · "
+                        f"вх {p.get('entry')} → {p.get('mark')} · "
+                        f"PnL {upnl:+.2f}$"
+                    )
+                pos_out = "\n".join(parts)
+        else:
+            pos_out = str(pos)
     except Exception:
         return
     lines = [f'**{label}**', '', '💰 *Баланс:*', balance_out, '', '📊 *Позиции:*', pos_out]

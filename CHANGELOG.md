@@ -7,6 +7,76 @@
 
 ---
 
+## [11.4] — 2026-10-04
+
+### Fixed
+- **Self-learn: ручные входы загрязняли выборку.** Добавлена колонка `trade_history.manual` (schema + миграция) для разделения авто-входов и ручных. Ручной вход через `/enter` → `mark_manual_position()` → при закрытии `manual=1`. Адаптер self-learn грузит `manual=0`. Ручные сделки (AKE −$367, ZEC −$44) заставляли self-learn «думать», что стратегия убыточна (−$201), хотя чистые авто-сделки прибыльны (+$210, WR 74%, PF 1.34).
+
+## [11.3] — 2026-09-25
+
+### Fixed
+- **BB-кеш шорт-скана** — `auto_short._get_bb_ws` кеширует Daily BB (TTL 30 мин) → убирает повторные kline-запросы. Фиксит `TIMEOUT check_auto_short` (1778 раз/2 дня): 80 кандидатов × REST без кеша не укладывались в deadline. deadline 45→75с, timeout 50→90с.
+- **positions snapshot TIMEOUT** — `asyncio.wait_for` 20→35с (внутренний `bybit_async` уже 30с, `recv_window` 30000).
+- **Funding Momentum таймаут** — `_get_bb_and_funding` кеш (TTL 5 мин) + `check_funding_signals` timeout 20→40с. Фиксит 4521 исторических таймаутов.
+
+### Changed
+- **Техдолг: дубли модулей** — убраны мёртвые импорты `auto_sl`/`trailing_sl` из `main_async.py` (реальный вызов — только `unified_sl.manage_sl`), `docker-entrypoint.sh` переведён с заглушки `main.py` на `main_async`. `trailing_sl.py`/`auto_sl.py` помечены `@deprecated` (не удалены — на них ссылаются тесты).
+
+## [11.2] — 2026-09-17
+
+### Fixed
+- **TP «Qty invalid» на дешёвых монетах (FLOW/GRAM)** — `auto_tp._get_lot_step()` звал несуществующий `fetch_instruments_info` → ImportError → дефолт `0.001` вместо реального `qtyStep` (0.1) → Bybit отклонял ордер → 4 фейла → PERM_SKIP 24ч. Теперь прямой `instruments-info`, дефолт `0.1`.
+- **Float-шум в qty-строке** — `place_take_profit` форматирует `f'{qty:.8f}'.rstrip('0').rstrip('.')`.
+- **Монотонный trailing SL** — `unified_sl._calc_tight_trail`/`_calc_breakeven` пересчитывали SL=mark×0.99 без сверки с текущим SL → SL ехал вниз при микро-падении mark (осцилляция $0.0088↔$0.0089). Добавлен guard: LONG только вверх, SHORT только вниз.
+- **BTC kline-таймауты** — `bybit_async` timeout 15→30с (retries внутри рассчитаны до ~60с).
+
+### Added
+- **Volatility Regime Filter** (`volatility_filter.py`) — off-by-default safety gate: блок новых входов при `ATR > N×baseline` + vol-scaled позишн-сайзинг (риск в $ = константа). Конфиг `volatility_filter.{enabled,atr_ratio_threshold,baseline_days,min_scale}`. Fail-open на ошибку/нет сети. 10 тестов.
+
+---
+
+## [11.1] — 2026-09-09
+
+### Фаза 9.1 — Risk-фикс junk-шортов (15.08)
+- Junk-шорты (Tier C/D): SL +7% через trading-stop
+- DCA-мартингейл удалён (check_auto_short + check_junk_dca)
+- Мёртвый код вычищен (JUNK_DCA_LEVELS, short_margin, SHORT_LEVERAGE)
+- exit_reason детект по знаку closedPnl (не по цене)
+
+### Фаза 9.2 — FIFO-матчинг self-learn фикс (20.08)
+- adapter.load_from_sqlite строит RoundTrip напрямую из pnl/hold_hours
+- analyzer.compute_profile_from_roundtrips (без пересчёта FIFO)
+- WR 28% → 66% (совпадает с прямым SQL)
+
+### Фаза 9.3 — Time-exit + Blacklist + Candle-cache (27.08)
+- check_short_time_sl: createdTime → opened_at/entry_ts
+- symbol_blacklist.py — перманентный чёрный список (auto_short + auto_entry)
+- candle_cache.py — TTL-кэш MTF-свечей (300с), deadline 20→30с
+- CI: workflow master→main + logic/regression тесты
+- Legacy-мусор удалён (.bak ×2, deploy.sh.old, =6.0)
+
+### Метрики (09.09.2026)
+- 301 закрытая сделка (185 auto); PF post-9.1: 1.38 (LONG 9.64, SHORT 0.70)
+
+## [11.0] — 2026-08-08
+
+### Фаза 9 — SHORT-оптимизация
+- **World Model**: точность 22.3% → 33.1% (+48%), добавлен в SHORT-скоринг
+- **SHORT ML-фильтр**: BB% порог 95→100, WM score порог ≥3, MTF-скидка TRENDING_DOWN
+- **SHORT перекос BB%**: <30% = 0 баллов (защита от входа на падении)
+- **Android MVP**: `/set-tp` эндпоинт + `/generate-jwt` для серверной авторизации
+
+### SHORT-результаты (paper trade)
+- BTC/ETH top-40, 3 месяца: WR 40% → 52%, PF 0.56 → 0.92, Sharpe -0.6 → -0.1
+- SOL/AVAX (волатильные): WR 43%, PF 1.12, Sharpe +0.27
+
+### Техническое
+- JWT auth для Android RPC-клиента
+- `gsc_audit` интеграция (pre-commit + CI)
+- gitignore: `.repowise/`, `.claude/`, `.mcp.json`
+
+---
+
 ## [10.0] — 2026-08-04
 
 ### Self-Learning v10 (20+ механик)

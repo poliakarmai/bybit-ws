@@ -7,7 +7,6 @@ Priority: tight_trail > simple_trail > hard_trail > breakeven > auto_sl > defaul
 import time
 from .api import place_stop_loss, get_bb_data
 from .alerts import log_event
-from .manual_positions import is_manual_position
 from . import TRAIL_SL_PERCENT
 
 # Throttle: не чаще чем раз в N секунд на позицию (по имени символа)
@@ -38,8 +37,6 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
     alerts = []
 
     for sym, p in positions.items():
-        if is_manual_position(sym):
-            continue
 
         entry = p.get('entry', 0)
         mark = p.get('mark', 0)
@@ -72,7 +69,7 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
                         sl_target, sl_desc = _calc_breakeven(p, is_long, mark, entry)
                     if sl_target is None:
                         # ── Priority 5: Default fix (ensure SL exists) ──
-                        sl_target, sl_desc = _calc_default_sl(p, is_long, mark, entry, leverage)
+                        sl_target, sl_desc = _calc_default_sl(sym, p, is_long, mark, entry, leverage)
 
         if sl_target is None:
             continue
@@ -101,8 +98,15 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
 
 
 def _calc_tight_trail(p: dict, is_long: bool, mark: float, entry: float):
-    """Tight trailing: +3% → SL=entry+2%, затем mark×0.99"""
+    """Tight trailing: +3% → SL=mark×0.99 (LONG) / mark×1.01 (SHORT).
+
+    Монотонность (17.09.2026): SL двигается ТОЛЬКО в прибыльную сторону —
+    LONG вверх (target > current_sl), SHORT вниз (target < current_sl).
+    Раньше target=mark×0.99 пересчитывался каждый цикл без сверки с текущим
+    SL → при микро-падении mark SL ехал вниз (осцилляция $0.0088↔$0.0089).
+    """
     pnl_pct = ((mark - entry) / entry * 100) if is_long else ((entry - mark) / entry * 100)
+    current_sl = p.get('stopLoss')
 
     if pnl_pct < 3:
         return None, ''
@@ -110,12 +114,12 @@ def _calc_tight_trail(p: dict, is_long: bool, mark: float, entry: float):
     if is_long:
         # LONG: SL подтягиваем вверх
         target = round(mark * 0.99, 4)
-        if target > entry * 1.02:  # минимум +2% от входа
+        if target > entry * 1.02 and (current_sl is None or target > current_sl):
             return target, f'tight trail LONG +{pnl_pct:.1f}%'
     else:
         # SHORT: SL подтягиваем вниз
         target = round(mark * 1.01, 4)
-        if target < entry * 0.98:  # минимум -2% от входа
+        if target < entry * 0.98 and (current_sl is None or target < current_sl):
             return target, f'tight trail SHORT +{pnl_pct:.1f}%'
 
     return None, ''
@@ -170,31 +174,57 @@ def _calc_hard_trail(sym: str, is_long: bool, mark: float, entry: float, current
 
 
 def _calc_breakeven(p: dict, is_long: bool, mark: float, entry: float):
-    """Breakeven: +10% → SL = entry + 1% (LONG) / -10% → SL = entry - 1% (SHORT)"""
+    """Breakeven: +10% → SL = entry + 1% (LONG) / -10% → SL = entry - 1% (SHORT).
+
+    Монотонность (17.09.2026): не откатывать SL, уже подтянутый tight/simple
+    trail'ом выше entry*1.01 — иначе BE откатит SL вниз.
+    """
     pnl_pct = ((mark - entry) / entry * 100) if is_long else ((entry - mark) / entry * 100)
+    current_sl = p.get('stopLoss')
 
     if pnl_pct < 10:
         return None, ''
 
     if is_long and mark > entry * 1.03:
         target = round(entry * 1.01, 4)
-        return target, f'BE LONG +{pnl_pct:.1f}%'
+        if current_sl is None or target > current_sl:
+            return target, f'BE LONG +{pnl_pct:.1f}%'
     elif not is_long and mark < entry * 0.97:
         target = round(entry * 0.99, 4)
-        return target, f'BE SHORT +{pnl_pct:.1f}%'
+        if current_sl is None or target < current_sl:
+            return target, f'BE SHORT +{pnl_pct:.1f}%'
 
     return None, ''
 
 
-def _calc_default_sl(p: dict, is_long: bool, mark: float, entry: float, leverage: float):
-    """Default SL: -10% от входа если SL не установлен"""
+def _calc_default_sl(sym: str, p: dict, is_long: bool, mark: float, entry: float, leverage: float):
+    """Default SL: ATR-адаптивный (1.5×ATR(14), clamp 3–10%), fallback −10%.
+
+    04.10.2026: динамический шаг по волатильности вместо фикс −10%.
+    Волатильная монета (SAND +65%/нед) → шире SL (до 10%), спокойная (BTC) → уже (3–5%).
+    """
     current_sl = p.get('stopLoss')
     if current_sl is not None:
         return None, ''
 
+    atr = 0.0
+    try:
+        from .auto_tp import _get_atr_value
+        atr = _get_atr_value(sym)
+    except Exception:
+        atr = 0.0
+
+    if atr > 0 and entry > 0:
+        dist = max(0.03, min(0.10, 1.5 * atr / entry))
+        if is_long:
+            target = round(entry * (1 - dist), 4)
+        else:
+            target = round(entry * (1 + dist), 4)
+        return target, f'ATR SL {dist*100:.1f}%'
+
+    # fallback: фикс −10% (нет ATR / ошибка сети)
     if is_long:
         target = round(entry * 0.90, 4)
     else:
         target = round(entry * 1.10, 4)
-
     return target, 'default -10%'

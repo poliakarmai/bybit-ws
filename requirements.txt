@@ -1,2 +1,14 @@
-# Bybit Bollinger Grid Monitor — зависимости
+# bybit-ws — core runtime dependencies
+# ML/LSTM optional deps (torch, dspy, optuna, stable-baselines3, gymnasium) are NOT here:
+# they are lazily imported with graceful fallbacks (see bybit_ws/lstm_regime.py).
+aiohttp>=3.8
+filelock>=3.9
+httpx>=0.24
+matplotlib>=3.7
+mcp>=1.0
+mplfinance==0.12.10b0
+numpy>=1.24
+pandas>=2.0
+PyJWT>=2.8
 PyYAML>=6.0
+requests>=2.28

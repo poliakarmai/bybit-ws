@@ -617,6 +617,10 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
             scaler.var_ = np.array(scaler_data['var_'])
             scaler.n_features_in_ = scaler_data['n_features_in_']
         else:
+            # pickle fallback — verify HMAC before deserializing
+            if not _verify_lstm_file(SCALER_PATH):
+                print(f'⚠️ HMAC mismatch for {SCALER_PATH} — skipping LSTM', flush=True)
+                return None
             # Регистрируем FeatureScaler в __main__ для совместимости с pickle
             import sys as _sys
             _sys.modules['__main__'].FeatureScaler = FeatureScaler
