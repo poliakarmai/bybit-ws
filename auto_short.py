@@ -338,13 +338,21 @@ def short_score_coin(sym: str, bb_data: dict, ticker: dict, is_junk: bool) -> di
     }
 
 
-def should_disable_short(window: int = 30, min_pf: float = 1.0) -> bool:
+def should_disable_short(window: int = 30, min_pf: float = 1.0,
+                         stale_hours: "float | None" = None) -> bool:
     """Отключить авто-SHORT если PF на последних N закрытых SHORT-сделок < min_pf.
 
     ponytail: скользящее окно по closed_at DESC. < window сделок → не отключаем
     (мало данных). Ошибка чтения → fail-open (не блокируем торговлю).
+
+    Stale-reset (фикс 10.10.2026): если последняя SHORT-сделка старше stale_hours,
+    НЕ блокируем — иначе circular lock: guard глушит SHORT → новых SHORT-сделок нет →
+    окно из 30 застывает → PF не меняется → блок навсегда. Порог настраивается через
+    env BYBIT_SHORT_GUARD_STALE_HOURS.
     """
     try:
+        if stale_hours is None:
+            stale_hours = float(os.environ.get('BYBIT_SHORT_GUARD_STALE_HOURS', '24'))
         trades = db.get_trades(limit=window * 3)  # запас на LONG/ручные
         shorts = [
             t for t in trades
@@ -352,6 +360,11 @@ def should_disable_short(window: int = 30, min_pf: float = 1.0) -> bool:
         ][:window]
         if len(shorts) < window:
             return False
+        # Stale-reset: окно не двигалось stale_hours → даём SHORT шанс заново
+        if stale_hours > 0:
+            last_closed = max((t.get('closed_at') or 0) for t in shorts)
+            if last_closed and (time.time() - last_closed) > stale_hours * 3600:
+                return False
         gross_profit = sum(t.get('pnl') or 0 for t in shorts if (t.get('pnl') or 0) > 0)
         gross_loss = abs(sum(t.get('pnl') or 0 for t in shorts if (t.get('pnl') or 0) < 0))
         if gross_loss <= 0:
