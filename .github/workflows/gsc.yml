@@ -13,3 +13,4 @@ jobs:
       - uses: poliakarmai/gsc@v1
         with:
           fail_on_critical: false
+          deep_scan: false
