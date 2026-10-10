@@ -267,8 +267,6 @@ def auto_take_profit(positions, orders, skip_syms=None):
                         qty = math.floor(raw_qty / lot_step) * lot_step
                         qty = round(qty, lot_decimals)
                         if qty < max(0.5, lot_step):
-                            if qty < lot_step:
-                                log_event(f'🔇 TP {sym}: partial qty {raw_qty:.4f} < qtyStep {lot_step}, пропускаю уровень')
                             continue
                         if side == 'Buy':
                             tp_price = entry + k * atr

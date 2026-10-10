@@ -248,3 +248,12 @@ python3 -m bybit_ws.paper_trade SOLUSDT --days 30
 python3 -m bybit_ws.paper_trade SOLUSDT --days 90 --interval 240 --json
 python3 -m bybit_ws.paper_trade BTCUSDT --days 180 --risk 3 --rr 1.5
 ```
+
+## Известные не-баги
+
+| Проявление | Причина | Влияние |
+|-----------|--------|---------|
+| `check_weekly_pumps` timeout 10s | Защита от зависаний, результат отбрасывается, цикл работает | Нет |
+| SSRF в bybit_ws_sdk.py | SDK hardcoded на localhost:8766, не принимает external input | Internal dev tool |
+| YAML-UPLOAD001 (MIME validation) | ML-модели загружаются из локальных файлов, не HTTP | Локальный ML-пайплайн |
+| ~~RVN partial qty spam~~ | **Fixed 10.10**: убран лог при qty < qtyStep | ✅ Устранено |
