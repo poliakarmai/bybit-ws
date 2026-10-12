@@ -354,9 +354,11 @@ def should_disable_short(window: int = 30, min_pf: float = 1.0,
         if stale_hours is None:
             stale_hours = float(os.environ.get('BYBIT_SHORT_GUARD_STALE_HOURS', '24'))
         trades = db.get_trades(limit=window * 3)  # запас на LONG/ручные
+        # side в trade_history = сторона ЗАКРЫТИЯ: 'Buy' закрывает SHORT (вход 'Sell'),
+        # 'Sell' закрывает LONG. Фильтр по 'Sell' считал PF лонгов — баг 12.10.2026.
         shorts = [
             t for t in trades
-            if t.get('side') == 'Sell' and not t.get('manual')
+            if t.get('side') == 'Buy' and not t.get('manual')
         ][:window]
         if len(shorts) < window:
             return False
