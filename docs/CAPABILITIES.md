@@ -1,4 +1,6 @@
-# bybit-ws — Bollinger Grid трейдинг-монитор v7.6
+# bybit-ws — Bollinger Grid трейдинг-монитор v11.4.x
+
+> ⚠️ Файл сверен с кодом 2026-10-14 (коммит `49a9a79`); ранее был v7.6 и описывал удалённое поведение.
 
 Автоматическая торговля фьючерсами Bybit. 24/7 systemd-сервис. SQLite WAL (SSOT).
 Документация: [ARCHITECTURE.md](ARCHITECTURE.md) (внутреннее устройство), [API.md](API.md) (эндпоинты), [ROADMAP.md](ROADMAP.md) (план).
@@ -27,10 +29,10 @@ BB-сигнал (score ≥ min_score)
 
 | Параметр | Значение |
 |----------|---------|
-| Модель 1 | Nemotron (OpenRouter) |
-| Модель 2 | DeepSeek (fallback) |
+| Цепочка | DeepSeek (`deepseek-v4-pro`) → Qwen (`qwen3.7-max`) → Nemotron (`nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter) |
+| Режим | fail-closed; fail-open только при длительном отказе LLM |
 | Таймаут | 5s |
-| Обе упали | revise (блок) |
+| Все упали | revise (блок) |
 | Judge CB | 3 падения → отключение на 1ч |
 | Fallback >1ч | режим без Judge (fail-open), min_score +20% |
 | Кэш | 300s TTL |
@@ -50,15 +52,15 @@ SL = entry ± k × ATR(14), capped -50%/+50% от входа.
 **Trailing SL:** активируется при PnL >15%. Шаг: каждые 1% движения цены.
 Distance: 1.0×ATR(14) от тек. цены. Минимум: 0.5% от entry.
 
-## 5. Auto-TP — ATR-based (3 уровня)
+## 5. Auto-TP — ATR-adaptive (3 ноги)
 
-| Уровень | k | % объёма | Действие |
-|---------|---|----------|---------|
-| TP1 | 1.0×ATR | 40% | Закрыть 40%, SL → breakeven |
-| TP2 | 2.0×ATR | 35% | Закрыть 35%, SL подтянуть |
-| TP3 | 3.0×ATR | 25% | Закрыть остаток |
+| Нога | % размера | Действие |
+|------|-----------|---------|
+| Leg 1 | 40% | Закрыть 40%, SL → breakeven |
+| Leg 2 | 35% | Закрыть 35%, SL подтянуть |
+| Leg 3 | 25% | Закрыть остаток |
 
-PERM_SKIP: time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
+Сплит `ATR_TP_SPLITS = [0.40, 0.35, 0.25]` (3 ноги, % от размера), множители ATR масштабируются по режиму рынка. BB-сплит 20%/80% — fallback, когда ATR недоступен (guard `not bb_used`). `BYBIT_ATR_TP_ENABLED` по умолчанию ON (`'1'`). PERM_SKIP: time-decay 24ч.
 
 ## 6. DCA (Dollar Cost Averaging)
 
@@ -75,23 +77,24 @@ PERM_SKIP: time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 | Уровень | Критерий | Действие |
 |--------|---------|---------|
 | Early warning | Volume spike >5×SMA(20) + price >20%/1h | алерт, не шортить |
-| JUNK | +80% за день | SHORT с жёстким SL -15% |
-| JUNK CB | 2 закрытия по -15% | отключить JUNK на 24ч |
+| JUNK | +80% за день | SHORT с SL +5% (`sl_tier_cd`), max_loss 10%, max_hold 24h, time-SL 6h |
+| JUNK CB | 2 закрытия по SL | отключить JUNK на 24ч |
 
-## 8. Black Swan — многоуровневая защита
+> `check_junk_dca` — legacy (DCA-логика шлака), не вызывается из live-цикла.
+
+## 8. Black Swan — alert-only (без авто-закрытия)
+
+BlackSwan **только оповещает**, позиции сам не закрывает.
 
 | Триггер | Действие |
 |---------|---------|
-| BTC -3%/15min | Закрыть 50% позиций (худшие по PnL) |
-| BTC -5%/30min | Закрыть 80% позиций |
-| BTC -8%/1h | Закрыть 100% + пауза (kill switch) |
-| PnL > 2× max_daily_loss | Emergency close all |
+| ≥5 красных позиций **И** суммарный uPnL < −$150 | алерт с вопросом «Закрыть красные позиции?» (ждёт ответа пользователя) |
 
-Опережающий индикатор: BTC ATR(14)/price > порога → повышенная готовность.
+Авто-закрытие — только через RPC `/emergency_close` или `/kill_switch` (`emergency_close_all()` вызывается только оттуда). Пороги: `BLACKSWAN_MIN_RED_POSITIONS = 5`, `BLACKSWAN_TOTAL_UPNL_THRESHOLD = -150` (комментарий «не закрытие!»).
 
 ## 9. Self-Learning
 
-Каждые 2880 циклов (~24ч):
+Event-driven: ≥10 сделок **и** ≥6ч с прошлого прогона, иначе fallback через 24ч (`should_run_self_learn_v6`, min_trades=10, min_hours=6, fallback_hours=24):
 - journal/analyzer.py — FIFO-матчинг, win rate, P/L ratio
 - journal/self_learn.py — адаптация min_score (±30%), SL/TP (±20%)
 - post_trade.py — кластерный анализ, блок <40% WR
@@ -149,12 +152,14 @@ high_vol: max 5 позиций (приоритет над сессионным).
 
 ## 14. Аварийные эндпоинты
 
+Все write-эндпоинты требуют Bearer-токен. Аварийные эндпоинты дополнительно требуют `X-Emergency-Auth` (`EMERGENCY_TOKEN`):
+
 ```
 # Kill Switch — полная блокировка до /resume
-POST /kill_switch  (X-Emergency-Auth)
+POST /kill_switch  (Bearer + X-Emergency-Auth)
 
 # Emergency Close — закрыть всё (или symbol)
-POST /emergency_close  (X-Emergency-Auth)
+POST /emergency_close  (Bearer + X-Emergency-Auth)
 {"symbol": "LINKUSDT"}  // опционально
 
 # Сброс CB

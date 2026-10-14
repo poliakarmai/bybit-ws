@@ -1,27 +1,28 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-10-04 (v11.4 — self-learn manual-фильтр: ручные входы исключены из обучения)
+> Обновлено: 2026-10-14 (v11.4.x — docs sync, коммит 49a9a79)
 
 ## Что это
 
 Трейдинг-монитор Bybit фьючерсов. Стратегия: **Bollinger Grid** (LONG/SHORT).  
 Systemd-сервис `bybit-ws-async`, ~185 MB RAM (с LSTM/torch), SQLite — SSOT.
 
-## Текущее состояние (11.10.2026)
+## Текущее состояние (14.10.2026)
+
+> **Снимок на 2026-10-14 (stale-safe).** Числа — снапшот `state.db`; живой режим/PnL всегда из RPC (`/metrics`, `/journal`, `/rpc/regime`) + `state.db`, не из этой таблицы.
 
 | Метрика | Значение | Примечание |
 |---------|----------|-----------|
-| Закрытых сделок (все) | 444 | 297 auto + 47 historical + 30 imported + 31 legacy + 8 x10 + 31 manual |
-| **Авто (manual=0 → self-learn)** | **297 / +$159 / WR 75% / PF 1.21** | ручные входы исключены из обучения |
-| Ручные (manual=1) | 31 / −$410 | AKEUSDT + ZECUSDT (входы пользователя, не бот) |
-| LONG (авто) | 195 / +$233 / WR 78% / PF 1.48 | основная прибыль |
-| SHORT (авто) | 102 / −$74 / WR 69% / PF 0.71 | ⚠️ avg_loss $8.00 vs avg_win $2.60 — дисбаланс остался |
+| Закрытых сделок (все) | 448 | auto 332 + historical 47 + NULL/legacy 31 + imported 30 + x10 6 + x10:scalp 2 |
+| Авто (`strategy='auto'`, любой manual) | 332 | все авто-входы |
+| **Авто self-learn (`manual=0`)** | **301 / +$174.71 / WR 75.1% / PF 1.24** | ручные входы исключены из обучения |
+| Ручные (`manual=1`) | 31 | входы пользователя, не бот |
+| LONG (авто, `manual=0`) | 199 / +$248.98 / WR 78.4% | основная прибыль |
+| SHORT (авто, `manual=0`) | 102 / −$74.27 / WR 68.6% | ⚠️ проблемная сторона |
 | Режим | live → `GET /rpc/regime` | не хранить в доке (мгновенно устаревает) |
 
-> **Срез 11.10.2026.** Числа — снимок `state.db`; живой режим/PnL всегда из RPC (`/rpc/regime`, `/rpc/journal`), не из этой таблицы.
->
-> **manual-фильтр (04.10.2026):** `trade_history.manual` отделяет авто-входы от ручных. Ручной вход через `/enter` → `mark_manual_position()` → при закрытии `manual=1` → self-learn исключает. Раньше ручные сделки пользователя (AKE −$367, ZEC −$44) загрязняли выборку: self-learn «думал», что стратегия убыточна, хотя чистые авто-сделки прибыльны. Адаптер грузит `manual=0`. SHORT остаётся проблемной стороной (PF 0.71) — реальная авто-асимметрия SL/TP, не ручной шум.
+> **manual-фильтр:** `trade_history.manual` отделяет авто-входы от ручных. Ручной вход через `/enter` → `mark_manual_position()` → при закрытии `manual=1` → self-learn исключает. Адаптер self-learn грузит `manual=0`.
 
 ## Структура (core)
 
@@ -44,7 +45,7 @@ bybit-ws/
 │   ├── analyzer.py        ← Профиль + 4 bias-диагностики
 │   └── adapter.py         ← SQLite → нормализованные сделки
 ├── deploy.sh             ← Атомарный деплой (smoke 52 + canary 8)
-├── test_smoke.py         ← 52 интеграционных тестов
+├── test_smoke.py         ← 16 тестов (всего в репо: 16 тест-файлов / 171 тест-функций)
 ├── paper_trade.py        ← Бэктестинг на исторических данных
 ├── bybit_ws/experiments/ ← Experiment Tree: воспроизводимые бэктесты + sandbox
 │   ├── engine.py          ← Детерминированный backtest-движок (кэш свечей, run-манифест)
@@ -201,7 +202,7 @@ systemctl --user restart bybit-ws-async
 
 ## Pre-deploy checklist
 
-- [ ] `python3 test_smoke.py` → PASS (52/52)
+- [ ] `python3 test_smoke.py` → PASS (16/16)
 - [ ] `sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA integrity_check"` → ok
 - [ ] `curl -s http://127.0.0.1:8766/health` → alive
 - [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий

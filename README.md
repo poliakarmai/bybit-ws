@@ -3,7 +3,7 @@
 **24/7 автотрейдинг на фьючерсах Bybit. Bollinger Grid + AI-фильтры. Подключил — зарабатывает.**
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen)](./test_smoke.py)
+[![Tests](https://img.shields.io/badge/tests-16%2F16-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
 [![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
 
@@ -18,7 +18,7 @@
 - Защищает депозит: Circuit Breaker, BlackSwan, Anti-ludomania, корреляционный блок
 - Самообучается: LSTM-классификатор рынка, Thompson Sampling, Dynamic Bandit, Drift Detector, Ensemble (20+ механик)
 
-Работает **24/7 на VPS за $5/мес**. 52 smoke-теста, атомарный деплой.
+Работает **24/7 на VPS за $5/мес**. 16 тест-файлов / 171 тест, атомарный деплой.
 
 ---
 
@@ -28,13 +28,14 @@
 
 | Метрика | Значение |
 |--------|----------|
-| Авто-сделки (manual=0) | 297 / +$159 / WR 75% / PF 1.21 |
-| LONG | 195 / +$233 / WR 78% / PF 1.48 |
-| SHORT | 102 / −$74 / WR 69% / PF 0.71 |
+| Авто-сделки self-learn (manual=0) | 301 / +$174.71 / WR 75.1% / PF 1.24 |
+| LONG (авто, manual=0) | 199 / +$248.98 / WR 78.4% |
+| SHORT (авто, manual=0) | 102 / −$74.27 / WR 68.6% |
+| Всего закрытых сделок | 448 |
 
-> **Срез 11.10.2026 (manual=0):** LONG — PF **1.48** (WR 78%, +$233) — основная прибыль. SHORT — PF 0.71 (WR 69%): avg_loss $8.00 vs avg_win $2.60 — дисбаланс остался. Ручные входы (manual=1: 31 / −$410) исключены из self-learn через `trade_history.manual`.
+> **Снимок на 2026-10-14.** Числа — снапшот `state.db`; живой источник — RPC (`/metrics`, `/journal`, `/rpc/regime`).
 
-*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 444 закрытых сделок (297 авто-чистых + 31 ручных + 116 historical/imported/legacy).*
+*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 448 закрытых сделок (332 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
 
 ---
 
@@ -51,18 +52,18 @@ pip install -r requirements.txt
 ### 2. Добавь ключи Bybit
 
 ```bash
-cp config.example.yaml ~/.config/bybit-ws/config.yaml
 mkdir -p ~/.config/bybit-ws
+cp config.example.yaml ~/.config/bybit-ws/config.yaml
 
-# Создай .env с API-ключами (chmod 600!)
-cat > ~/.config/bybit-ws/.env << 'EOF'
+# Создай env с API-ключами (chmod 600!)
+cat > ~/.config/bybit-ws/env << 'EOF'
 BYBIT_API_KEY=your_key
 BYBIT_API_SECRET=your_secret
 RPC_TOKEN=your_random_token_32_chars
 TG_BOT_TOKEN=optional_telegram_bot_token
 TG_CHAT_ID=optional_chat_id
 EOF
-chmod 600 ~/.config/bybit-ws/.env
+chmod 600 ~/.config/bybit-ws/env
 ```
 
 ### 3. Запусти
@@ -72,7 +73,7 @@ chmod 600 ~/.config/bybit-ws/.env
 python3 -m bybit_ws.paper_trade SOLUSDT --days 30
 
 # Боевой запуск
-python3 test_smoke.py          # 52 теста → PASS
+python3 test_smoke.py          # 16 тестов → PASS (всего: 16 файлов / 171 тест)
 bash deploy.sh                 # атомарный деплой с canary-проверкой
 ```
 
@@ -86,8 +87,8 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Bollinger Grid** LONG/SHORT на дневном таймфрейме
 - **9-метричный скоринг**: BB%, объём, падающие дни, фондинг, волатильность, качество + ML Gate
 - **LSTM-классификатор** рынка (82.3% точность, 5 режимов)
-- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek → Qwen → Nemotron, fail-closed)
-- **Auto-TP**: 20% на Middle BB + 80% на Upper BB
+- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek → Qwen → Nemotron; fail-closed, fail-open только при длительном отказе LLM)
+- **Auto-TP**: ATR-adaptive, 3 ноги `[0.40, 0.35, 0.25]` (% размера), множители ATR по режиму. BB 20% Middle / 80% Upper — fallback, когда ATR недоступен
 - **Unified SL**: 5 механизмов → один приоритетный (tight > simple > hard > BE > default)
 
 ### 🛡️ Защита депозита
@@ -200,7 +201,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 
 ## Безопасность
 
-- API-ключи через `.env` (chmod 600) — никогда в коде
+- API-ключи через `env` (chmod 600) — никогда в коде
 - RPC write-эндпоинты требуют Bearer-токен
 - IP-whitelist на уровне Bybit
 - Атомарный деплой: 6 pre-deploy проверок + 8 canary checks

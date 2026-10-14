@@ -1,9 +1,9 @@
 # ROADMAP — bybit-ws
 
-> План развития. Версия: 11.0. Обновлено: 2026-08-27.
+> План развития. Версия: 11.4.x. Обновлено: 2026-10-14.
 > Актуальный roadmap также в Obsidian: `hermes/bybit-ws-roadmap.md`.
 
-## Текущий статус (v11)
+## Текущий статус (v11.4.x)
 
 | Компонент | Статус |
 |-----------|--------|
@@ -16,7 +16,7 @@
 | LSTM World Model (multi-task OHLCV, entry scoring) | ✅ prod |
 | REGIME_AUTO: блокировка входов по режиму рынка | ✅ prod |
 | Адаптивный TP/SL по LSTM-режиму (v9) | ✅ prod |
-| Self-learning (FIFO + bias + post-trade, каждые 24ч) | ✅ prod |
+| Self-learning (event-driven: ≥10 сделок и ≥6ч с прошлого прогона, иначе fallback через 24ч) | ✅ prod |
 | Anti-ludomania: 3 убытка/час → блок 30 мин | ✅ prod |
 | BlackSwan v2: корреляционный алерт (без авто-закрытия) | ✅ prod |
 | Symbol blacklist (перманентный, auto_short + auto_entry) | ✅ prod |
@@ -25,10 +25,10 @@
 | Paper Trading (исторический бэктест) | ✅ prod |
 | Веб-дашборд (SVG + HTML/Chart.js) | ✅ prod |
 | MCP-инструменты (6 шт.) | ✅ prod |
-| RPC REST API (15 эндпоинтов) | ✅ prod |
+| RPC REST API (20 эндпоинтов) | ✅ prod |
 | One-click trading через Hermes-чат | ✅ prod |
 | Алерты (ntfy + Telegram) | ✅ prod |
-| Тесты (52/52 интеграционных) | ✅ prod |
+| Тесты (16 тестов в test_smoke.py; 16 файлов / 171 тест всего) | ✅ prod |
 
 ## Дорожная карта
 
@@ -169,5 +169,5 @@
 ## Принципы
 
 1. **Сначала защита, потом атака** — лимиты и CB важнее стратегий
-2. **Тесты перед деплоем** — 52/52 smoke-тестов
+2. **Тесты перед деплоем** — 16 файлов / 171 тест (16 в test_smoke.py)
 3. **Документация в актуальном состоянии** — docs/ всегда соответствует коду

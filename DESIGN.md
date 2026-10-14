@@ -21,7 +21,8 @@
 ┌───────────────────────────────────────────────────────┐
 │                   bybit-ws monitor                     │
 │                                                       │
-│  main.py ──► главный цикл (30 сек)                    │
+│  main_async.py ──► главный цикл (30 сек)              │
+│  (main.py — DEPRECATED заглушка, sys.exit)            │
 │    ├── api.py          bybit-cli wrapper               │
 │    ├── utils.py         общие утилиты (tier, lot, tick) │
 │    ├── auto_entry.py   LONG вход по scoring            │
@@ -87,9 +88,9 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
                          │
               каждые 10 циклов (5 мин):
               ├── check_overbought()    → SHORT-кандидаты
-              ├── check_auto_short()    → вход в SHORT
-              ├── check_junk_dca()      → шлак: max_loss + max_hold + DCA
-              ├── check_pumps()         → детектор пампов
+               ├── check_auto_short()    → вход в SHORT
+               ├── check_junk_dca()      → LEGACY (не вызывается из live-цикла)
+               ├── check_pumps()         → детектор пампов
               ├── check_rsi_divergence()→ медвежьи сигналы
               ├── check_squeeze()       → BB-сжатие
               ├── check_funding_flip()  → разворот фандинга
@@ -109,7 +110,7 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 | Параметр | Значение |
 |----------|---------|
 | Вход | Лимитный ордер на −3-5% ниже Lower BB (Daily) |
-| TP | 20% Middle BB + 80% Upper BB (два ордера) |
+| TP | ATR-adaptive: 3 ноги `[0.40, 0.35, 0.25]` (% размера), множители ATR по режиму. BB 20%/80% (Middle/Upper) — fallback, когда ATR недоступен |
 | SL | −7% от Lower BB |
 | Плечо | 3x |
 | **Маржа** | Динамическая (% депозита × score_multiplier, position_sizing v3.8) |
@@ -123,34 +124,34 @@ fetch_positions() ──► fetch_orders() ──► detect_changes()
 |----------|---------|
 | Вход | Лимитный ордер Sell на +2% выше рынка (ждём отскока) |
 | **TP** | Middle BB (через trading-stop takeProfit, единый вызов с SL) + трейлинг-TP (junk_trail.py) |
-| **SL** | +5% для Tier A/B, +7% для шлака C/D. JUNK-шорты: БЕЗ SL (hard stop −15% маржи, max_hold 48ч) |
+| **SL** | +5% для Tier A/B, +7% для шлака C/D (`sl_tier_cd`). JUNK-шорты: SL +5% (`sl_tier_cd`), max_loss 10%, max_hold 24h, time-SL 6h |
 | Плечо | 3x |
 | Маржа | $10 (будет динамическая) |
 | Порог BB | >85% (перегрев) |
 | Макс позиций | 3 |
-| Макс удержание | 72 часа (SHORT A/B) — **проверка макс удержания не реализована в коде**. JUNK: 48ч (реализовано в check_junk_dca) |
+| Макс удержание | 72 часа (SHORT A/B) — **проверка макс удержания не реализована в коде**. JUNK: 24h |
 | ONE_WAY фильтр | XRP*, ONDO, WLFI, ENJ, ESPORTS, AVAX*, APT*, SUI* — исключены |
-| DCA-шорт | На аномальных пампах (≥80% за 24ч) + трейлинг-TP (junk_trail.py) |
+| LEGACY DCA-шорт | (removed from live loop) на аномальных пампах (≥80% за 24ч) — `check_junk_dca` не вызывается |
 
 ### SHORT Шлак-режим (v3.7) 🦨
 
 > ⚠️ **Экспериментальный режим.** Включён только через `strategy.junk.enabled: true`.
-> Вместо SL: жёсткий лимит убытка + авто-закрытие по времени.
+> SL +5% (`sl_tier_cd`), max_loss 10%, max_hold 24h, time-SL 6h.
 
 | Параметр | Значение |
 |----------|---------|
 | Вход | Лимитный Sell на +2% выше рынка |
 | Триггер | Дневной рост ≥80% **И** BB Daily ≥70% |
-| Hard stop | **−15% убытка по марже** — market-close (best-effort, при гэпе убыток может быть больше) |
-| Max hold | **48 часов** — авто-закрытие при убытке |
+| Max loss | **10% убытка по марже** — market-close (best-effort, при гэпе убыток может быть больше) |
+| Max hold | **24 часа** — авто-закрытие при убытке |
 | TP | Middle BB (отдельный reduceOnly ордер) |
-| DCA-уровни | +100% и +120% от входа (лимитные Sell того же размера) |
+| DCA-уровни | LEGACY (removed from live loop) — `check_junk_dca` не вызывается |
 | Плечо | 3x |
 | Маржа | $10 |
 | Макс позиций | 2 шлак-шорта одновременно |
 | Кулдаун | 2 часа на монету |
 | Трейлинг-TP | junk_trail.py: 70% при +15% профита, 85% при +30% |
-| Недельный памп | Рост ≥230% за 7д → market SHORT, без SL/TP |
+| Недельный памп | Рост ≥230% за 7д → market SHORT |
 
 Конфиг:
 ```yaml
@@ -158,9 +159,9 @@ strategy:
   junk:
     enabled: false           # ← выключен по умолчанию!
     min_pump_pct: 80         # вход при росте ≥80%
-    dca_levels: [1.0, 1.2]   # +100%, +120%
-    max_loss_pct: 15         # hard stop: -15% убытка по марже (best-effort)
-    max_hold_hours: 48       # авто-закрытие через 48ч
+    dca_levels: [1.0, 1.2]   # LEGACY (removed from live loop)
+    max_loss_pct: 10         # max loss: 10% убытка по марже (best-effort)
+    max_hold_hours: 24       # авто-закрытие через 24ч
     max_positions: 2         # не более 2 шлак-шортов
 ```
 
@@ -542,8 +543,9 @@ strategy:
     margin_tiers: {7: 15, 5.5: 10, 0: 5}   # score → $margin
     entry_offset: 0.03                        # -3% ниже Lower BB
     sl_offset: 0.07                           # -7% от Lower BB
-    tp_middle_pct: 0.20                       # 20% на Middle
-    tp_upper_pct: 0.80                        # 80% на Upper
+    tp_middle_pct: 0.20                       # BB-fallback: 20% на Middle
+    tp_upper_pct: 0.80                        # BB-fallback: 80% на Upper
+                                              # (основной путь — ATR-adaptive [0.40, 0.35, 0.25])
     max_positions: 15                          # безопасный дефолт
     cooldown_after_sl: 14400                    # 4ч после SL перед повторным входом
     cooldown_after_tp: 3600                     # 1ч после TP
@@ -568,9 +570,9 @@ strategy:
   junk:                                        # NEW v3.7
     enabled: false                             # выключен по умолчанию
     min_pump_pct: 80                           # вход при росте ≥80%
-    dca_levels: [1.0, 1.2]                     # +100%, +120%
-    max_loss_pct: 15                           # hard stop: -15% убытка
-    max_hold_hours: 48                         # авто-закрытие через 48ч
+    dca_levels: [1.0, 1.2]                     # LEGACY (removed from live loop) — check_junk_dca не вызывается
+    max_loss_pct: 10                           # hard stop: 10% убытка (Фаза 9: 15→10)
+    max_hold_hours: 24                         # авто-закрытие через 24ч (Фаза 9: 48→24)
     max_positions: 2
 
   dca:
@@ -652,7 +654,7 @@ cp config.example.yaml ~/.config/bybit-ws/config.yaml
 
 ### 2. Запустить
 ```bash
-python3 -m bybit_ws.main
+python3 -m bybit_ws.main_async
 # или через Docker: docker-compose up -d
 ```
 
@@ -852,11 +854,11 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -m bybit_ws.main
+ExecStart=/usr/bin/python3 -m bybit_ws.main_async
 Restart=always
 RestartSec=10
-EnvironmentFile=%h/.config/bybit-ws/.env
-# Все секреты — только в .env (chmod 600):
+EnvironmentFile=%h/.config/bybit-ws/env
+# Все секреты — только в env (chmod 600):
 #   BYBIT_API_KEY=***   BYBIT_API_SECRET=***   RPC_TOKEN=***
 
 [Install]
@@ -899,7 +901,7 @@ docker-compose up -d
 
 ```bash
 # 1. Testnet: в config.yaml указать api.base_url: "https://api-testnet.bybit.com"
-# 2. Один проход: python3 -m bybit_ws.main --once
+# 2. Один проход: python3 -m bybit_ws.main_async --once
 # 3. Dry-run входа: POST /enter с confirm: false — покажет расчёт без ордера
 # 4. Проверить scoring: curl http://localhost:8766/signals — список кандидатов
 # 5. Проверить health: curl http://localhost:8766/health
@@ -979,7 +981,7 @@ docker-compose up -d
 │   └── hermes-mcp-server.py  MCP-сервер для AI-агентов
 ├── lib/
 │   └── bybit_ws/
-│       ├── main.py           главный цикл (481 строк)
+│       ├── main.py           DEPRECATED заглушка (sys.exit('Use main_async.py'))
 │       ├── api.py            API-обёртка, fetch_positions/orders
 │       ├── auto_entry.py     LONG авто-вход
 │       ├── auto_short.py     SHORT авто-вход (218 строк)
@@ -1078,5 +1080,5 @@ alerts:
 10. **events.log** ротируется при 50 МБ. v3.5: trades.jsonl тоже ротируется при 100 МБ + архивация в .gz.
 11. **Каскадная ликвидация** — при гэпе SL не исполняется. v3.5: проверка `dist(mark, liq) < dist(mark, SL) × 0.5` → market-close.
 12. **LONG без cooldown после SL** — v3.5: cooldown_after_sl=14400 (4ч), отслеживается через `cooldown.json`.
-13. **API-ключи в systemd unit** — v3.5: `EnvironmentFile=%h/.config/bybit-ws/.env` (chmod 600) вместо `Environment=`.
+13. **API-ключи в systemd unit** — v3.5: `EnvironmentFile=%h/.config/bybit-ws/env` (chmod 600) вместо `Environment=`.
 14. **SHORT TP теряется** — v3.5: TP через `takeProfit` в `trading-stop` (единый вызов с SL), не отдельным ордером.

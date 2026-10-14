@@ -39,7 +39,7 @@
  │   ├─ Time-Based Exit (6h/48h)
  │   ├─ Post-trade cluster analysis (раз в сутки)
  │   └─ Journal insights (раз в сутки)
- ├─ Self-learning (каждые 2880 циклов = ~24ч)
+ ├─ Self-learning (event-driven: ≥10 сделок и ≥6ч с прошлого прогона, иначе fallback 24ч)
  │   ├─ journal/analyzer.py — FIFO + bias-диагностика
  │   ├─ journal/self_learn.py — адаптация min_score, SL/TP
  │   └─ post_trade.py — кластерный анализ, блок <40% WR
@@ -88,7 +88,7 @@ bybit-ws/
 ├── push_notifier.py      ← Push (ntfy + Telegram)
 ├── journal/
 │   ├── analyzer.py       ← FIFO-анализ, bias
-│   └── self_learn.py     ← Self-learning (2880 циклов)
+│   └── self_learn.py     ← Self-learning (event-driven)
 ├── docs/                 ← Документация
 ├── scripts/              ← DSPy, walkforward
 ├── deploy.sh             ← Атомарный деплой
@@ -144,7 +144,7 @@ PERM_SKIP с time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 5. Кэш: 300s TTL
 6. Таймаут: 5s
 
-## Self-Learning (2880 циклов = ~24ч)
+## Self-Learning (event-driven: ≥10 сделок и ≥6ч с прошлого прогона, иначе fallback 24ч)
 
 - journal/analyzer.py — FIFO-матчинг, win rate, P/L ratio, 4 bias-диагностики
 - journal/self_learn.py — адаптация min_score (+30% при WR<40%), SL (+20%), bias-флаги

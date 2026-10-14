@@ -51,7 +51,7 @@ print(token[0]) if token else print('No token')
 **Файл `.env`:**
 - Может использоваться для установки `TELEGRAM_BOT_TOKEN` и других переменных окружения.
 - **НИКОГДА не коммитится** — прописан в `.gitignore`.
-- Рекомендуемый путь: `~/bybit-ws/.env`
+- Рекомендуемый путь: `~/.config/bybit-ws/env`
 
 ### 1.4 Сводная таблица секретов
 
@@ -138,7 +138,7 @@ chmod 600 ~/.config/bybit-cli/config
 chmod 600 ~/.config/bybit-ws/config.yaml
 
 # Файл с переменными окружения
-chmod 600 ~/bybit-ws/.env
+chmod 600 ~/.config/bybit-ws/env
 
 # База данных StateDB (содержит RPC-токен)
 chmod 600 ~/.local/share/bybit-ws/state.db
