@@ -1206,8 +1206,13 @@ class RPCHandler(BaseHTTPRequestHandler):
     def _handle_scan(self, body: dict):
         """POST /scan — Bollinger Grid скан (WS-кеш + параллельный REST).
 
-        Принимает: {"mode": "long|short", "limit": 5, "interval": "D"}
+        Принимает: {"mode": "long|short", "limit": 5, "interval": "D",
+                    "symbols": ["BTCUSDT"]}  # опционально: скан конкретных тикеров
         Возвращает: топ-N сигналов за ~5-10 секунд (даже при холодном кеше).
+
+        Без ``symbols`` — как раньше: топ-50 по обороту. С ``symbols`` сканируются
+        только запрошенные тикеры, и порог BB% не применяется (запросили конкретный
+        тикер — отдаём его состояние даже вне зоны входа, score при этом честный).
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import threading
@@ -1227,6 +1232,24 @@ class RPCHandler(BaseHTTPRequestHandler):
         if limit < 1 or limit > 20:
             return _error(self, 'Invalid limit', 'limit must be 1-20', 400)
 
+        # Явный список тикеров (для /scan TICKER в ботах): иначе скан идёт по топ-50
+        # оборота и запрошенного символа там может не быть вообще.
+        symbols = body.get('symbols', body.get('symbol'))
+        requested: list[str] = []
+        if symbols:
+            if isinstance(symbols, str):
+                symbols = [symbols]
+            if not isinstance(symbols, list):
+                return _error(self, 'Invalid symbols', 'symbols must be a list of strings', 400)
+            for raw_sym in symbols:
+                sym = str(raw_sym).strip().upper()
+                if not sym.endswith('USDT') or not sym.isalnum():
+                    return _error(self, 'Invalid symbol', f'bad symbol: {raw_sym}',
+                                  400, 'invalid_symbol')
+                requested.append(sym)
+            if len(requested) > 20:
+                return _error(self, 'Too many symbols', 'symbols limit is 20', 400)
+
         try:
             from . import api
             from .ws_client import get_bb
@@ -1242,6 +1265,15 @@ class RPCHandler(BaseHTTPRequestHandler):
             BLACKLIST = {'TRUMPUSDT', 'MELANIAUSDT', 'BONKUSDT', 'FLOKIUSDT', 'WIFUSDT'}
 
             # Фаза 1: WS-кеш (мгновенно)
+            if requested:
+                wanted = set(requested)
+                have = {t['symbol'] for t in tickers}
+                tickers = [t for t in tickers if t['symbol'] in wanted]
+                # Тикера может не быть в tickers (делистнут/другая категория) — пробуем напрямую.
+                for sym in requested:
+                    if sym not in have:
+                        tickers.append({'symbol': sym, 'lastPrice': 0, 'turnover24h': 0})
+
             ws_hits = []
             rest_needed = []
             for t in tickers:
@@ -1253,7 +1285,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                     ws_hits.append((sym, bb, float(t.get('lastPrice', 0)), float(t.get('turnover24h', 0))))
                 else:
                     rest_needed.append(sym)
-                if len(ws_hits) + len(rest_needed) >= 50:
+                if not requested and len(ws_hits) + len(rest_needed) >= 50:
                     break
 
             # Фаза 2: параллельный REST для промахов (10 потоков)
@@ -1269,15 +1301,22 @@ class RPCHandler(BaseHTTPRequestHandler):
 
                 with ThreadPoolExecutor(max_workers=10) as pool:
                     futures = {pool.submit(_fetch_one, s): s for s in rest_needed}
-                    for _ in as_completed(futures, timeout=30):
-                        pass  # результаты в rest_results
+                    try:
+                        for _ in as_completed(futures, timeout=45):
+                            pass  # результаты в rest_results
+                    except TimeoutError:
+                        # Часть REST-фетчей не успела (холодный кеш). Раньше это летело в
+                        # catch-all → HTTP 500, и потребители (бот) показывали «нет данных».
+                        # Теперь отдаём то, что успели собрать.
+                        pass
 
                 _save_bb_cache()
 
             # Фаза 3: сборка
             candidates = []
             for sym, bb, mark, turnover in ws_hits:
-                self._score_candidate(candidates, sym, bb, mark, mode, interval, turnover=turnover)
+                self._score_candidate(candidates, sym, bb, mark, mode, interval,
+                                      turnover=turnover, force=bool(requested))
             ticker_map = {t["symbol"]: float(t.get("turnover24h", 0)) for t in tickers}
             for sym, bb in rest_results.items():
                 if bb:
@@ -1287,7 +1326,8 @@ class RPCHandler(BaseHTTPRequestHandler):
                         if t['symbol'] == sym:
                             mark = float(t.get('lastPrice', 0))
                             break
-                    self._score_candidate(candidates, sym, bb, mark, mode, interval, turnover=ticker_map.get(sym, 0))
+                    self._score_candidate(candidates, sym, bb, mark, mode, interval,
+                                          turnover=ticker_map.get(sym, 0), force=bool(requested))
 
             candidates.sort(key=lambda s: s['score'], reverse=True)
             _json_response(self, candidates[:limit])
@@ -1297,13 +1337,15 @@ class RPCHandler(BaseHTTPRequestHandler):
             logging.getLogger('bybit.rpc').error(f'Scan error: {e}')
             return _error(self, 'Internal scan error', str(e)[:500], 500)
 
-    def _score_candidate(self, candidates, sym, bb, mark, mode, interval, turnover=0.0):
-        """Добавить кандидата в список если проходит фильтр BB%."""
+    def _score_candidate(self, candidates, sym, bb, mark, mode, interval, turnover=0.0,
+                         force=False):
+        """Добавить кандидата в список если проходит фильтр BB% (force=True — без фильтра)."""
         bb_pct = bb.get('bb_pct', 50)
-        if mode == 'long' and bb_pct > 35:
-            return
-        if mode == 'short' and bb_pct < 65:
-            return
+        if not force:
+            if mode == 'long' and bb_pct > 35:
+                return
+            if mode == 'short' and bb_pct < 65:
+                return
         score = round(min(10.0, max(0, (35 - bb_pct) * 0.4) if mode == 'long'
                       else max(0, (bb_pct - 65) * 0.4)), 1)
         candidates.append({
