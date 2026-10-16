@@ -336,7 +336,7 @@ async def get_cached_scan(interval: str = 'D', user_id: int = None, symbol: str 
                      green_only: bool = False, mode: str = 'long') -> list:
     """Получить сигналы через RPC /scan (WS-кеш, без CLI)."""
     global _cache
-    cache_key = f'data_{interval}_{mode}'
+    cache_key = f'data_{interval}_{mode}_{symbol or "all"}'
     now = time.time()
     if cache_key in _cache and (now - _cache.get(f'{cache_key}_ts', 0)) < CACHE_TTL:
         data = _cache[cache_key]
@@ -348,7 +348,10 @@ async def get_cached_scan(interval: str = 'D', user_id: int = None, symbol: str 
                 print('[GridSignal] No RPC token — scan unavailable')
                 return []
 
-            body = json.dumps({"mode": mode, "interval": interval, "limit": 5}).encode()
+            payload = {"mode": mode, "interval": interval, "limit": 5}
+            if symbol:
+                payload["symbols"] = [symbol]   # RPC /scan: скан конкретного тикера
+            body = json.dumps(payload).encode()
             req = urllib.request.Request(
                 RPC_URL, data=body,
                 headers={
@@ -366,22 +369,109 @@ async def get_cached_scan(interval: str = 'D', user_id: int = None, symbol: str 
             _cache[f'{cache_key}_ts'] = now
             save_signals(data, user_id, interval, mode)
 
+        # Не выходим сразу: при сбое RPC (500 на холодном кеше — таймаут as_completed(30s)
+        # в bybit-ws rpc.py) фильтр ниже отдаст пустой список, и для запроса по тикеру
+        # сработает локальный расчёт. Раньше `return []` съедал этот путь и юзер получал
+        # «Не удалось получить данные» вместо данных (баг 16.10.2026).
         except urllib.error.HTTPError as e:
             print(f'[GridSignal] RPC HTTP {e.code}: {e.reason}')
-            return []
+            data = []
         except json.JSONDecodeError as e:
             print(f'[GridSignal] JSON parse error: {e}')
-            return []
+            data = []
         except Exception as e:
             print(f'[GridSignal] Scan error: {type(e).__name__}: {e}')
-            return []
+            data = []
 
     # Фильтры
     if symbol:
         data = [s for s in data if s['symbol'] == symbol]
+        if not data:
+            # Тикера нет в глобальном топе RPC-скана → считаем его отдельно.
+            # ponytail: per-symbol считаем в потоке, кеша нет — скан по тикеру редкий
+            # (лимит 2/день), а RPC-кеш топ-5 не переиспользуется.
+            one = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: fetch_symbol_signal(symbol, interval, mode))
+            if one:
+                data = [one]
+                if user_id:
+                    save_signals(data, user_id, interval, mode)
     if green_only:
         data = [s for s in data if s.get('bb_pos', 100) < 25 or s.get('bb_pct', 100) < 25]
     return data
+
+
+
+def _bb_from_closes(closes: list, n: int = 20) -> dict:
+    """BB(20,2) + RSI(14) + down_days. Sample std (n-1) — как в RPC-сканере,
+    чтобы цифры в боте совпадали с остальными сигналами."""
+    import math
+    if len(closes) < n + 1:
+        return {}
+    window = closes[-n:]
+    sma = sum(window) / n
+    var = sum((c - sma) ** 2 for c in window) / (n - 1)
+    std = math.sqrt(var)
+    upper, lower = sma + 2 * std, sma - 2 * std
+    bb_pct = (closes[-1] - lower) / (upper - lower) * 100 if upper != lower else 50.0
+    w = closes[-15:]
+    gains = sum(max(w[i] - w[i - 1], 0) for i in range(1, len(w)))
+    losses = sum(max(w[i - 1] - w[i], 0) for i in range(1, len(w)))
+    rsi = 100 - (100 / (1 + gains / max(losses, 0.0001)))
+    down_days = 0
+    for i in range(len(closes) - 1, 0, -1):
+        if closes[i] < closes[i - 1]:
+            down_days += 1
+        else:
+            break
+    return {'sma': sma, 'upper': upper, 'lower': lower, 'bb_pct': round(bb_pct, 1),
+            'rsi': round(rsi), 'down_days': down_days}
+
+
+def fetch_symbol_signal(symbol: str, interval: str = 'D', mode: str = 'long') -> dict | None:
+    """Сигнал по ОДНОМУ тикеру — через CLI kline.
+
+    Зачем: RPC `/scan` сканирует только топ-50 по обороту и параметра symbol не
+    принимает, поэтому раньше бот фильтровал глобальный топ-5 — и любой тикер не из
+    топ-5 отдавал «Не удалось получить данные» (баг 16.10.2026). Тут считаем сами.
+    """
+    tf = {'5m': '5', '3m': '3', 'D': 'D', 'W': 'W'}.get(interval, 'D')
+    try:
+        r = subprocess.run(
+            [BYBIT_CLI, 'raw', 'GET',
+             f'/v5/market/kline?category=linear&symbol={symbol}&interval={tf}&limit=100'],
+            capture_output=True, text=True, timeout=25)
+        data = json.loads(r.stdout)
+        if data.get('retCode') != 0:
+            return None
+        rows = list(reversed(data['result']['list']))
+        closes = [float(x[4]) for x in rows]
+        bb = _bb_from_closes(closes)
+        if not bb:
+            return None
+
+        turnover = 0.0
+        r2 = subprocess.run(
+            [BYBIT_CLI, 'raw', 'GET',
+             f'/v5/market/tickers?category=linear&symbol={symbol}'],
+            capture_output=True, text=True, timeout=15)
+        d2 = json.loads(r2.stdout)
+        if d2.get('retCode') == 0:
+            lst = (d2.get('result') or {}).get('list') or [{}]
+            turnover = float(lst[0].get('turnover24h') or 0)
+
+        pct = bb['bb_pct']
+        score = round(min(10.0, max(0.0, (35 - pct) * 0.4)) if mode == 'long'
+                      else min(10.0, max(0.0, (pct - 65) * 0.4)), 1)
+        return {
+            'symbol': symbol, 'side': 'Buy' if mode == 'long' else 'Sell', 'score': score,
+            'price': closes[-1], 'bb_pct': pct, 'bb_pos': pct,
+            'lower_bb': bb['lower'], 'upper_bb': bb['upper'], 'middle_bb': bb['sma'],
+            'down_days': bb['down_days'], 'turnover': turnover, 'rsi': bb['rsi'], 'mode': mode,
+        }
+    except Exception as e:
+        print(f'[GridSignal] fetch_symbol_signal({symbol}) failed: {type(e).__name__}: {e}')
+        return None
 
 
 
