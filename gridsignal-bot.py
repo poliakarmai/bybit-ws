@@ -1404,7 +1404,9 @@ async def cmd_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not symbol.endswith('USDT'):
         symbol += 'USDT'
 
-    # /alert TIAUSDT bb25 — алерт на BB-зону
+    # /alert TIAUSDT bb25 — алерт на BB-зону. По умолчанию zone=25 (зона покупки),
+    # чтобы алерт был полезен сразу: срабатывает, когда BB-позиция ≤ 25%,
+    # а не когда цена ≤ застывшей lower_bb (редко и уже «поздно»).
     bb_zone = None
     if len(args) > 1:
         for a in args[1:]:
@@ -1413,6 +1415,8 @@ async def cmd_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     bb_zone = float(a[2:])
                 except ValueError:
                     pass
+    if bb_zone is None:
+        bb_zone = 25.0
 
     # Лимит алертов
     alert_count = conn.execute('SELECT COUNT(*) FROM alerts WHERE user_id=? AND active=1', (user_id,)).fetchone()[0]
@@ -1556,10 +1560,15 @@ print(f"{{price}}\\n{{lower}}\\n{{pos}}")
         triggered = False
         trigger_msg = ""
 
+        # Триггер по BB-позиции (динамическая, из свежего CLI-вызова), а не по
+        # застывшей lower_bb на момент установки алерта. bb_zone теперь всегда
+        # задан (cmd_alert по умолчанию ставит 25) — сработает когда цена вошла
+        # в зону покупки < 25%. Для совместимости со старыми алертами (bb_zone NULL)
+        # падаем на price <= lower_bb, но это крайний случай.
         if bb_zone is not None and bb_zone > 0 and bb_pos <= bb_zone:
             triggered = True
             trigger_msg = f"BB вошёл в зону ≤{bb_zone:.0f}%! (сейчас {bb_pos:.0f}%)\n"
-        elif bb_zone is None and price and price <= lower_bb:
+        elif bb_zone is None and price and lower_bb and price <= lower_bb:
             triggered = True
             trigger_msg = ""
 
