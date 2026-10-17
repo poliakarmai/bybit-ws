@@ -376,45 +376,57 @@ def check_overtrading(trades: list[Trade], rts: list[RoundTrip]) -> BiasReport:
     )
 
 
-def check_chasing(trades: list[Trade]) -> BiasReport:
-    """Chasing momentum: покупаем после роста цены в том же символе?"""
+def check_entry_price_drift(trades: list[Trade], max_gap_hours: float = 24.0) -> BiasReport:
+    """Entry price drift: входим по растущим ценам в тот же символ в пределах max_gap_hours.
+
+    Раньше (как `check_chasing`) сравнивались цены входов БЕЗ учёта времени: при
+    разрыве в дни и недели «рост >3%» не имеет отношения к chasing. Замер
+    17.10.2026 на 28 парах: медиана разрыва — 70.9ч, 67% пар разнесены более
+    чем на сутки, max 715ч. Теперь пары с разрывом > max_gap_hours исключаются.
+    """
     buys = [t for t in trades if t.side == "buy"]
     buys.sort(key=lambda x: (x.symbol, x.timestamp))
 
     if len(buys) < 5:
-        return BiasReport(name="chasing_momentum", severity="low",
+        return BiasReport(name="entry_price_drift", severity="low",
                           evidence="Слишком мало покупок для анализа")
 
-    # Группируем покупки по символам, ищем последовательные с ростом >3%
-    sym_prices: dict[str, list[float]] = defaultdict(list)
+    sym_buys: dict[str, list[Trade]] = defaultdict(list)
     for b in buys:
-        sym_prices[b.symbol].append(b.price)
+        sym_buys[b.symbol].append(b)
 
-    chased = 0
+    drifted = 0
     evaluated = 0
-    for prices in sym_prices.values():
-        for i in range(3, len(prices)):
+    for lst in sym_buys.values():
+        for i in range(3, len(lst)):
+            gap_h = (lst[i].timestamp - lst[i - 3].timestamp) / 3600.0
+            if gap_h > max_gap_hours:
+                continue  # слишком далеко по времени — это не chasing
             evaluated += 1
-            if prices[i] > prices[i-3] * 1.03:
-                chased += 1
+            if lst[i].price > lst[i - 3].price * 1.03:
+                drifted += 1
 
     if evaluated == 0:
-        return BiasReport(name="chasing_momentum", severity="low",
-                          evidence="Недостаточно повторных покупок для оценки chasing")
+        return BiasReport(name="entry_price_drift", severity="low",
+                          evidence=f"Нет повторных входов в пределах {max_gap_hours:.0f}ч — "
+                                   f"оценивать нечего",
+                          metrics={"drift_ratio": 0.0, "buys_evaluated": 0,
+                                   "max_gap_hours": max_gap_hours})
 
-    ratio = chased / evaluated
+    ratio = drifted / evaluated
     sev = _severity(ratio, 0.4, 0.6)
     return BiasReport(
-        name="chasing_momentum",
+        name="entry_price_drift",
         severity=sev,
         evidence=(
-            f"{chased}/{evaluated} покупок ({ratio:.0%}) — после роста >3% "
-            f"в том же символе. "
-            + ("Сильный chasing-паттерн." if sev == "high"
-               else "Небольшая склонность к chasing." if sev == "medium"
-               else "Нет выраженного chasing.")
+            f"{drifted}/{evaluated} входов ({ratio:.0%}) — по цене выше на >3%, "
+            f"чем предыдущий вход в тот же символ в пределах {max_gap_hours:.0f}ч. "
+            + ("Заметный дрейф цен входов вверх." if sev == "high"
+               else "Небольшой дрейф цен входов." if sev == "medium"
+               else "Дрейфа цен входов нет.")
         ),
-        metrics={"chase_ratio": round(ratio, 3), "buys_evaluated": evaluated},
+        metrics={"drift_ratio": round(ratio, 3), "buys_evaluated": evaluated,
+                 "max_gap_hours": max_gap_hours},
     )
 
 
@@ -485,7 +497,7 @@ def _build_result(profile: JournalProfile, rts: list[RoundTrip], trades: list[Tr
     biases = [
         check_disposition(rts),
         check_overtrading(trades, rts),
-        check_chasing(trades),
+        check_entry_price_drift(trades),
         check_anchoring(trades),
     ]
 
