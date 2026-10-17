@@ -181,19 +181,9 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
     bb_period = int(params.get("bb_period", 20))
     bb_std = float(params.get("bb_std_mult", 2.0))
     atr_ratio_threshold = params.get("atr_ratio_threshold", None)
-    # BB-width gate (гипотеза Герчика: касание полосы значимо только при определённой
-    # ширине канала, иначе сигнал — шум). None по умолчанию = поведение не меняется.
-    bb_width_min = params.get("bb_width_min", None)
-    bb_width_max = params.get("bb_width_max", None)
-    # Гейт «энергии» (Герчик/Носков): не входить, если инструмент уже прошёл больше
-    # X дневного ATR в сторону сделки — движения дальше почти нет. None = выключено.
-    # ponytail: ATR берётся того же ТФ, что свечи; строго по правилу это верно на D,
-    # для внутридневных интервалов — прокси (ATR шире дневного → гейт мягче).
-    atr_travel_max = params.get("atr_travel_max", None)
 
     exchange = PaperExchange(symbol, klines, initial_balance)
     closes: list[float] = []
-    cur_day, day_open = None, None   # для гейта «энергии» (начало текущих суток)
     equity_curve = [initial_balance]
 
     warmup = max(50, bb_period + 1)
@@ -208,14 +198,6 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
 
         bb = calc_bb(closes, period=bb_period, std_mult=bb_std)
         if not bb:
-            equity_curve.append(exchange.equity)
-            continue
-
-        # BB-width gate: узкий/слишком широкий канал = сигнал касания не торгуем
-        if bb_width_min is not None and bb["bb_width"] < float(bb_width_min):
-            equity_curve.append(exchange.equity)
-            continue
-        if bb_width_max is not None and bb["bb_width"] > float(bb_width_max):
             equity_curve.append(exchange.equity)
             continue
 
@@ -249,20 +231,6 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
                 baseline_atr = 0.0
             ratio = atr / baseline_atr if baseline_atr and baseline_atr > 0 else 0.0
             if ratio > atr_ratio_threshold:
-                equity_curve.append(exchange.equity)
-                continue
-
-        # Energy gate: вход отсекается, если ПРЕДЫДУЩЕЕ движение уже выработало
-        # X ATR (цена растянута). У Герчика правило про трендовый вход («прошло
-        # 70% ATR — энергии нет»), но стратегия тут контрарная: покупка на
-        # просадке, продажа на отскоке. Поэтому меряем растяжение хода ПРОТИВ
-        # сделки — иначе гейт не срабатывает никогда (проверено на серии).
-        if atr_travel_max is not None and atr > 0:
-            day = k["open_time"] // 86_400_000
-            if day != cur_day:
-                cur_day, day_open = day, k["open"]
-            stretch = (day_open - entry) if best_side == "Buy" else (entry - day_open)
-            if stretch > float(atr_travel_max) * atr:
                 equity_curve.append(exchange.equity)
                 continue
 
