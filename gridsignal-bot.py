@@ -1431,7 +1431,7 @@ async def cmd_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lower_bb = 0
     cur_bb_pos = 100
     try:
-        result = subprocess.run(['python3', '-c', f'''
+        result = await asyncio.to_thread(subprocess.run, ['python3', '-c', f'''
 import json, subprocess, re
 r = subprocess.run(["{BYBIT_CLI}", "bb", "{safe_sym}", "D"], capture_output=True, text=True, timeout=20)
 m_lower = re.search(r"Lower:.*?\\$([0-9.]+)", r.stdout)
@@ -1532,7 +1532,7 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
         if not safe_sym:
             continue
         try:
-            r = subprocess.run(['python3', '-c', f'''
+            r = await asyncio.to_thread(subprocess.run, ['python3', '-c', f'''
 import json, subprocess, re
 r = subprocess.run(["{BYBIT_CLI}", "bb", "{safe_sym}", "D"], capture_output=True, text=True, timeout=20)
 m_price = re.search(r"Текущая:[^$]*\\$([0-9.]+)", r.stdout)
@@ -1697,7 +1697,7 @@ async def cmd_fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn_tmp = init_db(); log_event(conn_tmp, update.effective_user.id, 'fear', update); conn_tmp.close()
 
     try:
-        r = subprocess.run(['bybit', 'raw', 'GET', '/v5/market/tickers?category=linear'],
+        r = await asyncio.to_thread(subprocess.run, ['bybit', 'raw', 'GET', '/v5/market/tickers?category=linear'],
                           capture_output=True, text=True, timeout=15)
         tickers = json.loads(r.stdout).get('result', {}).get('list', [])
         tickers.sort(key=lambda t: float(t.get('turnover24h', 0)), reverse=True)
@@ -1801,7 +1801,7 @@ async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("📊 Смотрим топ движения...")
 
     try:
-        r = subprocess.run([BYBIT_CLI, 'raw', 'GET', '/v5/market/tickers?category=linear'],
+        r = await asyncio.to_thread(subprocess.run, [BYBIT_CLI, 'raw', 'GET', '/v5/market/tickers?category=linear'],
                           capture_output=True, text=True, timeout=15)
         tickers = json.loads(r.stdout).get('result', {}).get('list', [])
     except Exception:
@@ -1861,7 +1861,8 @@ async def check_outcomes(context: ContextTypes.DEFAULT_TYPE):
     # Батчевый запрос: все цены за один вызов
     prices = {}
     try:
-        r = subprocess.run(
+        r = await asyncio.to_thread(
+            subprocess.run,
             [BYBIT_CLI, 'raw', 'GET', '/v5/market/tickers?category=linear'],
             capture_output=True, text=True, timeout=15
         )
@@ -2189,7 +2190,8 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         import pandas as pd
         import tempfile
 
-        r = subprocess.run(
+        r = await asyncio.to_thread(
+            subprocess.run,
             [BYBIT_CLI, 'raw', 'GET', f'/v5/market/kline?category=linear&symbol={symbol}&interval={tf}&limit=100'],
             capture_output=True, text=True, timeout=15
         )
@@ -2470,11 +2472,14 @@ async def _do_dex_search(update: Update, query: str):
     import urllib.request, urllib.error
     msg = await update.message.reply_text(f"🔍 Ищу `{query}`...")
 
-    try:
-        url = f"https://api.dexscreener.com/latest/dex/search?q={urllib.parse.quote(query)}"
+    def _fetch(url: str):
         req = urllib.request.Request(url, headers={'User-Agent': 'GridSignalBot/4.1'})
         with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+            return json.loads(resp.read())
+
+    try:
+        url = f"https://api.dexscreener.com/latest/dex/search?q={urllib.parse.quote(query)}"
+        data = await asyncio.to_thread(_fetch, url)
 
         pairs = data.get('pairs', [])
         if not pairs:
