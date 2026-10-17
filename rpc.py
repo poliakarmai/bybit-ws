@@ -1262,7 +1262,15 @@ class RPCHandler(BaseHTTPRequestHandler):
             tickers = ticker_resp.get('result', {}).get('list', [])
             tickers.sort(key=lambda t: float(t.get('turnover24h', 0)), reverse=True)
 
+            # Мемкоины и ETF/акции — НЕ крипта для скан-ботов. ETF-лист расширяемый.
+            # Explicit-запрос (/scan SOXLUSDT) всё же разрешён — фильтруется только автоподбор.
             BLACKLIST = {'TRUMPUSDT', 'MELANIAUSDT', 'BONKUSDT', 'FLOKIUSDT', 'WIFUSDT'}
+            ETF_SYMBOLS = {'SOXLUSDT', 'SNDKUSDT', 'KORUUSDT', 'SKHYNIXUSDT', 'MSTRUSDT',
+                           'SOXSUSDT', 'MUUSDT', 'SKHYUSDT', 'TSLAUSDT', 'NVDAUSDT',
+                           'XAUUSDT', 'XAGUSDT', 'AAPLUSDT', 'QQQUSDT', 'MSFTUSDT',
+                           'AVGOUSDT', 'GOOGLUSDT', 'SPYUSDT', 'METAUSDT', 'MRVLUSDT',
+                           'HOODUSDT', 'COINUSDT', 'TQQQUSDT', 'PLTRUSDT', 'AMZNUSDT',
+                           'SNXXUSDT'}
 
             # Фаза 1: WS-кеш (мгновенно)
             if requested:
@@ -1273,6 +1281,9 @@ class RPCHandler(BaseHTTPRequestHandler):
                 for sym in requested:
                     if sym not in have:
                         tickers.append({'symbol': sym, 'lastPrice': 0, 'turnover24h': 0})
+            else:
+                # автоподбор: исключить ETF/акции, чтобы пользователи видели крипту
+                tickers = [t for t in tickers if t['symbol'] not in ETF_SYMBOLS]
 
             ws_hits = []
             rest_needed = []
