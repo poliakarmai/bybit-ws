@@ -315,6 +315,214 @@ def check_new_entry_correlation(
     return True, ''
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Cluster Risk (stage 1 — shadow mode)
+# ═══════════════════════════════════════════════════════════════════════════
+
+CLUSTER_CORR_THRESHOLD = 0.70        # pairs above this = same cluster
+CLUSTER_RISK_PCT = 0.50              # cluster risk budget = 50% of max_daily_loss
+CLUSTER_SNAPSHOT_MAX_AGE_SEC = 900   # snapshot older than this = stale
+CLUSTER_SL_FALLBACK_FRAC = 0.50      # no SL price -> risk = margin * this
+
+
+def _position_risk_usd(pos: dict) -> float:
+    """$ loss if this position's SL is hit. size*|entry-stopLoss|, fallback margin*0.5."""
+    try:
+        size = float(pos.get('size', 0) or 0)
+        entry = float(pos.get('entry', 0) or 0)
+        sl = float(pos.get('stopLoss', 0) or 0)
+        if sl:
+            return abs(size * (entry - sl))
+        margin = float(pos.get('margin', 0) or pos.get('positionIM', 0) or 0)
+        return margin * CLUSTER_SL_FALLBACK_FRAC
+    except Exception:
+        return 0.0
+
+
+def cluster_risk(
+    positions: dict,
+    new_symbol: str,
+    new_side: str = 'Buy',
+    config=None,
+) -> dict:
+    """Cluster risk accounting: correlated same-side positions count as ONE bet.
+
+    Stage 1 — computes only; blocking decided by ``check_cluster_risk``.
+
+    Returns:
+        {
+            'mode': 'off'|'shadow'|'enforce',
+            'used_usd': float,        # cluster risk of existing members (excl. new)
+            'budget_usd': float,
+            'size_multiplier': float, # min(1.0, budget/used) when over budget, else 1.0
+            'members': [str, ...],    # cluster symbols (existing positions)
+            'max_corr': float,        # strongest correlation with new_symbol
+            'stale': bool,            # snapshot too old / missing
+            'reason': str,
+        }
+    """
+    result = {
+        'mode': 'off',
+        'used_usd': 0.0,
+        'portfolio_used_usd': 0.0,
+        'budget_usd': 0.0,
+        'size_multiplier': 1.0,
+        'members': [],
+        'max_corr': 0.0,
+        'stale': False,
+        'over': False,
+        'reason': '',
+    }
+    try:
+        cfg = config if config is not None else _get_config()
+        risk_cfg = cfg.risk if hasattr(cfg, 'risk') else {}
+
+        mode = str(risk_cfg.get('cluster_risk_mode', 'shadow'))
+        result['mode'] = mode
+        if mode == 'off':
+            result['reason'] = 'cluster risk off'
+            return result
+
+        budget = float(risk_cfg.get('max_daily_loss', 50)) * float(
+            risk_cfg.get('cluster_risk_pct', CLUSTER_RISK_PCT)
+        )
+        result['budget_usd'] = budget
+        threshold = float(
+            risk_cfg.get('cluster_corr_threshold', CLUSTER_CORR_THRESHOLD)
+        )
+        max_age = float(
+            risk_cfg.get('cluster_snapshot_max_age_sec', CLUSTER_SNAPSHOT_MAX_AGE_SEC)
+        )
+
+        if not positions:
+            result['reason'] = 'no positions'
+            return result
+
+        snapshot = _load_correlation_snapshot()
+        if not snapshot:
+            result['stale'] = True
+            result['reason'] = 'no correlation snapshot'
+            return result
+
+        # Staleness: parse ISO timestamp; missing/unparseable/too old → stale.
+        ts = snapshot.get('timestamp')
+        age = None
+        if ts:
+            try:
+                age = (datetime.now() - datetime.fromisoformat(str(ts))).total_seconds()
+            except Exception:
+                age = None
+        if age is None or age > max_age:
+            result['stale'] = True
+            result['reason'] = 'stale snapshot'
+            return result
+
+        pairs = snapshot.get('pairs', []) or []
+        if not pairs:
+            result['reason'] = 'no correlation pairs'
+            return result
+
+        members = []
+        max_corr = 0.0
+        for pair in pairs:
+            try:
+                s1, s2, r = pair[0], pair[1], float(pair[2])
+            except Exception:
+                continue
+            if new_symbol not in (s1, s2):
+                continue
+            other = s2 if new_symbol == s1 else s1
+            other_pos = positions.get(other)
+            if not isinstance(other_pos, dict):
+                continue
+            # same side + positive correlation above threshold = same cluster
+            if other_pos.get('side') != new_side:
+                continue
+            if r <= threshold:
+                continue
+            members.append(other)
+            if r > max_corr:
+                max_corr = r
+
+        result['members'] = members
+        result['max_corr'] = max_corr
+
+        used = sum(_position_risk_usd(positions[m]) for m in members)
+        result['used_usd'] = used
+
+        # Portfolio slice: total risk of ALL same-side positions (correlation-independent).
+        # Catches the measured hole: 7 correlated LONGs risking $44.73 vs $25 budget,
+        # where any single cluster (e.g. SOL+DOGE+XLM+XRP) is only ~$15.
+        portfolio_used = 0.0
+        for p in positions.values():
+            if isinstance(p, dict) and p.get('side') == new_side:
+                portfolio_used += _position_risk_usd(p)
+        result['portfolio_used_usd'] = portfolio_used
+
+        over_cluster = bool(members) and used > budget
+        over_portfolio = portfolio_used > budget
+        result['over'] = over_cluster or over_portfolio
+
+        if result['over']:
+            peak = max(used, portfolio_used)
+            result['size_multiplier'] = min(1.0, budget / peak) if peak > 0 else 1.0
+            parts = []
+            if over_cluster:
+                parts.append(
+                    f'cluster ${used:.2f} ({len(members)} correlated: {", ".join(members)})'
+                )
+            if over_portfolio:
+                parts.append(f'portfolio ${portfolio_used:.2f}')
+            result['reason'] = (
+                f'Cluster risk ${max(used, portfolio_used):.2f} / ${budget:.2f} '
+                f'[{"; ".join(parts)}]'
+            )
+        else:
+            result['size_multiplier'] = 1.0
+            result['reason'] = ''
+        return result
+    except Exception as e:
+        result['reason'] = f'cluster check error: {e}'
+        return result
+
+
+def check_cluster_risk(
+    positions: dict,
+    new_symbol: str,
+    new_side: str = 'Buy',
+    config=None,
+) -> Tuple[bool, str]:
+    """Gate used by check(). Blocks ONLY when mode == 'enforce' and used_usd > budget_usd.
+
+    In 'shadow' mode always returns (True, reason) and logs via log_event.
+    Fail-open (allowed) on: no positions, no snapshot, stale snapshot, empty pairs,
+    any exception.
+    """
+    try:
+        r = cluster_risk(positions, new_symbol, new_side, config)
+        mode = r.get('mode', 'shadow')
+        reason = r.get('reason', '') or ''
+
+        if mode == 'off':
+            return True, reason
+
+        over = bool(r.get('over'))
+
+        # log_event at most once per call, only when over budget or stale
+        if over or r.get('stale'):
+            try:
+                from .alerts import log_event
+                log_event(f'⚠️ Cluster risk ({mode}): {reason}')
+            except Exception:
+                pass
+
+        if over and mode == 'enforce':
+            return False, reason
+        return True, reason
+    except Exception as e:
+        return True, f'cluster check error: {e}'
+
+
 def _load_correlation_snapshot() -> Optional[dict]:
     """Загрузить последний correlation snapshot."""
     corr_file = DATA_DIR / "correlation.json"
@@ -649,6 +857,12 @@ def check(
         )
         if not corr_ok:
             return False, corr_reason
+
+    # ── 4b. Cluster risk (stage 1 — shadow mode) ──
+    if new_symbol and positions:
+        cluster_ok, cluster_reason = check_cluster_risk(positions, new_symbol, new_side or 'Buy', config)
+        if not cluster_ok:
+            return False, cluster_reason
 
     # ── 5. Проверка daily PnL (лимит) ──
     daily = get_daily_pnl()

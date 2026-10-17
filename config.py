@@ -154,6 +154,10 @@ _DEFAULT_RISK = {
     'drawdown_reset_hours': 24,   # авто-сброс паузы через N часов после emergency
     'max_per_sector': 3,           # не более 3 позиций в одном секторе (L1/DeFi/AI/Meme)
     'banned_symbols': ['AKEUSDT'],          # символы в перманентном бане (не торгуются НИКОГДА)
+    'cluster_risk_mode': 'shadow',
+    'cluster_corr_threshold': 0.70,
+    'cluster_risk_pct': 0.50,
+    'cluster_snapshot_max_age_sec': 900,
     'sectors': {
         'L1': ['SOLUSDT', 'SUIUSDT', 'APTUSDT', 'NEARUSDT', 'AVAXUSDT', 'ADAUSDT', 'DOTUSDT'],
         'DeFi': ['AAVEUSDT', 'UNIUSDT', 'INJUSDT', 'RUNEUSDT'],
