@@ -2,11 +2,11 @@
 """LP-отчёт для инвесторов фонда.
 
 Из state.db (trade_history) собирает performance-сводку:
-NAV, реализованный PnL, комиссии (оценка), Net PnL, WR, PF, Sharpe,
+NAV, реализованный PnL (net of fees), WR, PF, Sharpe,
 max drawdown, топ монет, daily PnL, честная разбивка по strategy.
 
-Комиссии: в trade_history.fees не пишутся (всегда 0) — считаем оценочно
-как (entry_notional + exit_notional) × taker_rate. Bybit linear taker = 0.055%.
+Комиссии: pnl = Bybit closedPnl (main_async.py:138), уже net of fees; fees в БД = 0 by design.
+Строка «комиссии» — справочная оценка (entry+exit notional × taker 0.055%), из PnL НЕ вычитается.
 
 Запуск:
     python3 lp_report.py              # весь период
@@ -122,8 +122,8 @@ def report(days: int | None, nav: float | None) -> str:
     # комиссии (оценка): (entry+exit) notional × taker
     entry_notional = sum((r[3] or 0) * (r[4] or 0) for r in rows)
     exit_notional = sum((r[2] or 0) * (r[4] or 0) for r in rows)
+    # Справочная оценка комиссий (в PnL НЕ вычитается — см. докстринг модуля).
     fees_est = (entry_notional + exit_notional) * TAKER_RATE
-    net_pnl = sum(pnls) - fees_est
 
     total = _stats(pnls)
     clean_auto = [r[5] for r in rows if (r[9] or "") == "auto" and r[8] == 0]
@@ -174,9 +174,8 @@ def report(days: int | None, nav: float | None) -> str:
     O.append("## Ключевые метрики")
     O.append("| Метрика | Значение |")
     O.append("|---|---|")
-    O.append(f"| Реализованный PnL (gross) | {_fmt_money(total['pnl'])} |")
-    O.append(f"| Комиссии (оценка, taker 0.055%) | {_fmt_money(-fees_est)} |")
-    O.append(f"| **Net PnL** | **{_fmt_money(net_pnl)}** |")
+    O.append(f"| Реализованный PnL (net of fees) | {_fmt_money(total['pnl'])} |")
+    O.append(f"| Комиссии (справочно, оценка taker 0.055%) | {_fmt_money(-fees_est)} |")
     O.append(f"| Win rate | {total['wr']:.1f}% |")
     O.append(f"| Profit factor | {total['pf']:.2f} |")
     O.append(f"| Sharpe (annualized) | {sharpe:.2f} |")
