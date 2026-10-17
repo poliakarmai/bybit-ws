@@ -47,6 +47,10 @@ def _normalize_msg(msg):
 
 def log_event(msg):
     """Записать событие в events.log с автоматической ротацией."""
+    # Тесты гоняют боевые функции с фикстурами (entry=$100) — не гадим в SSOT-лог.
+    import os as _os
+    if _os.environ.get('BYBIT_LOG_SILENT') == '1':
+        return
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     line = f'[{ts}] {msg}\n'
 

@@ -8,6 +8,9 @@ import sys, os, tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+# Не писать фикстуры (entry=$100 и пр.) в боевой events.log — он SSOT.
+os.environ['BYBIT_LOG_SILENT'] = '1'
+
 # symlink bybit_ws → bybit-ws в /home/openclaw
 sys.path.insert(0, '/home/openclaw')
 

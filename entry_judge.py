@@ -1,9 +1,9 @@
 """
-Entry Judge — pre-entry валидация сигнала через cross-model judge (Nemotron).
+Entry Judge — pre-entry валидация сигнала через LLM-судью (прямой DeepSeek, режим signal).
 Вызывается перед ордером: если verdict=revise → пропускаем вход.
 
 Feature flag: BYBIT_ENTRY_JUDGE_ENABLED=1
-Зависимость: ~/.hermes/scripts/cross-model-judge.py + OPENROUTER_API_KEY
+Зависимость: ~/.hermes/scripts/cross-model-judge.py + DEEPSEEK_API_KEY (прямой api.deepseek.com)
 """
 
 import json
@@ -13,7 +13,7 @@ import time
 from typing import Optional
 
 JUDGE_SCRIPT = os.path.expanduser("~/.hermes/scripts/cross-model-judge.py")
-JUDGE_TIMEOUT = 5  # секунд на вызов судьи (жёсткий таймаут, 27.06)
+JUDGE_TIMEOUT = 20  # секунд: прямой DeepSeek отвечает ~2-4с, 5с резало живые вызовы (17.10)
 JUDGE_ENABLED = os.environ.get("BYBIT_ENTRY_JUDGE_ENABLED", "0") == "1"
 
 # Символы которые НИКОГДА не судим (чёрный список)
@@ -120,7 +120,7 @@ Check:
             }
 
         # ── Кеш вердиктов ──
-        cache_key = f"{symbol}:{side}:{score}:{bb_pos:.0f}:{funding_rate:.4f}"
+        cache_key = f"{symbol}:{side}:{score}:{bb_pos:.0f}:{funding_rate:.4f}:{sl_price}:{tp_price}"
         now = time.time()
         if cache_key in _judge_verdict_cache:
             ts, cached = _judge_verdict_cache[cache_key]
@@ -128,7 +128,7 @@ Check:
                 return cached
 
         proc = subprocess.run(
-            ["python3", JUDGE_SCRIPT, "--mode", "general", "--json", "-"],
+            ["python3", JUDGE_SCRIPT, "--mode", "signal", "--json", "-"],
             input=signal_context,
             capture_output=True,
             text=True,
@@ -156,7 +156,7 @@ Check:
             _llm_disabled_until = time.time() + LLM_COOLDOWN
         return {
             "verdict": "revise",
-            "blocking_issues": [],
+            "blocking_issues": [f"Judge timeout ({JUDGE_TIMEOUT}s)"],
             "confidence": 0.0,
             "notes": f"judge timeout ({_llm_failures}/{LLM_FAILURE_THRESHOLD})",
         }
