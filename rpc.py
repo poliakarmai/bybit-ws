@@ -423,6 +423,11 @@ def _round_price(price: float) -> float:
     return round(round(price / tick) * tick, 8)
 
 
+def _hedge_idx(side):
+    """positionIdx для hedge-режима: Sell (шорт) = 2, Buy (лонг) = 1."""
+    return 2 if side == 'Sell' else 1
+
+
 class RPCHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # тихий режим
@@ -1468,7 +1473,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 'timeInForce': 'GTC',
                 'positionIdx': 0,
             })
-            # Retry with positionIdx=1 для hedge mode
+            # Retry с hedge positionIdx (Sell=2, Buy=1)
             if order_result.get('retCode') != 0 and 'position idx' in order_result.get('retMsg', ''):
                 order_result = _api_call('POST', '/v5/order/create', {
                     'category': 'linear',
@@ -1478,7 +1483,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                     'qty': qty_str,
                     'price': str(limit_price),
                     'timeInForce': 'GTC',
-                    'positionIdx': 1,
+                    'positionIdx': _hedge_idx(side),
                 })
         else:
             # Market order
@@ -1491,7 +1496,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 'timeInForce': 'IOC',
                 'positionIdx': 0,
             })
-            # Retry with positionIdx=1 если hedge mode
+            # Retry с hedge positionIdx (Sell=2, Buy=1)
             if order_result.get('retCode') != 0 and 'position idx' in order_result.get('retMsg', ''):
                 order_result = _api_call('POST', '/v5/order/create', {
                     'category': 'linear',
@@ -1500,7 +1505,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                     'orderType': 'Market',
                     'qty': qty_str,
                     'timeInForce': 'IOC',
-                    'positionIdx': 1,
+                    'positionIdx': _hedge_idx(side),
                 })
 
         if order_result.get('retCode') != 0:
