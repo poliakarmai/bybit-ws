@@ -1,51 +1,67 @@
 # AGENTS.md — bybit-ws
 
 > Навигация для AI-агентов. Детали стратегий, параметры, runbook → [OpenWiki](openwiki/quickstart.md).
-> Обновлено: 2026-10-14 (v11.4.x — docs sync, коммит 49a9a79)
+> **Обновлено: 2026-10-18** — числа сверены с `state.db`, `verify.sh`, `test_smoke.py`, `pytest` (замеры ниже с датой).
 
 ## Что это
 
 Трейдинг-монитор Bybit фьючерсов. Стратегия: **Bollinger Grid** (LONG/SHORT).  
-Systemd-сервис `bybit-ws-async`, ~185 MB RAM (с LSTM/torch), SQLite — SSOT.
+Systemd-сервис `bybit-ws-async` (user unit, `ExecStart=/usr/bin/python3 -m bybit_ws.main_async`),
+**RSS ~50-55 MB** (замер 18.10: 54 576 KB; значение плавает — прежние 185 MB в доке не подтверждаются), SQLite — SSOT.
 
-## Текущее состояние (14.10.2026)
+## Текущее состояние (замер 2026-10-18)
 
-> **Снимок на 2026-10-14 (stale-safe).** Числа — снапшот `state.db`; живой режим/PnL всегда из RPC (`/metrics`, `/journal`, `/rpc/regime`) + `state.db`, не из этой таблицы.
+> **Снимок на 2026-10-18.** Числа — снапшот `state.db`; живой режим/PnL всегда из RPC (`/metrics`, `/rpc/all`, `/positions`) + `state.db`, не из этой таблицы.
+> (`/journal` и `/rpc/regime` в коде **отсутствуют** — отдают 404; ссылки на них были ошибкой доки.)
 
 | Метрика | Значение | Примечание |
 |---------|----------|-----------|
-| Закрытых сделок (все) | 448 | auto 332 + historical 47 + NULL/legacy 31 + imported 30 + x10 6 + x10:scalp 2 |
-| Авто (`strategy='auto'`, любой manual) | 332 | все авто-входы |
-| **Авто self-learn (`manual=0`)** | **301 / +$174.71 / WR 75.1% / PF 1.24** | ручные входы исключены из обучения |
-| Ручные (`manual=1`) | 31 | входы пользователя, не бот |
-| LONG (авто, `manual=0`) | 199 / +$248.98 / WR 78.4% | основная прибыль |
-| SHORT (авто, `manual=0`) | 102 / −$74.27 / WR 68.6% | ⚠️ проблемная сторона |
-| Режим | live → `GET /rpc/regime` | не хранить в доке (мгновенно устаревает) |
+| Закрытых сделок (все) | 457 | auto 341 + historical 47 + NULL/legacy 31 + imported 30 + x10 6 + x10:scalp 2 |
+| Авто (`strategy='auto'`, любой manual) | 341 | все авто-входы |
+| **Авто self-learn (`manual=0`)** | **310 / +$146.61 / WR 74.8% / PF 1.19** | ручные входы исключены из обучения |
+| Ручные (`manual=1`) | 31 / −$410.38 | входы пользователя, не бот |
+| SHORT (авто, `manual=0`) | 207 / +$206.57 / WR 77.8% | **прибыльная сторона** |
+| LONG (авто, `manual=0`) | 103 / −$59.96 / WR 68.9% | ⚠️ убыточная сторона (было наоборот 14.10) |
+| Режим | live → `GET /metrics` (Prometheus) или `/rpc/all` | не хранить в доке (мгновенно устаревает) |
+
+> ⚠️ **Числа меняются каждую сессию — не копировать без перезамера.** Снапшот 14.10 говорил
+> «LONG +$248.98 / SHORT −$74.27»; за 4 дня стороны поменялись местами. Живой источник:
+> `sqlite3 ~/.local/share/bybit-ws/state.db` + RPC `/metrics`, `/rpc/all`, `/positions`
+> (`/journal` и `/rpc/regime` из прежней версии доки не существуют — 404, проверено 18.10).
 
 > **manual-фильтр:** `trade_history.manual` отделяет авто-входы от ручных. Ручной вход через `/enter` → `mark_manual_position()` → при закрытии `manual=1` → self-learn исключает. Адаптер self-learn грузит `manual=0`.
 
 ## Структура (core)
 
+> ⚠️ **`bybit_ws/*.py` — это симлинки на корневые модули** (замер 2026-10-18: `find -type l` → 74 шт.,
+> напр. `bybit_ws/rpc.py -> ../rpc.py`). Дублей кода нет: правка корневого файла действует и в пакете.
+> Файлов `.py` всего 2130 (1920 из них — `.venv`), вне виртуального окружения — 135, из них 74 симлинка.
+> Побочный эффект для сканеров: один и тот же файл виден по двум путям → GSC считает находку дважды
+> (`api.py` + `bybit_ws/api.py`).
+>
+> **Версии расходятся:** `pyproject.toml` → `3.10.1`, `CHANGELOG.md` → `[11.4.x] 2026-10-14`.
+> Пока не сведены — в разговоре ссылаться на CHANGELOG.
+
 ```
 bybit-ws/
-├── main_async.py         ← Главный цикл (async, 30с). Self-learn: event-driven (≥10 сделок / 6ч)
-├── unified_sl.py          ← Unified SL (5→1, приоритет: tight>simple>hard>BE>default)
+├── main_async.py         ← Главный цикл (async, 30с). Self-learn: event-driven (≥10 сделок), но не чаще 24ч (см. ниже)
+├── unified_sl.py          ← Unified SL (слияние 5 модулей → 1; приоритет: tight>simple>hard>BE>auto>default)
 ├── auto_entry.py          ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
 ├── auto_sl.py             ← ATR-adaptive SL (legacy, заменён unified_sl)
 ├── auto_tp.py             ← ATR-based TP (1×/2×/3× ATR)
 ├── volatility_filter.py   ← Volatility Regime Filter (off-by-default: блок входа при ATR-скачке + vol-scaled sizing)
 ├── risk_manager.py       ← Risk + BlackSwan (v2: alert only) + emergency_close
 ├── entry_judge.py        ← Cross-model judge (DeepSeek, fail-closed)
-├── lstm_regime.py         ← LSTM-классификатор режима (82.3% точность, 5 классов)
+├── lstm_regime.py         ← LSTM-классификатор режима (82.3% — заявлено 01.08, не перезамерялось; 5 классов)
 ├── lstm_world_model.py    ← Multi-task OHLCV prediction + entry scoring
 ├── rpc.py                ← JSON-RPC (:8766) + /kill_switch + /metrics + one-click
 ├── state_db.py           ← SQLite SSOT (WAL, busy_timeout=5с)
-├── journal/              ← Самообучение v10 (20+ механик)
+├── bybit_ws/journal/     ← Самообучение v10 (20+ механик). В корне папки `journal/` НЕТ
 │   ├── self_learn.py      ← Dynamic Bandit, Pareto MC, Drift, Ensemble, Causal
 │   ├── analyzer.py        ← Профиль + 4 bias-диагностики
 │   └── adapter.py         ← SQLite → нормализованные сделки
-├── deploy.sh             ← Атомарный деплой (smoke 52 + canary 8)
-├── test_smoke.py         ← 16 тестов (всего в репо: 16 тест-файлов / 171 тест-функций)
+├── deploy.sh             ← Деплой: test_logic_integrity (8) → test_smoke (52) → рестарт → canary (8 health-проверок)
+├── test_smoke.py         ← 52 проверки (PASS=52/FAIL=0, замер 2026-10-18) — то, что гоняют verify.sh и deploy.sh
 ├── paper_trade.py        ← Бэктестинг на исторических данных
 ├── bybit_ws/experiments/ ← Experiment Tree: воспроизводимые бэктесты + sandbox
 │   ├── engine.py          ← Детерминированный backtest-движок (кэш свечей, run-манифест)
@@ -103,14 +119,26 @@ python3 -m bybit_ws.experiments.parallel_sandbox --symbol SOLUSDT --days 180 --n
 
 Детали: `docs/SELF_LEARN.md`.
 
+> ⚠️ **Расхождение по частоте переобучения (найдено 18.10):** в коде `bybit_ws/journal/self_learn.py`
+> константа `SELF_LEARN_INTERVAL_SEC = 24 * 3600` с комментарием «v10: 24ч cooldown (было 6ч)»,
+> при этом `docs/SELF_LEARN.md` всё ещё пишет «раз в 6 часов». Event-driven триггер `should_run_self_learn_v6`
+> вызывается из `main_async.py:820`, но путь через `should_run_self_learn()` режется 24-часовым cooldown.
+> Пока не сведено — считать реальным 24ч.
+
 ## Запуск
 
 ```bash
 systemctl --user start bybit-ws-async     # старт
 systemctl --user status bybit-ws-async    # статус
 bash deploy.sh                             # деплой (smoke → logic → canary)
-python3 test_smoke.py                      # тесты
+python3 test_smoke.py                      # тесты: 52 проверки (PASS=52/FAIL=0)
 ```
+
+> ⚠️ **`python3 -m pytest` без аргументов НЕ работает** (замер 2026-10-18): `INTERNALERROR … SystemExit: 1`
+> — `test_ml_smoke.py:85` вызывает `sys.exit()` на импорте и валит всю сессию. Собирается 78 тестов
+> в 9 файлах из 20. Всего `def test_` по репо — **200** (197 в 19 корневых `test_*.py` + 3 в
+> `bybit_ws/experiments/test_vol_gate.py`); остальные — скриптовые раннеры, pytest их не видит.
+> Рабочие вызовы: `python3 test_smoke.py`, `python3 test_logic_integrity.py` или `python3 -m pytest test_smoke.py -q`.
 
 ## Проверка работоспособности (обязательно для AI-агентов)
 
@@ -151,7 +179,7 @@ bash verify.sh        # exit 0 = всё зелёное; exit 1 = есть FAIL
 | Конфиг | `~/.config/bybit-ws/config.yaml` |
 | Креды | `~/.config/bybit-ws/env` (chmod 600) |
 | RPC | `http://127.0.0.1:8766` |
-| Self-learn state | `~/.local/share/bybit-ws/{canary_state,parameter_ensemble,self_learn_state,regime_params}.json` |
+| Self-learn state | `~/.local/share/bybit-ws/{canary_state,parameter_ensemble,self_learn_state}.json` (`regime_params.json` ожидается кодом (`self_learn.py:1505`), но на диске **отсутствует** — создастся при первом срабатывании) |
 | Param versions | `~/.local/share/bybit-ws/params_history/v*.json` |
 | LSTM модель | `~/.local/share/bybit-ws/models/lstm_regime.pt` |
 
@@ -213,7 +241,7 @@ systemctl --user restart bybit-ws-async
 | `get_positions()` | Позиции + PnL |
 | `get_metrics()` | TP/SL/входы за день |
 | `get_risk_status()` | Лимиты + CB |
-| `place_entry(symbol, side, qty)` | Вход |
+| `place_entry(symbol, side, qty, sl?, tp?, order_type?, price?)` | Вход. **Плечо не задаётся:** в конфиге стратегии `leverage: 3` (`config.py:44,56`), но MCP-вход его не применяет → позиция открывается на биржевом дефолте символа (прецедент 18.10: QUSDT — 10x, хотя просили 5x; стоп 0.158 оказался за ликвидацией ~0.1483). Проверять `get_positions` сразу после входа |
 | `get_journal()` | Журнал (FIFO, bias) |
 
 ## LSTM World Model (v8.1)
@@ -225,14 +253,14 @@ systemctl --user restart bybit-ws-async
 
 ## LSTM Market Regime
 
-- **Модель:** 82.3% точность (переобучена 01.08.2026)
+- **Модель:** 82.3% точность — **заявлено 01.08.2026, повторно не замерялось** (число из истории обучения, не из живого прогона). Живой источник: `lstm_hmac.json` / логи переобучения.
 - **Классы:** TRENDING_UP, TRENDING_DOWN, RANGING, HIGH_VOL, LOW_VOL
 - **Feature flag:** `BYBIT_REGIME_AUTO=1` — авто-переключение LONG/SHORT
 - **CLI:** `python3 -m bybit_ws.lstm_regime --predict`
 
 ## Pre-deploy checklist
 
-- [ ] `python3 test_smoke.py` → PASS (16/16)
+- [ ] `python3 test_smoke.py` → PASS (52/52)
 - [ ] `sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA integrity_check"` → ok
 - [ ] `curl -s http://127.0.0.1:8766/health` → alive
 - [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий

@@ -28,14 +28,14 @@
 
 | Метрика | Значение |
 |--------|----------|
-| Авто-сделки self-learn (manual=0) | 301 / +$174.71 / WR 75.1% / PF 1.24 |
-| LONG (авто, manual=0) | 199 / +$248.98 / WR 78.4% |
-| SHORT (авто, manual=0) | 102 / −$74.27 / WR 68.6% |
-| Всего закрытых сделок | 448 |
+| Авто-сделки self-learn (manual=0) | 310 / +$146.61 / WR 74.8% / PF 1.19 |
+| SHORT (авто, manual=0) | 207 / +$206.57 / WR 77.8% |
+| LONG (авто, manual=0) | 103 / −$59.96 / WR 68.9% |
+| Всего закрытых сделок | 457 |
 
-> **Снимок на 2026-10-14.** Числа — снапшот `state.db`; живой источник — RPC (`/metrics`, `/journal`, `/rpc/regime`).
+> **Снимок на 2026-10-18.** Числа — снапшот `state.db`; живой источник — RPC (`/metrics`, `/rpc/all`, `/positions`) + `state.db`.
 
-*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 448 закрытых сделок (332 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
+*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 457 закрытых сделок (341 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
 
 ---
 
