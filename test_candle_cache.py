@@ -45,12 +45,21 @@ class FakeFetcher:
 def _reset_cache():
     """Перед каждым тестом сбрасываем глобальный кэш и счётчики.
     autouse=True — фикстура применяется ко всем тестам без явного запроса.
+
+    Чистим и ПОСЛЕ теста: кэш — глобальный на процесс, и последний тест файла
+    оставлял в нём фикстуры-заглушки для ('BTCUSDT','D'). Следующий файл в общем
+    прогоне (test_mtf → check_confluence) читал их из кэша и падал `None`
+    (18.10: 2 failed в полном pytest, зелёные по отдельности).
     """
     with candle_cache._lock:
         candle_cache._cache.clear()
         candle_cache._hits = 0
         candle_cache._misses = 0
     yield
+    with candle_cache._lock:
+        candle_cache._cache.clear()
+        candle_cache._hits = 0
+        candle_cache._misses = 0
 
 
 class TestGetCandlesCacheHit:
