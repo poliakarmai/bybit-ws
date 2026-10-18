@@ -136,12 +136,18 @@ def _import_bybit_trades(data_dir):
                 price = float(item.get('avgExitPrice', item.get('avgEntryPrice', 0)))
                 ts_val = int(item.get('updatedTime', 0)) / 1000
                 pnl = float(item.get('closedPnl', 0))
+                fees = float(item.get('openFee') or 0) + float(item.get('closeFee') or 0)
+                try:
+                    lev = int(float(item.get('leverage') or 0)) or None
+                except (TypeError, ValueError):
+                    lev = None
+                ext_id = str(item.get('orderId') or '') or None
                 key = (sym, ts_val, side)
                 if key not in existing_keys and qty > 0:
                     _f.write(_json.dumps({
                         'symbol': sym, 'side': side, 'qty': qty,
-                        'price': price, 'ts': ts_val, 'fee': 0, 'source': 'bybit_history',
-                        'pnl': pnl,
+                        'price': price, 'ts': ts_val, 'fee': fees, 'source': 'bybit_history',
+                        'pnl': pnl, 'external_id': ext_id,
                     }) + '\n')
                     imported += 1
                     existing_keys.add(key)
@@ -178,6 +184,7 @@ def _import_bybit_trades(data_dir):
                             bb_pct=diag.get('bb_pct'), rsi=diag.get('rsi'),
                             entry_reason=diag.get('entry_reason'),
                             manual=_manual,
+                            fees=fees, leverage=lev, external_id=ext_id,
                         )
                     except Exception:
                         pass
@@ -202,16 +209,16 @@ def _import_bybit_trades(data_dir):
                         try:
                             from .journal.self_learn import on_trade_closed as _micro_update
                             _micro_update(sym, side, pnl, hold_h, exit_reason)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log_event(f'⚠️ self-learn micro-update failed for {sym}: {e}')
                     except Exception:
                         pass
                     # Проброс в canary-трекер: только для канареечных входов
                     try:
                         if _match_canary(sym, side, ts_val, window=int(ts_val - entry_ts) + 3600):
                             _record_canary(pnl > 0)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_event(f'⚠️ canary tracking failed for {sym}: {e}')
     log_event(f'📥 Импорт истории Bybit: {imported} новых трейдов (всего {len(existing_keys)})')
     return imported
 

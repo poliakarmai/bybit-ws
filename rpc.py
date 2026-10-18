@@ -1526,8 +1526,9 @@ class RPCHandler(BaseHTTPRequestHandler):
             from .manual_positions import mark_manual_position
             _reason = (body.get('reason') or 'manual').strip()[:100]
             mark_manual_position(symbol, side=side, note=_reason, auto_sltp=True)
-        except Exception:
-            pass
+        except Exception as e:
+            from .alerts import log_event
+            log_event(f'⚠️ mark_manual_position failed for {symbol} {side}: {e}')
 
         result = {
             'status': 'ok',

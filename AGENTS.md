@@ -31,6 +31,30 @@ Systemd-сервис `bybit-ws-async` (user unit, `ExecStart=/usr/bin/python3 -m
 
 > **manual-фильтр:** `trade_history.manual` отделяет авто-входы от ручных. Ручной вход через `/enter` → `mark_manual_position()` → при закрытии `manual=1` → self-learn исключает. Адаптер self-learn грузит `manual=0`.
 
+> 💰 **`trade_history.pnl` — уже ЧИСТЫЙ, не вычитать комиссии повторно (проверено 18.10).**
+> Колонка пишется из Bybit `closedPnl` (`main_async.py` → `_import_bybit_trades`), а `closedPnl`
+> равен `gross − openFee − closeFee − фандинг`. Замер на 8 сделках: `(closedPnl + fees) − gross`
+> даёт от `0.0000` до `−0.09` — остаток и есть фандинг, он тоже уже учтён.
+> ```
+> QUSDT    gross=+14.6251  fees=0.3115  closedPnl=+14.3136   (closedPnl+fees)−gross = +0.0000
+> XVGUSDT  gross= +1.8816  fees=0.1324  closedPnl= +1.6579   (closedPnl+fees)−gross = −0.0913
+> ```
+> Значит **PF 1.19 и +$146.61 в таблице выше — net-метрики**, а не грязные. Вычитание оценочных
+> комиссий (taker 0.055% × 2) даёт двойной счёт и занижает доходность вдвое — на этом уже
+> спотыкались 18.10 (см. `obsidian-vault/bybit-ws/bybit-ws-audit-external-2026-10-18.md` §0).
+> Что действительно пусто — это колонка `fees` (0 у всех 457): структура издержек не видна,
+> но PnL от этого не искажён.
+
+> 📊 **Телеметрия сделки (с 18.10).** `trade_history` дополнена колонками `leverage` и
+> `external_id` (миграция в `state_db.py` → `_migrate()`, идемпотентна, применяется при старте
+> сервиса). Живой цикл пишет `fees` (`openFee + closeFee`), `leverage` и `orderId` из уже
+> получаемого ответа `/v5/position/closed-pnl` — новых API-запросов нет.
+> **Дыра, которую это закрывает:** `strategy='x10'` содержит всего 8 записей, при этом 10x-шорт
+> QUSDT лёг как `strategy='auto'` — без колонки `leverage` 10x-сделки были неотделимы от 3x.
+> Ретро-заполнение старых 457 строк **сознательно не делалось**: `pnl` уже net, покупалась бы
+> только косметика, а матчинг по (symbol, size, время±300с) без уникального id ненадёжен.
+> `external_id` нужен именно для того, чтобы следующее сопоставление было точным, а не гаданием.
+
 ## Структура (core)
 
 > ⚠️ **`bybit_ws/*.py` — это симлинки на корневые модули** (замер 2026-10-18: `find -type l` → 74 шт.,
@@ -55,7 +79,7 @@ bybit-ws/
 ├── lstm_regime.py         ← LSTM-классификатор режима (82.3% — заявлено 01.08, не перезамерялось; 5 классов)
 ├── lstm_world_model.py    ← Multi-task OHLCV prediction + entry scoring
 ├── rpc.py                ← JSON-RPC (:8766) + /kill_switch + /metrics + one-click
-├── state_db.py           ← SQLite SSOT (WAL, busy_timeout=5с)
+├── state_db.py           ← SQLite SSOT (WAL, busy_timeout=5с). `trade_history`: pnl (net), fees, leverage, external_id, manual; миграции — `_migrate()`
 ├── bybit_ws/journal/     ← Самообучение v10 (20+ механик). В корне папки `journal/` НЕТ
 │   ├── self_learn.py      ← Dynamic Bandit, Pareto MC, Drift, Ensemble, Causal
 │   ├── analyzer.py        ← Профиль + 4 bias-диагностики

@@ -693,8 +693,8 @@ def auto_entry_scan(positions):
                     log_event(f'💰 LOW FUNDS {sym}: need ${required:.1f}, have ${available_usdt:.1f} — cooling down 30min')
                     record_sl_hit(sym)  # кулдаун через cooldown.json
                     continue
-            except Exception:
-                pass  # API может отвалиться — лучше войти без проверки чем пропустить сигнал
+            except Exception as e:
+                log_event(f'⚠️ balance check failed for {sym}: {e}')  # API может отвалиться — лучше войти без проверки чем пропустить сигнал
 
             # ── Orderbook imbalance filter (27.06) ──
             try:
@@ -762,8 +762,8 @@ def auto_entry_scan(positions):
                 if not conc_ok:
                     log_event(f'⚠️ CONC BLOCK {sym}: {conc_reason}')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ concentration check failed for {sym}: {e}')
 
             # ── Anti-chasing: блок LONG, если монета уже разогналась >CHASE_PCT% ──
             try:
@@ -774,8 +774,8 @@ def auto_entry_scan(positions):
                     if is_chasing(_closes, CHASE_PCT, CHASE_LOOKBACK):
                         log_event(f'⛔ CHASE BLOCK {sym}: рост >{CHASE_PCT}% за {CHASE_LOOKBACK} свечей')
                         continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ chase guard failed for {sym}: {e}')
 
             # ── Anti-overtrading: дневной лимит LONG-входов ──
             try:
@@ -785,8 +785,8 @@ def auto_entry_scan(positions):
                 if not _ok:
                     log_event(f'⛔ DAILY LIMIT {sym}: {_reason} ({_today}/{MAX_DAILY_TRADES})')
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                log_event(f'⚠️ daily-limit check failed for {sym}: {e}')
 
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),

@@ -831,8 +831,9 @@ def check(
                 f'🛑 Anti-ludomania: 3 убытка подряд за час (${total_loss:.2f}). '
                 f'Пауза 30 минут.'
             )
-    except Exception:
-        pass
+    except Exception as e:
+        from .alerts import log_event
+        log_event(f'⚠️ anti-ludomania check failed: {e}')
 
     # ── 3. Проверка banned_symbols ──
     cfg = config if config is not None else _get_config()
@@ -896,8 +897,10 @@ def check(
             return False, (
                 f'Лимит маржи: ${total_margin:.2f} / ${max_total_margin:.2f}'
             )
-    except Exception:
-        pass
+    except Exception as e:
+        from .alerts import log_event
+        log_event(f'⛔ RISK CHECK FAILED (margin limit): {e}')
+        return False, f'risk check failed: {e}'
 
     return True, ''
 

@@ -159,10 +159,14 @@ class StateDB:
         return self._conn
 
     def _migrate(self):
-        """Добавить колонку manual в существующую БД (migration)."""
+        """Добавить колонки manual/leverage/external_id в существующую БД (migration)."""
         cols = [d[1] for d in self.conn.execute("PRAGMA table_info(trade_history)")]
         if 'manual' not in cols:
             self.conn.execute("ALTER TABLE trade_history ADD COLUMN manual INTEGER DEFAULT 0")
+        if 'leverage' not in cols:
+            self.conn.execute("ALTER TABLE trade_history ADD COLUMN leverage INTEGER")
+        if 'external_id' not in cols:
+            self.conn.execute("ALTER TABLE trade_history ADD COLUMN external_id TEXT")
 
     # ── trade_history ─────────────────────────────────────────
 
@@ -176,18 +180,19 @@ class StateDB:
         return dict(zip(cols, row))
 
     def add_trade(self, symbol, side, strategy, entry_price, exit_price,
-                  size, pnl, fees=0, entry_at=None, closed_at=None,
+                  size, pnl, fees=0.0, entry_at=None, closed_at=None,
                   bb_pct=None, rsi=None, entry_reason=None,
                   dca_count=0, partial_tp_count=0, exit_reason=None, hold_hours=None,
-                  manual=0):
+                  manual=0, leverage=None, external_id=None):
         self.conn.execute("""INSERT INTO trade_history
             (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at,
-             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours, manual)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours, manual,
+             leverage, external_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, side, strategy, entry_price, exit_price, size, pnl,
              fees, entry_at or int(time.time()), closed_at or int(time.time()),
              bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours,
-             int(manual)))
+             int(manual), leverage, external_id))
         self.conn.commit()
         return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
