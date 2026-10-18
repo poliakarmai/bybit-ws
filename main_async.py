@@ -402,6 +402,19 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
     # Пампы, перекупленность, funding — параллельно (независимые API-вызовы)
     if positions:
+        # ── Авто-очистка pump_state для закрытых позиций ──
+        # TASK H: строго ДО задач, которые могут открыть позицию (check_pumps /
+        # check_weekly_pumps ниже). Иначе только что открытый символ отсутствует в
+        # снапшоте `positions`, взятом в начале цикла, помечается «позиция закрыта»
+        # и его состояние стирается → следующий цикл входит повторно.
+        # Замер 18.10 по исполнениям QUSDT: вход 18:26:40 (Sell 130) → clean в
+        # 18:26:41 → повторный вход 18:31:41 (Sell 130) → позиция 260 вместо 130,
+        # причём шорт «БЕЗ SL». Тот же дубль: 17:46:38 (Sell 150) → 17:51:38 (Sell 140).
+        try:
+            await run_in_thread(_clean_pump_state, DATA_DIR, positions)
+        except Exception as e:
+            log_event(f'⚠️ pump_state clean error: {e}')
+
         # Запускаем все независимые проверки параллельно (timeout 10s вместо 25s)
         pump_tasks = [
             check_overbought_async(positions),
@@ -435,12 +448,6 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 for msg in weekly_msgs:
                     add_alert('STOP', msg)
                     send_critical_alert(msg)  # Push: 🚨 на телефон
-
-        # ── Авто-очистка pump_state для закрытых позиций ──
-        try:
-            await run_in_thread(_clean_pump_state, DATA_DIR, positions)
-        except Exception:
-            pass
 
         # ── Funding Rate Momentum x10 ──
         funding_result = pump_results[3]
