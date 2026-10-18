@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from filelock import FileLock
 
 
-LOCK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'locks')
+LOCK_DIR = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'locks')
 os.makedirs(LOCK_DIR, exist_ok=True)
 
 
