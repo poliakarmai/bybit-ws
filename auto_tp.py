@@ -186,6 +186,18 @@ def auto_take_profit(positions, orders, skip_syms=None):
         if pos_size <= 0:
             continue
 
+        # TASK G: покрытие считаем СУММАРНО по всем открытым TP — и до запросов к API.
+        # XLMUSDT: позиция 421 уже закрыта ордерами 85+168+168=421, но BB-ветка
+        # видела на уровне upper только 85 из «нужных» 252 и просила ещё 167 →
+        # Bybit урезал reduce-only в ноль (110017 «orderQty will be truncated to
+        # zero»). Дыра была только в BB-ветке: ATR-ветка ниже считает uncovered
+        # правильно (pos_size - sum(existing_tp)).
+        # ponytail: при ЧАСТИЧНОМ покрытии gap может превысить остаток — Bybit сам
+        # урежет reduce-only до свободного объёма, отказа не будет. Клампить, если
+        # в логах появится расхождение между запрошенным и фактическим qty.
+        if sum(q for q, _ in existing_tp.get(sym, [])) >= pos_size:
+            continue
+
         bb = get_bb_data(sym, 'D')
         try:
             qty_step, min_order_qty = _get_qty_limits(sym)
