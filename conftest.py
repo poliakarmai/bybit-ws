@@ -5,9 +5,18 @@
 Этот conftest подменяет _pytest.python.PyModule._getobj чтобы пропустить __init__.py.
 """
 
+import re
 import types
 import sys
 from pathlib import Path
+
+# Скриптовые smoke-тесты (test_ml_smoke.py, test_scanner_smoke.py, ...) вызывают sys.exit()
+# на уровне модуля — pytest на них падает INTERNALERROR'ом и не собирает ничего вообще.
+# Запускать их вручную: python3 test_ml_smoke.py. Список вычисляется, а не хардкодится.
+collect_ignore = [
+    p.name for p in Path(__file__).parent.glob("test_*.py")
+    if re.search(r"^sys\.exit\(", p.read_text(errors="ignore"), re.M)
+]
 
 
 def pytest_configure(config):

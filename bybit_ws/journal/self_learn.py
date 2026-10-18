@@ -53,7 +53,9 @@ CANARY_MATCH_WINDOW = 3600
 CANARY_IDLE_TIMEOUT_HOURS = 24  # canary живёт весь self-learn цикл (24ч); 3ч убивал его до набора статистики → вечный idle_rollback, 0 промоушенов
 
 # ── Self-learn timing ───────────────────────────────
-SELF_LEARN_INTERVAL_SEC = 24 * 3600  # v10: 24ч cooldown (было 6ч)
+# SELF_LEARN_INTERVAL_SEC (24ч) удалён 18.10: константа использовалась только мёртвой
+# should_run_self_learn(). Живой путь — should_run_self_learn_v6 (min_hours=6, min_trades=10,
+# fallback_hours=24), вызывается из main_async.py.
 SELF_LEARN_HYSTERESIS = 0.10  # v10: изменение только если composite +10%
 SELF_LEARN_STATE = DATA_DIR / "self_learn_state.json"  # последний запуск
 
@@ -826,22 +828,9 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
 # 5. WALL-CLOCK SELF-LEARN TRIGGER (v5)
 # ══════════════════════════════════════════════════════
 
-def should_run_self_learn() -> bool:
-    """Проверить, пора ли запускать self-learn (по wall clock, не по cycle count).
-
-    Сохраняет время последнего запуска в self_learn_state.json.
-    """
-    now = time.time()
-    try:
-        if SELF_LEARN_STATE.exists():
-            state = json.loads(SELF_LEARN_STATE.read_text())
-            last_run = state.get("last_run_ts", 0)
-            if now - last_run < SELF_LEARN_INTERVAL_SEC:
-                return False
-    except Exception:
-        pass
-    return True
-
+# should_run_self_learn() удалена 18.10: не вызывалась ниоткуда (main_async использует
+# should_run_self_learn_v6). Её константа SELF_LEARN_INTERVAL_SEC=24ч вводила в заблуждение —
+# казалось, что self-learn работает раз в сутки, хотя живой триггер: ≥10 сделок за 6ч или 24ч fallback.
 
 def mark_self_learn_run():
     """Записать время запуска self-learn."""

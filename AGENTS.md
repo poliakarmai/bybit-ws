@@ -39,12 +39,12 @@ Systemd-сервис `bybit-ws-async` (user unit, `ExecStart=/usr/bin/python3 -m
 > Побочный эффект для сканеров: один и тот же файл виден по двум путям → GSC считает находку дважды
 > (`api.py` + `bybit_ws/api.py`).
 >
-> **Версии расходятся:** `pyproject.toml` → `3.10.1`, `CHANGELOG.md` → `[11.4.x] 2026-10-14`.
-> Пока не сведены — в разговоре ссылаться на CHANGELOG.
+> **Версии сведены 18.10:** `pyproject.toml` → `11.4.0` (было 3.10.1 — стейл-наследство), `CHANGELOG.md` → `[11.4.x]`.
+> `rpc.py` отдаёт `api_version: "v1"` — это версия HTTP-API, не продукта, их не путать.
 
 ```
 bybit-ws/
-├── main_async.py         ← Главный цикл (async, 30с). Self-learn: event-driven (≥10 сделок), но не чаще 24ч (см. ниже)
+├── main_async.py         ← Главный цикл (async, 30с). Self-learn: ≥10 сделок за ≥6ч, либо fallback 24ч
 ├── unified_sl.py          ← Unified SL (слияние 5 модулей → 1; приоритет: tight>simple>hard>BE>auto>default)
 ├── auto_entry.py          ← Авто-вход (MTF + Orderbook + Volume + Entry Judge + Correlation)
 ├── auto_sl.py             ← ATR-adaptive SL (legacy, заменён unified_sl)
@@ -119,11 +119,11 @@ python3 -m bybit_ws.experiments.parallel_sandbox --symbol SOLUSDT --days 180 --n
 
 Детали: `docs/SELF_LEARN.md`.
 
-> ⚠️ **Расхождение по частоте переобучения (найдено 18.10):** в коде `bybit_ws/journal/self_learn.py`
-> константа `SELF_LEARN_INTERVAL_SEC = 24 * 3600` с комментарием «v10: 24ч cooldown (было 6ч)»,
-> при этом `docs/SELF_LEARN.md` всё ещё пишет «раз в 6 часов». Event-driven триггер `should_run_self_learn_v6`
-> вызывается из `main_async.py:820`, но путь через `should_run_self_learn()` режется 24-часовым cooldown.
-> Пока не сведено — считать реальным 24ч.
+> ⚠️ **Частота переобучения (разобрано 18.10).** Живой триггер — `should_run_self_learn_v6(min_trades=10,
+> min_hours=6, fallback_hours=24)` из `main_async.py`: запуск при **≥10 сделках за ≥6ч**, либо принудительно
+> через **24ч**. Мёртвая функция `should_run_self_learn()` и её константа `SELF_LEARN_INTERVAL_SEC = 24ч`
+> **удалены** — они нигде не вызывались, но именно из-за них доки выглядели противоречиво.
+> `docs/SELF_LEARN.md` («раз в 6 часов / ≥10 сделок / 24ч fallback») соответствует коду.
 
 ## Запуск
 
@@ -134,11 +134,13 @@ bash deploy.sh                             # деплой (smoke → logic → c
 python3 test_smoke.py                      # тесты: 52 проверки (PASS=52/FAIL=0)
 ```
 
-> ⚠️ **`python3 -m pytest` без аргументов НЕ работает** (замер 2026-10-18): `INTERNALERROR … SystemExit: 1`
-> — `test_ml_smoke.py:85` вызывает `sys.exit()` на импорте и валит всю сессию. Собирается 78 тестов
-> в 9 файлах из 20. Всего `def test_` по репо — **200** (197 в 19 корневых `test_*.py` + 3 в
-> `bybit_ws/experiments/test_vol_gate.py`); остальные — скриптовые раннеры, pytest их не видит.
-> Рабочие вызовы: `python3 test_smoke.py`, `python3 test_logic_integrity.py` или `python3 -m pytest test_smoke.py -q`.
+> ✅ **`python3 -m pytest` починен 18.10** — раньше падал `INTERNALERROR … SystemExit` (скриптовые
+> smoke-файлы вызывают `sys.exit()` на импорте). Теперь `conftest.py` вычисляет их и игнорирует
+> автоматически; сами скрипты по-прежнему запускаются вручную (`python3 test_ml_smoke.py`).
+> Текущий прогон: **200 тестов — 198 passed, 2 failed**. Два падения — `test_mtf.py::TestCheckConfluence`
+> (`check_confluence('BTCUSDT', …)` → `None`): тесты бьют в живой API Bybit, в изоляции проходят 16/16,
+> в полном прогоне упираются в rate-limit. Это флак от сети, а не поломка логики.
+> Быстрый набор (то, что гоняют verify.sh и deploy.sh): `python3 test_smoke.py` → 52/52.
 
 ## Проверка работоспособности (обязательно для AI-агентов)
 
