@@ -3,6 +3,11 @@
 Стратегия: если позиция платит фандинг (лонг при +ставке, шорт при -ставке),
 и есть альтернативный сигнал с выгодным фандингом — ротируем.
 
+ВНИМАНИЕ: модуль работает как ДЕТЕКТОР. `check_funding_rotation` только
+предлагает ротации (информационные алерты), авто-исполнения нет. Функция
+`execute_rotation` ниже вызывающих не имеет и не должна использоваться до
+отдельного решения — это новая торговая логика, отдельная задача.
+
 Пороги:
 - Ротация LONG: funding > +0.01% → ищем LONG с funding < -0.01%
 - Ротация SHORT: funding < -0.01% → ищем SHORT с funding > +0.01%
@@ -28,6 +33,7 @@ ROTATION_STATE_FILE = os.path.join(DATA_DIR, 'funding_rotation_state.json')
 ROTATION_COOLDOWN = 86400       # 24 часа на монету после ротации
 MAX_ROTATIONS_PER_DAY = 3
 FUNDING_DELTA_MIN = 0.0003      # мин. улучшение ставки (0.03%)
+ALERT_COOLDOWN = 3600           # 1 час — не повторять алерт по той же паре (from→to)
 
 # Тир для ротации — Tier A/B ликвидные
 ROTATION_TIERS = {
@@ -46,7 +52,7 @@ def _load_state():
                 return json.load(f)
     except Exception as e:
         log_event(f'⚠️ funding_rotation state: {e}')
-    return {'cooldowns': {}, 'daily_count': 0, 'last_reset': ''}
+    return {'cooldowns': {}, 'daily_count': 0, 'last_reset': '', 'last_alert_ts': {}}
 
 
 def _save_state(state):
@@ -109,7 +115,9 @@ def check_funding_rotation(positions) -> list[dict]:
     """Проверить все позиции на невыгодный фандинг и предложить ротации.
 
     Возвращает список действий (пока только алерты, без авто-исполнения).
-    Каждое действие: {'action': 'rotate', 'from': sym, 'to': sym, 'reason': str}
+    Каждое действие: {'from', 'to', 'side', 'current_funding', 'new_funding',
+    'delta', 'bb_pct', 'price', 'reason'} — ставки и дельта в процентах.
+    Повторный алерт по той же паре (from→to) подавляется на ALERT_COOLDOWN.
     """
     if not isinstance(positions, dict):
         return []
@@ -123,7 +131,10 @@ def check_funding_rotation(positions) -> list[dict]:
         return []
 
     now = time.time()
+    t_start = time.time()
     actions = []
+    candidates_checked = 0
+    state_dirty = False
 
     # Получаем текущий фандинг для всех тикеров
     fmap = _get_funding_map()
@@ -204,7 +215,9 @@ def check_funding_rotation(positions) -> list[dict]:
             if delta < FUNDING_DELTA_MIN:
                 continue
 
-            # BB-проверка
+            # BB-проверка (единственный HTTP-вызов на кандидата — см. таймаут
+            # в main_async: при многих кандидатах чек может выйти за 10s)
+            candidates_checked += 1
             bb = _get_bb_signal(candidate)
             if bb is None:
                 continue
@@ -227,17 +240,40 @@ def check_funding_rotation(positions) -> list[dict]:
                 }
 
         if best_candidate:
-            actions.append({
-                'from': bp['symbol'],
-                'to': best_candidate['symbol'],
-                'side': side,
-                'current_funding': round(current_fr * 100, 4),
-                'new_funding': round(best_candidate['funding'] * 100, 4),
-                'delta': round(best_candidate['delta'] * 100, 4),
-                'bb_pct': best_candidate['bb_pct'],
-                'price': best_candidate['price'],
-            })
+            frm = bp['symbol']
+            to = best_candidate['symbol']
+            pair_key = f'{frm}→{to}'
+            last_ts = state.get('last_alert_ts', {}).get(pair_key, 0)
+            if now - last_ts < ALERT_COOLDOWN:
+                continue  # та же пара внутри кулдауна — не спамим повторно
 
+            current_funding_pct = round(current_fr * 100, 4)
+            new_funding_pct = round(best_candidate['funding'] * 100, 4)
+            delta_pct = round(best_candidate['delta'] * 100, 4)
+            bb_pct = best_candidate['bb_pct']
+            actions.append({
+                'from': frm,
+                'to': to,
+                'side': side,
+                'current_funding': current_funding_pct,
+                'new_funding': new_funding_pct,
+                'delta': delta_pct,
+                'bb_pct': bb_pct,
+                'price': best_candidate['price'],
+                'reason': (f'фандинг {current_funding_pct}% → {new_funding_pct}% '
+                           f'(Δ{delta_pct}%), BB {bb_pct}%'),
+            })
+            state.setdefault('last_alert_ts', {})[pair_key] = now
+            state_dirty = True
+
+    if state_dirty:
+        # Сбой записи состояния не должен терять уже посчитанные алерты.
+        try:
+            _save_state(state)
+        except Exception as e:
+            log_event(f'⚠️ funding_rotation state save: {e}')
+    if candidates_checked:
+        log_event(f'⏱️ funding_rotation: {candidates_checked} кандидатов за {time.time() - t_start:.1f}s')
     return actions
 
 

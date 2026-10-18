@@ -421,7 +421,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             run_in_thread(check_pumps, positions, timeout=10),
             run_in_thread(check_weekly_pumps, timeout=10),
             run_in_thread(check_funding_signals, positions, timeout=40),
-            run_in_thread(check_funding_rotation, positions, timeout=10),
+            run_in_thread(check_funding_rotation, positions, timeout=40),
         ]
         pump_results = await asyncio.gather(*pump_tasks, return_exceptions=True)
 
@@ -474,6 +474,8 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                 log_event(f'⚠️ funding_entry error: {e}\\n' + traceback.format_exc())
 
         # ── Funding Rotation (информационные алерты) ──
+        # check_funding_rotation работает как ДЕТЕКТОР: только алерты, без авто-
+        # исполнения. execute_rotation вызывающих не имеет и не подключается здесь.
         rot_result = pump_results[4]
         if not isinstance(rot_result, Exception) and rot_result:
             try:
