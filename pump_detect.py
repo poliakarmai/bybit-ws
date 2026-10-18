@@ -37,7 +37,50 @@ TP_PCT = 0.20               # -20% тейк
 MAX_PUMP_SHORTS = 2
 PUMP_COOLDOWN = 14400       # 4 часа между шортами на монету
 
+# Обходной список: эти символы НЕ шортим вообще (решение пользователя).
+# Он НЕ решает проблему неверного positionIdx — её закрывает _order_with_idx_fallback
+# (one-way/hedge определяется по ошибке 10001 и запоминается в _POS_MODE_CACHE).
 ONE_WAY = {'XRPUSDT', 'ONDOUSDT', 'WLFIUSDT', 'ENJUSDT', 'ESPORTSUSDT', 'AVAXUSDT', 'APTUSDT', 'SUIUSDT'}
+
+# Кэш режима позиции по символу: 0 (one-way) | 2 (hedge, Sell) | 1 (hedge, Buy).
+# Заполняется _order_with_idx_fallback при ретрае после 10001 — самокоррекция без зондирования.
+_POS_MODE_CACHE = {}
+
+
+def _position_idx(sym, side='Sell'):
+    """Предпочтительный positionIdx. Из кэша, иначе дефолт 0 (one-way).
+
+    Реальное значение уточняется ретраем при 10001 и записывается в кэш —
+    см. _order_with_idx_fallback.
+    """
+    return _POS_MODE_CACHE.get(sym, 0)
+
+
+def _order_with_idx_fallback(body, sym, side, path='/v5/order/create', idx=None):
+    """Отправить ордер, при 10001 ('position idx') повторить с другим индексом.
+
+    idx=None  — индекс резолвится из кэша/дефолта (_position_idx).
+    idx=<int> — явный индекс: SL/TP передают used_idx от входа, чтобы позиция
+                гарантированно получила защиту тем же индексом, что и вход.
+
+    Возвращает (response, used_idx). used_idx — тот, с которым запрос УШЁЛ
+    (успешный, а не предполагаемый). Вызывающий обязан использовать именно его
+    для SL/TP, иначе позиция останется без защиты.
+    """
+    if idx is None:
+        idx = _position_idx(sym, side)
+    body['positionIdx'] = idx
+    response = bybit('POST', path, body)
+
+    if (response or {}).get('retCode') != 0 and 'position idx' in str((response or {}).get('retMsg', '')):
+        alt = (2 if side == 'Sell' else 1) if idx == 0 else 0
+        body['positionIdx'] = alt
+        response = bybit('POST', path, body)
+        if (response or {}).get('retCode') == 0:
+            _POS_MODE_CACHE[sym] = alt
+        return response, alt
+
+    return response, idx
 
 
 def _load_state():
@@ -169,37 +212,34 @@ def _place_pump_short(sym, price, level_label, state, peak_price):
             'side': 'Sell',
             'orderType': 'Market' if level_label == 'init' else 'Limit',
             'qty': str(qty),
-            'positionIdx': 2,
             'timeInForce': 'IOC' if level_label == 'init' else 'GTC',
         }
         if level_label != 'init':
             body['price'] = str(entry)
-        order = bybit('POST', '/v5/order/create', body)
+        order, used_idx = _order_with_idx_fallback(body, sym, 'Sell')
         if order.get('retCode') != 0:
             log_event(f'⚠️ Pump-SHORT {sym} [{level_label}]: {order.get("retMsg","?")}')
             return False
 
         # SL — Bybit v5 trading-stop: только нужные параметры
-        bybit('POST', '/v5/position/trading-stop', {
+        _order_with_idx_fallback({
             'category': 'linear',
             'symbol': sym,
-            'positionIdx': 2,
             'stopLoss': str(sl_price),
             'slTriggerBy': 'MarkPrice',
-        })
+        }, sym, 'Sell', path='/v5/position/trading-stop', idx=used_idx)
 
         # TP
-        bybit('POST', '/v5/order/create', {
+        _order_with_idx_fallback({
             'category': 'linear',
             'symbol': sym,
             'side': 'Buy',
             'orderType': 'Limit',
             'qty': str(qty),
             'price': str(tp_price),
-            'positionIdx': 2,
             'timeInForce': 'GTC',
             'reduceOnly': True,
-        })
+        }, sym, 'Buy', idx=used_idx)
 
         log_event(f'🚀 Pump-SHORT {sym} [{level_label}]: ${entry:.4f} ×{qty}, '
                   f'SL ${sl_price:.4f}, TP ${tp_price:.4f}')
@@ -429,12 +469,12 @@ def check_weekly_pumps(positions=None):
 
         entry = _round_to_tick(last_price, sym)
         try:
-            order = bybit('POST', '/v5/order/create', {
+            order, _used_idx = _order_with_idx_fallback({
                 'category': 'linear', 'symbol': sym,
                 'side': 'Sell', 'orderType': 'Market',
-                'qty': str(qty), 'positionIdx': 2,
+                'qty': str(qty),
                 'timeInForce': 'IOC',
-            })
+            }, sym, 'Sell')
             if order.get('retCode') != 0:
                 log_event(f'⚠️ Weekly-Pump {sym}: {order.get("retMsg","?")}')
                 continue
