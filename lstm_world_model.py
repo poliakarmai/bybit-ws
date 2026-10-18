@@ -476,7 +476,7 @@ def predict_world(symbol='BTCUSDT', days=30):
     try:
         import json
         with open(WORLD_SCALER_PATH, 'r') as f:
-            scaler_params = json.load(f)
+            scaler_params = _scaler_arrays(json.load(f))
     except Exception:
         return None
 
@@ -548,6 +548,16 @@ _WORLD_CACHE_SYMBOLS = [
 _CACHE_TTL = 3600  # 1 hour
 
 
+def _scaler_arrays(params: dict) -> dict:
+    """JSON-раундтрип превращает min_/max_ в списки → `max_ - min_` падал
+    TypeError: unsupported operand type(s) for -: 'list' and 'list'.
+    Приводим к ndarray один раз, на входе."""
+    return {
+        'min_': np.asarray(params['min_'], dtype=np.float32),
+        'max_': np.asarray(params['max_'], dtype=np.float32),
+    }
+
+
 def _ensure_world_model():
     """Lazy-load the world model and scaler once per process lifetime."""
     global _world_model_instance, _world_scaler_params
@@ -568,7 +578,7 @@ def _ensure_world_model():
 
     import json
     with open(WORLD_SCALER_PATH, 'r') as f:
-        scaler_params = json.load(f)
+        scaler_params = _scaler_arrays(json.load(f))
 
     _world_model_instance = model
     _world_scaler_params = scaler_params
