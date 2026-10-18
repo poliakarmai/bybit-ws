@@ -158,14 +158,18 @@ print(c.execute('PRAGMA quick_check').fetchone()[0])" 2>&1 | tail -1)
 [ "$QC" = "ok" ] && ok "quick_check: ok" || bad "quick_check: $QC"
 
 # ── 9. Ошибки в логе за сегодня ──────────────────────────────────────────
-hdr "9. Ошибки в events.log (сегодня)"
+hdr "9. Ошибки в events.log (с момента старта сервиса)"
 if [ -f "$LOG" ]; then
-    ERR=$(grep -ci "$(date '+%Y-%m-%d').*\(Traceback\|CRITICAL\|❌\)" "$LOG" 2>/dev/null | head -1)
+    # Считаем не «за сутки», а с момента старта: после рестарта старые ошибки
+    # (до фикса) висят в логе весь день и держат ложный warning.
+    SINCE=$(date -d "$(systemctl --user show bybit-ws-async -p ActiveEnterTimestamp --value 2>/dev/null)" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
+    [ -n "$SINCE" ] || SINCE="$(date '+%Y-%m-%d') 00:00:00"
+    ERR=$(awk -v since="$SINCE" '{ts=substr($0,2,19); if (ts>=since && tolower($0) ~ /traceback|critical|❌/) n++} END{print n+0}' "$LOG" 2>/dev/null)
     ERR=${ERR:-0}
     if [ "$ERR" -eq 0 ]; then
-        ok "нет ошибок/traceback за сегодня"
+        ok "нет ошибок/traceback с $SINCE"
     else
-        warn "$ERR записей с ошибками за сегодня — посмотреть: grep -i traceback $LOG"
+        warn "$ERR записей с ошибками с $SINCE — посмотреть: grep -i traceback $LOG"
     fi
 fi
 
