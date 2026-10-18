@@ -48,6 +48,7 @@ sync_db = StateDB()
 # Синхронные модули (вызываются через executor)
 from .unified_sl import manage_sl
 from .auto_tp import auto_take_profit, apply_auto_tp
+from .cleanup import report_expired_orders
 from .pump_detect import check_pumps, check_weekly_pumps
 from .overbought import check_overbought, check_overbought_async, rotate_watchlist
 from .correlation import check_correlation, tighten_correlation_sl
@@ -570,6 +571,20 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             result, err = item if isinstance(item, tuple) else (item, None)
             if err:
                 log_event(f'⏱️ heavy task {i}: timeout — {err}')
+
+    # ── Просроченные лимитки: только АЛЕРТ, без отмены ──
+    # Авто-отмена невозможна: createType='CreateByUser' и у ордеров бота тоже,
+    # ручные лимитки пользователя неотличимы (см. cleanup.report_expired_orders).
+    try:
+        stale_msgs, _stale_err = await run_in_thread(
+            report_expired_orders, orders or {}, time.time(), timeout=5
+        )
+        if stale_msgs:
+            for msg in stale_msgs:
+                log_event(msg)
+                add_alert('INFO', msg)
+    except Exception as e:
+        log_event(f'⚠️ stale orders check: {e}')
 
     # ── Авто-вход (после всех проверок) ──
     try:
