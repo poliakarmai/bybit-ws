@@ -1,9 +1,9 @@
-# ARCHITECTURE.md — bybit-ws v7.1
+# ARCHITECTURE.md — bybit-ws v11.4
 
 > **Назначение:** КАК устроен бот (внутренняя архитектура).
 > Для функциональности: [CAPABILITIES.md](CAPABILITIES.md). Для API: [API.md](API.md).
 
-> **Версия:** 7.1 | **Дата:** 2026-06-28 | **Python 3.11+** | **asyncio** | **SQLite SSOT**
+> **Версия:** 11.4 | **Дата:** 2026-10-19 | **Python 3.11+** | **asyncio** | **SQLite SSOT**
 
 ## SSOT (Single Source of Truth)
 
@@ -22,7 +22,7 @@
  ├─ Тяжёлый цикл (каждые 10 циклов = 5 мин):
  │   ├─ BB pre-fetch (batch, кеш 5 мин)
  │   ├─ Режим рынка (LSTM → NEUTRAL fallback)
- │   ├─ Black Swan check (PnL 2× limit ИЛИ BTC -8%/час)
+ │   ├─ Black Swan check (`check_correlation_panic`: 5+ красных позиций И uPnL < -$150)
  │   ├─ Auto-SHORT + Dry Spell Throttle
  │   ├─ Корреляции + Пампы/Перекупленность
  │   ├─ DCA + Partial TP
@@ -30,7 +30,7 @@
  │   │   ├─ MTF Confluence (D+W+M)
  │   │   ├─ Orderbook Imbalance
  │   │   ├─ Volume Confirmation
- │   │   ├─ Entry Judge (LLM: Nemotron → DeepSeek, fail-closed)
+ │   │   ├─ Entry Judge (LLM: DeepSeek → Qwen, fail-closed)
  │   │   ├─ Correlation sizing (r>0.85→блок, r>0.70→×0.5)
  │   │   ├─ Post-trade cluster check (<40% WR→блок)
  │   │   └─ Risk Manager (CB, margin, max pos, banned)
@@ -50,13 +50,13 @@
 
 ## Параметры (prod)
 
-| Параметр | v7.1 |
+| Параметр | v11.4 |
 |----------|------|
 | Max позиций | 12 (session: NY=5, Asia=10, Weekend=3) |
 | Max маржа | $300 |
 | Max дневной убыток | -$50 |
-| RAM (среднее) | ~70 MB |
-| RAM (peak) | ~104 MB |
+| RAM (среднее) | ~45-55 MB (замер 19.10: 45 436 KB) |
+| RAM (peak) | см. `systemd-cgtop`; историческое «~104 MB» не перезамерялось |
 | Cycle time | 30s |
 | Heavy cycle | 300s (10 циклов) |
 | Healthcheck | `GET /health` — timestamp последнего цикла |
@@ -86,7 +86,7 @@ bybit-ws/
 ├── bb_prefetch.py        ← BB batch-префетчер
 ├── post_trade.py         ← Кластерный анализ win rate
 ├── push_notifier.py      ← Push (ntfy + Telegram)
-├── journal/
+├── bybit_ws/journal/     ← самообучение (в корне папки journal/ НЕТ)
 │   ├── analyzer.py       ← FIFO-анализ, bias
 │   └── self_learn.py     ← Self-learning (event-driven)
 ├── docs/                 ← Документация
@@ -137,8 +137,8 @@ PERM_SKIP с time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 
 ### Entry Judge — hard gate
 
-1. Nemotron (OpenRouter) → verdict pass/revise
-2. DeepSeek fallback
+1. DeepSeek (api.deepseek.com) → verdict pass/revise
+2. Qwen (QwenCloud) — фолбэк
 3. Оба упали → revise (блок)
 4. 3 падения подряд → отключение на 1 час (Judge CB)
 5. Кэш: 300s TTL
@@ -283,7 +283,7 @@ PRAGMA busy_timeout=5000;
 
 | Уровень | Условие | Канал |
 |---------|---------|-------|
-| CRITICAL | Black swan (BTC -8%/1h) | ntfy + Telegram |
+| CRITICAL | Black swan (5+ красных и uPnL < -$150) | ntfy + Telegram |
 | CRITICAL | Risk CB triggered | ntfy + Telegram |
 | WARNING | Judge down >30min | Telegram |
 | WARNING | Bybit API errors >5/min | Telegram |

@@ -9,10 +9,10 @@
 |-----------|--------|
 | Bollinger Grid LONG/SHORT | ✅ prod |
 | SHORT-оптимизация: World Model 33.1% + ML-фильтр | ✅ prod |
-| Android MVP: JWT + /set-tp + /generate-jwt | ✅ prod |
+| Android: серверная часть (JWT + /set-tp + /generate-jwt) | ✅ prod |
 | ATR-adaptive SL + ATR-based TP (3 уровня) | ✅ prod |
 | 7 фильтров входа (MTF, Orderbook, Volume, Entry Judge, Correlation, Post-trade, Risk) | ✅ prod |
-| LSTM Market Regime (82.3% точность, авто LONG/SHORT) | ✅ prod |
+| LSTM Market Regime (5 режимов, авто LONG/SHORT; 82.3% — заявлено 01.08, не перезамерялось) | ✅ prod |
 | LSTM World Model (multi-task OHLCV, entry scoring) | ✅ prod |
 | REGIME_AUTO: блокировка входов по режиму рынка | ✅ prod |
 | Адаптивный TP/SL по LSTM-режиму (v9) | ✅ prod |
@@ -164,7 +164,7 @@
 | Фаза 9.1 — Risk-фикс junk-шортов | ✅ | 15.08.2026 |
 | Фаза 9.2 — FIFO-матчинг фикс | ✅ | 20.08.2026 |
 | Фаза 9.3 — Time-exit + Blacklist + Candle-cache | ✅ | 27.08.2026 |
-| Фаза 10 — Android приложение | 🟡 | — |
+| Фаза 10 — Android приложение | 🟡 серверная часть в prod, APK не собран | — |
 
 ## Принципы
 

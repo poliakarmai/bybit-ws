@@ -1,10 +1,10 @@
 # bybit-ws API Reference
 
-> REST API трейдинг-монитора bybit-ws. Фаза 7 (29.06.2026).
+> HTTP API трейдинг-монитора bybit-ws (сервер `rpc.py`, `http.server`; не JSON-RPC). Версия 11.4, обновлено 19.10.2026.
 
 ## Аутентификация
 
-`Authorization: Bearer *** All endpoints.
+Заголовок `Authorization: Bearer <token>` обязателен для всех эндпоинтов, кроме `/health`.
 
 ⚠️ **Production: HTTPS only** (nginx + Let's Encrypt или Cloudflare Tunnel).
 

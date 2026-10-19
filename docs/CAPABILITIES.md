@@ -99,7 +99,7 @@ Event-driven: ≥10 сделок **и** ≥6ч с прошлого прогон�
 - journal/self_learn.py — адаптация min_score (±30%), SL/TP (±20%)
 - post_trade.py — кластерный анализ, блок <40% WR
 
-**Canary-режим (v7.1):**
+**Canary-режим (с v7.1, код живой в v11.4):**
 - Новые параметры → только 10% входов (canary group)
 - 48ч окно оценки: WR canary vs baseline
 - Падение WR >10% → авто-rollback
