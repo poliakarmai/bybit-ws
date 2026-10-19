@@ -1,7 +1,7 @@
 # ROADMAP — bybit-ws
 
 > План развития. Версия: 11.4.x. Обновлено: 2026-10-14.
-> Актуальный roadmap также в Obsidian: `hermes/bybit-ws-roadmap.md`.
+> Актуальный roadmap также в Obsidian: `bybit-ws/short-analysis-2026-10-19.md` и `bybit-ws/docs-audit-lena-2026-10-19.md` (`hermes/bybit-ws-roadmap.md` отсутствует).
 
 ## Текущий статус (v11.4.x)
 

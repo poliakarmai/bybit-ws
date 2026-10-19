@@ -18,7 +18,7 @@
 - Защищает депозит: Circuit Breaker, BlackSwan, Anti-ludomania, корреляционный блок
 - Самообучается: LSTM-классификатор рынка, Thompson Sampling, Dynamic Bandit, Drift Detector, Ensemble (20+ механик)
 
-Работает **24/7 на VPS за $5/мес**. 16 тест-файлов / 171 тест, атомарный деплой.
+Работает **24/7 на VPS за $5/мес**. 44 теста pytest + 16 smoke, атомарный деплой.
 
 ---
 
@@ -31,13 +31,13 @@
 | Авто-сделки self-learn (auto, manual=0) | 318 / +$144.21 / WR 74.2% / PF 1.18 |
 | LONG (авто, manual=0) | 213 / +$205.50 / WR 77.0% / PF 1.38 |
 | SHORT (авто, manual=0) | 105 / −$61.29 / WR 68.6% / PF 0.76 |
-| Всего закрытых сделок | 466 |
+| Всего закрытых сделок | 471 |
 
-> **Снимок на 2026-10-19, сверено с биржей** (`/v5/position/closed-pnl`, 451 из 466 локальных строк сошлись по PnL).
+> **Снимок на 2026-10-19, сверено с биржей** (`/v5/position/closed-pnl`, 463 из 471 локальной строки сошлись по PnL).
 > Живой источник — RPC (`/metrics`, `/positions`) + `state.db`. Локальный `trade_history.side` — сторона
 > **закрытия** (`Buy`=закрыл SHORT), а не позиции; в `/positions` — наоборот, сырой Bybit.
 
-*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 466 закрытых сделок (350 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
+*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 471 закрытая сделка (355 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
 
 ---
 
@@ -75,7 +75,7 @@ chmod 600 ~/.config/bybit-ws/env
 python3 -m bybit_ws.paper_trade SOLUSDT --days 30
 
 # Боевой запуск
-python3 test_smoke.py          # 16 тестов → PASS (всего: 16 файлов / 171 тест)
+python3 test_smoke.py          # 16 тестов → PASS (плюс 44 теста pytest в tests/)
 bash deploy.sh                 # атомарный деплой с canary-проверкой
 ```
 
@@ -88,7 +88,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 ### 🤖 Авто-трейдинг
 - **Bollinger Grid** LONG/SHORT на дневном таймфрейме
 - **9-метричный скоринг**: BB%, объём, падающие дни, фондинг, волатильность, качество + ML Gate
-- **LSTM-классификатор** рынка (82.3% точность, 5 режимов)
+- **LSTM-классификатор** рынка (5 режимов; 82.3% — заявлено 01.08, не перезамерялось)
 - **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek → Qwen → Nemotron; fail-closed, fail-open только при длительном отказе LLM)
 - **Auto-TP**: ATR-adaptive, 3 ноги `[0.40, 0.35, 0.25]` (% размера), множители ATR по режиму. BB 20% Middle / 80% Upper — fallback, когда ATR недоступен
 - **Unified SL**: 5 механизмов → один приоритетный (tight > simple > hard > BE > default)
@@ -108,7 +108,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 
 ### 🔌 Интерфейсы
 - **RPC API** (порт 8766): `/scan`, `/enter`, `/close`, `/positions`, `/metrics`
-- **JSON-RPC** для ботов и интеграций
+- **HTTP RPC** для ботов и интеграций (`http.server`, не JSON-RPC)
 - **MCP Server** для AI-агентов (Claude Code, Hermes, Codex)
 - **Telegram-алерты**: входы, SL, TP, DCA, пампы, ошибки
 - **One-click trading** через Hermes-чат: «просканируй SOL» → «бери 5%»
@@ -122,7 +122,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Micro-updates**: обучение после каждой сделки с outlier-защитой (>3σ)
 - **Canary mode**: Bayesian A/B тест, адаптивный 5-20%, авто-rollback
 - **Entry Judge**: cross-model validation (DeepSeek → Qwen → Nemotron), fail-closed
-- **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% точность)
+- **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% — заявлено, не перезамерялось)
 - **LSTM World Model**: multi-task OHLCV prediction для скоринга входов
 
 ---

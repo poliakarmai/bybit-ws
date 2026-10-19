@@ -13,18 +13,18 @@ Systemd-сервис `bybit-ws-async` (user unit, `ExecStart=/usr/bin/python3 -m
 
 > **Снимок на 2026-10-19.** Локальные числа — из `state.db`; история пересчитана по бирже
 > (`/v5/position/closed-pnl`). Матчинг локальных строк по `(closed_at, symbol)`:
-> 460 из 468 совпали, 8 без пары (7 x10/x10:scalp от 17.06 + 1 AAVE — биржа их не отдаёт).
-> Период для таблицы сторон — 457 сделок по 18.10 09:13:20 (снимок 18.10); стратегии — все 468 строк.
+> 463 из 471 совпали, 8 без пары (7 x10/x10:scalp от 17.06 + 1 AAVE — биржа их не отдаёт).
+> Период для таблицы сторон — 457 сделок по 18.10 09:13:20 (снимок 18.10); стратегии — все 471 строка.
 
 | Метрика | Значение | Примечание |
 |---------|----------|-----------|
-| Закрытых сделок (все) | 468 | auto 352 + historical 47 + NULL/legacy 31 + imported 30 + x10 6 + x10:scalp 2 (х10-строки не отдаёт биржа) |
-| Авто (`strategy='auto'`, любой manual) | 352 | все авто-входы (321 с `manual=0`) |
+| Закрытых сделок (все) | 471 | auto 355 + historical 47 + NULL/legacy 31 + imported 30 + x10 6 + x10:scalp 2 (х10-строки не отдаёт биржа) |
+| Авто (`strategy='auto'`, любой manual) | 355 | все авто-входы (324 с `manual=0`) |
 | **Авто self-learn (`manual=0`, `strategy='auto'`)** | **318 / +$144.21 / WR 74.2% / PF 1.18** | сверка с биржей; ручные исключены |
 | Ручные (`manual=1`) | 31 / −$410.38 | входы пользователя, не бот |
 | **LONG (авто, `manual=0`)** | **213 / +$205.50 / WR 77.0% / PF 1.38** | **прибыльная сторона** |
 | **SHORT (авто, `manual=0`)** | **105 / −$61.29 / WR 68.6% / PF 0.76** | ⚠️ убыточная сторона |
-| Комиссии (все строки с `fees>0`) | 460 / 468, Σ $148.89 | бэкфилл из биржи, `backfill_from_bybit.py` |
+| Комиссии (все строки с `fees>0`) | 463 / 471, Σ $149.00 | бэкфилл из биржи, `backfill_from_bybit.py` |
 | Фандинг `funding_log` | 3043 записи, Σ −$8.56 | `funding_backfill.py`, Bybit `SETTLEMENT` |
 | Открытые позиции | 9 | LONG 8 / SHORT 1, uPnL −10.34 (live: `/positions`) |
 | Режим | live → `GET /metrics` (Prometheus), `/positions` (Bearer) | не хранить в доке (мгновенно устаревает) |
@@ -40,28 +40,24 @@ Systemd-сервис `bybit-ws-async` (user unit, `ExecStart=/usr/bin/python3 -m
 > 🧾 **Три независимых денежных потока — не складывать вслепую.**
 > | источник | что это | 01.06→19.10 |
 > |---|---|---|
-> | `trade_history.pnl` | Bybit `closedPnl`: нетто по сделке, **без фандинга и без комиссии открытия** | Σ −$382.66 (468 строк) |
+> | `trade_history.pnl` | Bybit `closedPnl`: нетто по сделке, **без фандинга и без комиссии открытия** | Σ −$385.60 (471 строка) |
 > | `funding_log.cash_flow` | фандинг из `transaction-log` типа `SETTLEMENT` (там `cashFlow='0'`, сумма в поле `change`) | Σ −$8.56 (3043 записи) |
 > | `transaction-log.cashFlow` тип `TRADE` | реальное движение денег по сделкам | **+$207.91** (4541 запись) |
 >
 > Сумма первых двух (−$391.22) **не равна** третьей (+$207.91) — расхождение ≈ $599 это
 > комиссии открытия, которые не входят ни в `closedPnl`, ни в `funding_log`: они видны только
 > в `TRADE`-записях транзакционного лога. Поэтому «PnL аккаунта» = `cashFlow TRADE`, а не `Σ pnl`.
-> Колонка `fees` в БД теперь заполнена (460/468), но это `openFee + closeFee` по сделке — для
+> Колонка `fees` в БД теперь заполнена (463/471), но это `openFee + closeFee` по сделке — для
 > сверки с `cashFlow` её надо вычитать аккуратно, закрывающая комиссия уже сидит в `closedPnl`.
 
 > **manual-фильтр:** `trade_history.manual` отделяет авто-входы от ручных. Ручной вход через `/enter` → `mark_manual_position()` → при закрытии `manual=1` → self-learn исключает. Адаптер self-learn грузит `manual=0`.
 
-> 💰 **`trade_history.pnl` — уже ЧИСТЫЙ по сделке, но НЕ «прибыль аккаунта» (уточнено 19.10).**
-> Колонка пишется из Bybit `closedPnl` (`main_async.py` → `_import_bybit_trades`); `closedPnl`
-> включает комиссию закрытия, но **не включает открытие и не включает фандинг** — сверка с
-> `/v5/account/transaction-log`: Σ closedPnl за 01.06→18.10 = −$409.66 против реального
-> `cashFlow` **−$65.64**. Фандинг начисляется отдельными записями `SETTLEMENT` (там `cashFlow`=0),
-> поэтому вычитать оценочные комиссии из `closedPnl` нельзя (двойной счёт), а складывать
-> `closedPnl` в «прибыль» — тоже нельзя (недосчёт фандинга). Для PnL сделки — `pnl`,
-> для денег аккаунта — `transaction-log.cashFlow`.
-> Что действительно пусто — колонка `fees` у старых строк: структура издержек не видна,
-> но PnL сделки от этого не меняется.
+> 💰 **`trade_history.pnl` — чистый по сделке, но НЕ «прибыль аккаунта».**
+> Колонка пишется из Bybit `closedPnl`: включает комиссию закрытия, **не включает открытие
+> и не включает фандинг**. Поэтому Σ `pnl` (−$385.60) ≠ `cashFlow TRADE` (+$207.91) — это
+> разные величины, см. таблицу трёх потоков выше. Для PnL сделки — `pnl`; для денег
+> аккаунта — `transaction-log.cashFlow`. Вычитать оценочные комиссии из `pnl` нельзя
+> (двойной счёт): закрывающая комиссия уже внутри.
 
 > 📊 **Телеметрия сделки (с 18.10).** `trade_history` дополнена колонками `leverage` и
 > `external_id` (миграция в `state_db.py` → `_migrate()`, идемпотентна, применяется при старте
@@ -96,7 +92,7 @@ bybit-ws/
 ├── entry_judge.py        ← Cross-model judge (DeepSeek, fail-closed)
 ├── lstm_regime.py         ← LSTM-классификатор режима (82.3% — заявлено 01.08, не перезамерялось; 5 классов)
 ├── lstm_world_model.py    ← Multi-task OHLCV prediction + entry scoring
-├── rpc.py                ← JSON-RPC (:8766) + /kill_switch + /metrics + one-click
+├── rpc.py                ← HTTP RPC (:8766, http.server, не JSON-RPC) + /kill_switch + /metrics + one-click
 ├── state_db.py           ← SQLite SSOT (WAL, busy_timeout=5с). `trade_history`: pnl (net), fees, leverage, external_id, manual; миграции — `_migrate()`
 ├── bybit_ws/journal/     ← Самообучение v10 (20+ механик). В корне папки `journal/` НЕТ
 │   ├── self_learn.py      ← Dynamic Bandit, Pareto MC, Drift, Ensemble, Causal

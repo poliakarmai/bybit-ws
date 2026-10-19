@@ -92,7 +92,7 @@ bybit-ws/
 ├── docs/                 ← Документация
 ├── scripts/              ← DSPy, walkforward
 ├── deploy.sh             ← Атомарный деплой
-└── test_smoke.py         ← 45/45 тестов
+└── test_smoke.py         ← 16 тестов (замер 19.10)
 ```
 
 ## Auto-SL — ATR-adaptive
@@ -297,7 +297,7 @@ PRAGMA busy_timeout=5000;
 |-----|---------|---------|
 | Unit | mocks для API, SQLite in-memory | target >80% |
 | Integration | реальный SQLite, fake Bybit API | 45 smoke-тестов |
-| Smoke | deploy validation (deploy.sh) | 45/45 |
+| Smoke | deploy validation (deploy.sh) | 16/16 |
 | CI | GitHub Actions, GSC security scan | на каждом push |
 
 ## Security
