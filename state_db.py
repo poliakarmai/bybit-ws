@@ -167,6 +167,19 @@ class StateDB:
             self.conn.execute("ALTER TABLE trade_history ADD COLUMN leverage INTEGER")
         if 'external_id' not in cols:
             self.conn.execute("ALTER TABLE trade_history ADD COLUMN external_id TEXT")
+        # Фандинг (отдельный денежный поток, не входит в closedPnl).
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS funding_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              symbol TEXT NOT NULL,
+              cash_flow REAL NOT NULL,      -- знак как у Bybit: минус = заплатили
+              fee_rate REAL,
+              ts INTEGER NOT NULL,          -- unix seconds
+              external_id TEXT UNIQUE       -- transaction-log id, дедуп
+            );
+            CREATE INDEX IF NOT EXISTS idx_funding_ts ON funding_log(ts);
+            CREATE INDEX IF NOT EXISTS idx_funding_sym ON funding_log(symbol, ts);
+        """)
 
     # ── trade_history ─────────────────────────────────────────
 

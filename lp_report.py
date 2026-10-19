@@ -55,6 +55,23 @@ def fetch_trades(days: int | None):
     return rows
 
 
+def funding_total(days: int | None) -> tuple[float, int]:
+    """Сумма фандинга из funding_log за тот же период, что и trade_history."""
+    conn = sqlite3.connect(DB)
+    q = "SELECT COALESCE(SUM(cash_flow), 0), COUNT(*) FROM funding_log"
+    params: tuple = ()
+    if days:
+        q += " WHERE ts > strftime('%s','now') - ?"
+        params = (days * 86400,)
+    try:
+        total, n = conn.execute(q, params).fetchone()
+    except sqlite3.OperationalError:  # БД ещё без миграции
+        total, n = 0.0, 0
+    finally:
+        conn.close()
+    return float(total or 0.0), n
+
+
 def _stats(pnls: list[float]) -> dict:
     n = len(pnls)
     if n == 0:
@@ -126,6 +143,7 @@ def report(days: int | None, nav: float | None) -> str:
     fees_est = (entry_notional + exit_notional) * TAKER_RATE
 
     total = _stats(pnls)
+    funding, funding_n = funding_total(days)
     clean_auto = [r[5] for r in rows if (r[9] or "") == "auto" and r[8] == 0]
     clean = _stats(clean_auto)
 
@@ -176,6 +194,8 @@ def report(days: int | None, nav: float | None) -> str:
     O.append("|---|---|")
     O.append(f"| Реализованный PnL (net of fees) | {_fmt_money(total['pnl'])} |")
     O.append(f"| Комиссии (справочно, оценка taker 0.055%) | {_fmt_money(-fees_est)} |")
+    O.append(f"| Funding (факт, Bybit SETTLEMENT, {funding_n} записей) | {_fmt_money(funding)} |")
+    O.append(f"| Итого: PnL + funding | {_fmt_money(total['pnl'] + funding)} |")
     O.append(f"| Win rate | {total['wr']:.1f}% |")
     O.append(f"| Profit factor | {total['pf']:.2f} |")
     O.append(f"| Sharpe (annualized) | {sharpe:.2f} |")
