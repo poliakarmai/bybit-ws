@@ -187,8 +187,8 @@ def _import_bybit_trades(data_dir):
                             manual=_manual,
                             fees=fees, leverage=lev, external_id=ext_id,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_event(f'⚠️ trade_history insert failed for {sym}: {e}')
                     # ── v4: Exit reason tracking + streak ──
                     entry_ts = int(item.get('createdTime', 0)) / 1000
                     try:
@@ -212,8 +212,8 @@ def _import_bybit_trades(data_dir):
                             _micro_update(sym, side, pnl, hold_h, exit_reason)
                         except Exception as e:
                             log_event(f'⚠️ self-learn micro-update failed for {sym}: {e}')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_event(f'⚠️ self-learn exit/streak failed for {sym}: {e}')
                     # Проброс в canary-трекер: только для канареечных входов
                     try:
                         if _match_canary(sym, side, ts_val, window=int(ts_val - entry_ts) + 3600):
