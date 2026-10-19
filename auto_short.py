@@ -694,7 +694,7 @@ def check_auto_short(positions):
 
             # ── Телеметрия входа (17.09.2026): диагностика для trade_history при закрытии ──
             try:
-                from bybit_ws.state_db import sync_db
+                from bybit_ws.state_db import db as sync_db
                 from .auto_entry import _calc_rsi as _calc_rsi_tel
                 sync_db.save_entry_diagnostic(
                     sym, 'Sell',

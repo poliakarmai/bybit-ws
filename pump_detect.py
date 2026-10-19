@@ -481,6 +481,13 @@ def check_weekly_pumps(positions=None):
 
             log_event(f'🚀🚀 Weekly-JUNK {sym}: SHORT ${entry:.4f} ×{qty}, БЕЗ SL (памп +{chg_7d*100:.0f}%)')
             alerts.append(f'🐻🐻 JUNK-SHORT {sym}: вход @ ${entry:.4f}, БЕЗ стопа')
+            # ── Телеметрия входа: entry_reason попадёт в trade_history при закрытии ──
+            try:
+                from bybit_ws.state_db import db as _diag_db
+                _diag_db.save_entry_diagnostic(
+                    sym, 'Sell', entry_reason=f'weekly_junk +{chg_7d*100:.0f}% за 7д')
+            except Exception as e:
+                log_event(f'⚠️ weekly_junk entry_reason: {e}')
 
             state[sym] = {
                 'first_seen_ts': now,

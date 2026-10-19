@@ -817,7 +817,7 @@ def auto_entry_scan(positions):
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
                 # ── v8.1: запись контекста входа в trade_history ──
                 try:
-                    from bybit_ws.state_db import sync_db
+                    from bybit_ws.state_db import db as sync_db
                     entry_reason = f'score={s.get("score")}/{s.get("max_score")} BB={s.get("bb_pos"):.0f}%'
                     if 'mtf' in s:
                         entry_reason += f' MTF={s["mtf"]["confluence"]}/3'
@@ -838,8 +838,8 @@ def auto_entry_scan(positions):
                         rsi=s.get('rsi'),
                         entry_reason=entry_reason,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_event(f'⚠️ entry telemetry failed for {sym}: {e}')
                 # Инкремент дневного счётчика входов (anti-overtrading)
                 _count_today_entries()
                 _daily_entries['count'] += 1

@@ -169,7 +169,8 @@ def _import_bybit_trades(data_dir):
                             exit_reason = 'SL'
                         else:
                             exit_reason = 'Unknown'
-                        diag = sync_db.get_entry_diagnostic(sym, 'Buy' if side == 'buy' else 'Sell') or {}
+                        diag = sync_db.get_entry_diagnostic_for_close(
+                            sym, 'Buy' if side == 'buy' else 'Sell') or {}
                         try:
                             from .manual_positions import is_manual_position
                             _manual = 1 if is_manual_position(sym) else 0

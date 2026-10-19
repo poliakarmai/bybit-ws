@@ -494,6 +494,16 @@ class StateDB:
             self.conn.commit()
         return val if isinstance(val, dict) else None
 
+    def get_entry_diagnostic_for_close(self, symbol, closing_side):
+        """Диагностика входа по стороне ЗАКРЫТИЯ из closed-pnl.
+
+        Bybit closed-pnl отдаёт сторону ЗАКРЫВАЮЩЕГО ордера (Sell закрывает LONG),
+        а diag пишется стороной ВХОДА (auto_entry: 'Buy', auto_short: 'Sell').
+        Сторона входа противоположна стороне закрытия.
+        """
+        entry_side = 'Sell' if closing_side == 'Buy' else 'Buy'
+        return self.get_entry_diagnostic(symbol, entry_side)
+
     # ── counterfactual entries ───────────────────────────────────────
 
     def log_counterfactual(self, symbol, side, score, bb_pos, entry_price, confidence, issues):
