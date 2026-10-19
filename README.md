@@ -28,14 +28,16 @@
 
 | Метрика | Значение |
 |--------|----------|
-| Авто-сделки self-learn (manual=0) | 310 / +$146.61 / WR 74.8% / PF 1.19 |
-| SHORT (авто, manual=0) | 207 / +$206.57 / WR 77.8% |
-| LONG (авто, manual=0) | 103 / −$59.96 / WR 68.9% |
-| Всего закрытых сделок | 457 |
+| Авто-сделки self-learn (auto, manual=0) | 318 / +$144.21 / WR 74.2% / PF 1.18 |
+| LONG (авто, manual=0) | 213 / +$205.50 / WR 77.0% / PF 1.38 |
+| SHORT (авто, manual=0) | 105 / −$61.29 / WR 68.6% / PF 0.76 |
+| Всего закрытых сделок | 466 |
 
-> **Снимок на 2026-10-18.** Числа — снапшот `state.db`; живой источник — RPC (`/metrics`, `/rpc/all`, `/positions`) + `state.db`.
+> **Снимок на 2026-10-19, сверено с биржей** (`/v5/position/closed-pnl`, 451 из 466 локальных строк сошлись по PnL).
+> Живой источник — RPC (`/metrics`, `/positions`) + `state.db`. Локальный `trade_history.side` — сторона
+> **закрытия** (`Buy`=закрыл SHORT), а не позиции; в `/positions` — наоборот, сырой Bybit.
 
-*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 457 закрытых сделок (341 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
+*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 466 закрытых сделок (350 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
 
 ---
 
