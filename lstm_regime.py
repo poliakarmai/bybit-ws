@@ -54,6 +54,11 @@ SCALER_PATH = MODEL_DIR / 'lstm_regime_scaler.pkl'
 FEATURES_PATH = MODEL_DIR / 'lstm_regime_features.json'
 CACHE_PATH = DATA_DIR / 'lstm_regime_cache.json'
 
+# ── Кандидаты: никогда не пересекаются с прод-файлами выше ──
+CANDIDATE_MODEL_PATH = MODEL_DIR / 'lstm_regime_candidate.pt'
+CANDIDATE_FEATURES_PATH = MODEL_DIR / 'lstm_regime_candidate_features.json'
+CANDIDATE_SCALER_PATH = MODEL_DIR / 'lstm_regime_candidate_scaler.pkl'
+
 # ── Production guard ──
 _FALLBACK_KEY = 'bybit-ws-model-integrity-dev'
 _HMAC_RAW = os.getenv('BYBIT_HMAC_SECRET')
@@ -90,6 +95,12 @@ N_FEATURES = 11   # 8 технических + 3 макро (BTC.D, ETH/BTC, Fea
 
 CLASS_NAMES = ['TRENDING_UP', 'TRENDING_DOWN', 'RANGING', 'HIGH_VOL', 'LOW_VOL']
 CLASS_IDX = {name: i for i, name in enumerate(CLASS_NAMES)}
+
+# 20.10.2026: 2 символа × 365 дней = 618 сэмплов на 5 классов — модель
+# сваливалась в один класс. 8 мажоров × 900 дней ≈ 15× данных.
+TRAIN_SYMBOLS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT',
+                 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT')
+TRAIN_DAYS = 900
 
 # ── Фаза 5.4: Feature flag авто-переключения LONG/SHORT ──
 REGIME_AUTO_ENABLED = os.getenv('BYBIT_REGIME_AUTO', '0') == '1'
@@ -168,6 +179,46 @@ def _calc_features(closes, highs, lows, volumes):
     mom_5 = (close / closes[-6] - 1) * 100 if len(closes) >= 6 else 0
 
     return [daily_return, hl_range, bb_pct, bb_width, rsi, atr_pct, vol_ratio, mom_5]
+
+
+def precompute_features(closes, highs, lows, volumes) -> list:
+    """_calc_features по одному разу на бар. None там, где истории мало.
+
+    Вынесено отдельно, чтобы build_dataset не пересчитывал признаки O(n²):
+    окно потом просто нарезается из готового списка.
+    """
+    return [_calc_features(closes[:j + 1], highs[:j + 1], lows[:j + 1], volumes[:j + 1])
+            for j in range(len(closes))]
+
+
+def class_weights(labels: list[int], n_classes: int = len(CLASS_NAMES)) -> list[float]:
+    """Веса обратно пропорциональны частоте класса: n/(k*count).
+
+    n — всего меток, k — число классов. Отсутствующий класс получает 0.0,
+    чтобы не тянуть loss в пустую категорию. Если все метки одного класса,
+    возвращаем 1.0 на каждый класс: вырожденный вход не должен делить на ноль.
+    """
+    n = len(labels)
+    counts = [0] * n_classes
+    for lab in labels:
+        if 0 <= lab < n_classes:
+            counts[lab] += 1
+
+    present = [c for c in counts if c > 0]
+    if n == 0 or len(present) <= 1:
+        return [1.0] * n_classes
+
+    k = len(present)
+    return [n / (k * c) if c > 0 else 0.0 for c in counts]
+
+
+def label_distribution(labels: list[int]) -> dict[str, int]:
+    """{имя класса: количество} — чтобы видеть перекос выборки."""
+    dist = {name: 0 for name in CLASS_NAMES}
+    for lab in labels:
+        if 0 <= lab < len(CLASS_NAMES):
+            dist[CLASS_NAMES[lab]] += 1
+    return dist
 
 
 # ── Макро-признаки (Фаза 5.4) ─────────────────────────────────
@@ -325,7 +376,7 @@ if HAS_TORCH:
 
 # ── Данные ───────────────────────────────────────────────────
 
-def fetch_training_data(symbols=('BTCUSDT', 'ETHUSDT'), days=365):
+def fetch_training_data(symbols=TRAIN_SYMBOLS, days=TRAIN_DAYS):
     """
     Загрузить исторические D-свечи через Bybit API.
     Возвращает list[dict]: symbol, closes, highs, lows, volumes.
@@ -382,17 +433,18 @@ def build_dataset(all_data, seq_len=SEQUENCE_LENGTH):
         lows = sym_data['lows']
         volumes = sym_data['volumes']
 
-        for i in range(seq_len, len(closes) - LOOKAHEAD):
-            # Признаки за последние seq_len дней
-            features = []
-            for j in range(i - seq_len, i):
-                feat = _calc_features(closes[:j + 1], highs[:j + 1], lows[:j + 1], volumes[:j + 1])
-                if feat is None:
-                    break
-                # Добавляем макро-признаки к каждому временному шагу
-                features.append(feat + macro)
-            if len(features) != seq_len:
+        # Признаки считаются один раз на бар, окна нарезаются из готового списка.
+        feats = precompute_features(closes, highs, lows, volumes)
+        first_valid = next((j for j, f in enumerate(feats) if f is not None), None)
+        if first_valid is None:
+            continue
+
+        for i in range(max(seq_len, first_valid + seq_len), len(closes) - LOOKAHEAD):
+            seq = feats[i - seq_len:i]
+            if any(f is None for f in seq):
                 continue
+            # Добавляем макро-признаки к каждому временному шагу
+            features = [f + macro for f in seq]
 
             # Метка (forward-looking)
             label = _label_regime(closes, highs, lows, i)
@@ -433,20 +485,29 @@ class FeatureScaler:
         return self.transform(X)
 
 
-def train_model(force=False):
-    """Обучить LSTM-модель и сохранить на диск."""
+def train_model(force=False, candidate=False):
+    """Обучить LSTM-модель и сохранить на диск.
+
+    candidate=True — писать в CANDIDATE_*-файлы, не подписывать HMAC и не
+    трогать прод-модель. Прод-артефакты остаются нетронутыми.
+    """
     if not HAS_TORCH:
         print("❌ PyTorch не установлен. pip install torch")
         return None
 
+    model_path = CANDIDATE_MODEL_PATH if candidate else MODEL_PATH
+    scaler_path = CANDIDATE_SCALER_PATH if candidate else SCALER_PATH
+    features_path = CANDIDATE_FEATURES_PATH if candidate else FEATURES_PATH
+
     # Загрузка данных
     print("📡 Загрузка исторических данных...")
-    data = fetch_training_data(['BTCUSDT', 'ETHUSDT'], days=365)
+    data = fetch_training_data()
     if not data:
         print("❌ Не удалось загрузить данные")
         return None
 
-    print(f"   BTC: {len(data[0]['closes'])} дней, ETH: {len(data[1]['closes'])} дней")
+    print(f"   Символов: {len(data)}, дней: "
+          + ", ".join(f"{d['symbol']}={len(d['closes'])}" for d in data))
     print("🔨 Построение датасета...")
     X, y = build_dataset(data)
     if X is None:
@@ -475,15 +536,14 @@ def train_model(force=False):
     X_val = torch.tensor(X_scaled[split:], dtype=torch.float32)
     y_val = torch.tensor(y[split:], dtype=torch.long)
 
-    # Class weights для дисбаланса (все N_CLASSES, даже если не представлены)
-    weight_array = np.ones(N_CLASSES, dtype=np.float32)
-    for cls_idx, cnt in zip(unique, counts):
-        weight_array[cls_idx] = len(y) / (len(unique) * max(cnt, 1))
-    class_weights = torch.tensor(weight_array, dtype=torch.float32)
-
     # Модель
     model = LSTMModel()
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    device = next(model.parameters()).device
+
+    # Class weights для дисбаланса — на том же устройстве, что и модель
+    weight_tensor = torch.tensor(class_weights(y[:split].tolist()),
+                                 dtype=torch.float32, device=device)
+    criterion = nn.CrossEntropyLoss(weight=weight_tensor)
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
 
@@ -533,14 +593,16 @@ def train_model(force=False):
 
     # Сохранение
     os.makedirs(MODEL_DIR, exist_ok=True)
-    torch.save(model.state_dict(), MODEL_PATH)
-    _sign_lstm_file(MODEL_PATH)
-    with open(SCALER_PATH, 'wb') as f:
+    torch.save(model.state_dict(), model_path)
+    if not candidate:
+        _sign_lstm_file(model_path)
+    with open(scaler_path, 'wb') as f:
         pickle.dump(scaler, f)
-    _sign_lstm_file(SCALER_PATH)
+    if not candidate:
+        _sign_lstm_file(scaler_path)
     # Макро-значения для логов
     macro_vals = _get_macro_features()
-    with open(FEATURES_PATH, 'w') as f:
+    with open(features_path, 'w') as f:
         json.dump({
             'n_samples': len(X),
             'n_features': N_FEATURES,
@@ -554,13 +616,35 @@ def train_model(force=False):
             },
             'val_accuracy': round(best_val_acc, 3),
             'trained_at': datetime.now().isoformat(),
-            'symbols': ['BTCUSDT', 'ETHUSDT'],
+            'symbols': [d['symbol'] for d in data],
         }, f, indent=2)
 
-    print(f"   Модель: {MODEL_PATH}")
-    print(f"   Скейлер: {SCALER_PATH}")
+    print(f"   Модель: {model_path}")
+    print(f"   Скейлер: {scaler_path}")
 
-    return model
+    metrics = {
+        'val_accuracy': float(best_val_acc),
+        'n_train': int(len(X_train)),
+        'n_val': int(len(X_val)),
+    }
+
+    if candidate:
+        # Перекос выборки и базовая линия «всегда самый частый класс»:
+        # без неё val_accuracy ничего не говорит о качестве модели.
+        dist = label_distribution(y.tolist())
+        total = sum(dist.values())
+        majority = max(dist.values()) / total if total else 0.0
+        print("\n📊 Кандидат — отчёт:")
+        for name, cnt in dist.items():
+            share = f"{cnt/total*100:.1f}%" if total else "n/a"
+            print(f"   {name}: {cnt} ({share})")
+        print(f"   val_accuracy: {metrics['val_accuracy']:.3f}")
+        print(f"   majority baseline: {majority:.3f} "
+              f"({max(dist.values()) if dist else 0}/{total})")
+        print(f"   бьёт baseline: {'да' if metrics['val_accuracy'] > majority else 'НЕТ'}")
+        print("   Прод-модель не тронута (кандидат не подписан HMAC).")
+
+    return metrics
 
 
 # ── Инференс ─────────────────────────────────────────────────
@@ -808,11 +892,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='LSTM Market Regime Classifier')
     parser.add_argument('--train', action='store_true', help='Обучить модель')
+    parser.add_argument('--train-candidate', action='store_true',
+                        help='Обучить кандидата в отдельные файлы (прод не трогать)')
     parser.add_argument('--predict', action='store_true', help='Предсказать текущий режим')
     parser.add_argument('--info', action='store_true', help='Информация о модели')
     args = parser.parse_args()
 
-    if args.train:
+    if args.train_candidate:
+        train_model(candidate=True)
+    elif args.train:
         train_model()
     elif args.predict:
         result = predict_regime()
