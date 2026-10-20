@@ -94,6 +94,11 @@ CLASS_IDX = {name: i for i, name in enumerate(CLASS_NAMES)}
 # ── Фаза 5.4: Feature flag авто-переключения LONG/SHORT ──
 REGIME_AUTO_ENABLED = os.getenv('BYBIT_REGIME_AUTO', '0') == '1'
 
+# 20.10.2026: ниже этого порога доверия гейт режима не применяется вообще.
+# Модель выдавала conf=41% (5 классов, базовая линия 20%) 22 дня подряд —
+# такой уверенности недостаточно, чтобы выключать сторону.
+REGIME_MIN_CONFIDENCE = int(os.getenv('BYBIT_REGIME_MIN_CONFIDENCE', '60'))
+
 # ── Макро-признаки (кеш) ──
 _macro_cache = {'data': None, 'ts': 0}
 _MACRO_CACHE_TTL = 3600  # 1 час
@@ -560,7 +565,9 @@ def train_model(force=False):
 
 # ── Инференс ─────────────────────────────────────────────────
 
-def _fetch_recent_klines(symbol, days=SEQUENCE_LENGTH + 5):
+# +20, а не +5: _calc_features требует n>=20, иначе первые шаги
+# последовательности уходят нулями (модель нулей при обучении не видела).
+def _fetch_recent_klines(symbol, days=SEQUENCE_LENGTH + 20):
     """Загрузить последние N дней свечей."""
     sys.path.insert(0, str(Path(__file__).parent.parent))
     try:
@@ -745,6 +752,16 @@ def get_regime_strategy(regime: str) -> dict:
     return strategy_map.get(regime, {'LONG_ENABLED': True, 'SHORT_ENABLED': True})
 
 
+def apply_confidence_gate(strategy: dict, confidence: int) -> dict:
+    """Ниже порога доверия гейт не применяется — обе стороны разрешены.
+
+    Чистая функция: не трогает сеть, модель и глобальное состояние.
+    """
+    if confidence < REGIME_MIN_CONFIDENCE:
+        return {'LONG_ENABLED': True, 'SHORT_ENABLED': True}
+    return strategy
+
+
 def get_current_regime_strategy() -> dict:
     """Получить текущую стратегию LONG/SHORT на основе предсказанного режима.
 
@@ -775,7 +792,7 @@ def get_current_regime_strategy() -> dict:
         except Exception:
             pass
 
-    strategy = get_regime_strategy(regime)
+    strategy = apply_confidence_gate(get_regime_strategy(regime), confidence)
     return {
         'LONG_ENABLED': strategy['LONG_ENABLED'],
         'SHORT_ENABLED': strategy['SHORT_ENABLED'],
