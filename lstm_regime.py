@@ -719,7 +719,7 @@ def get_regime_strategy(regime: str) -> dict:
 
     Правила:
       TRENDING_UP    → только LONG (SHORT запрещён)
-      TRENDING_DOWN  → только SHORT (LONG запрещён)
+      TRENDING_DOWN  → оба разрешены (LONG не блокируется с 20.10.2026)
       RANGING        → оба разрешены (боковик)
       HIGH_VOL       → оба разрешены (волатильность даёт входы в обе стороны)
       LOW_VOL        → оба разрешены
@@ -733,7 +733,10 @@ def get_regime_strategy(regime: str) -> dict:
 
     strategy_map = {
         'TRENDING_UP':    {'LONG_ENABLED': True,  'SHORT_ENABLED': False},
-        'TRENDING_DOWN':  {'LONG_ENABLED': False, 'SHORT_ENABLED': True},
+        # 20.10.2026: LONG больше не блокируется даунтрендом. Гейт срабатывал на
+        # conf=41% (подброс монеты) и держал выключенной прибыльную сторону
+        # (LONG WR 83%/PF 1.38 против SHORT PF 0.76). SHORT в даунтренде — как было.
+        'TRENDING_DOWN':  {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
         'RANGING':        {'LONG_ENABLED': False, 'SHORT_ENABLED': False},  # v8.1: боковик — не входим
         'HIGH_VOL':       {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
         'LOW_VOL':        {'LONG_ENABLED': True,  'SHORT_ENABLED': True},
