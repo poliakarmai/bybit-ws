@@ -46,7 +46,7 @@ CLASS_IDX = {n: i for i, n in enumerate(CLASS_NAMES)}
 DATA_DIR = Path.home() / '.local' / 'share' / 'bybit-ws'
 MODEL_DIR = DATA_DIR / 'models'
 WORLD_MODEL_PATH = MODEL_DIR / 'lstm_world_model.pt'
-WORLD_SCALER_PATH = MODEL_DIR / 'lstm_world_scaler.pkl'
+WORLD_SCALER_PATH = MODEL_DIR / 'lstm_world_scaler.json'
 
 # ── World Model Architecture ────────────────────────────────────────────
 
@@ -280,16 +280,16 @@ def fetch_training_data(symbols=('BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'LTCUSDT', 'AD
 # ── Training ────────────────────────────────────────────────────────────
 
 # Cache path for fetched data to avoid re-downloading
-WORLD_DATA_CACHE = DATA_DIR / 'lstm_world_data_cache.pkl'
+WORLD_DATA_CACHE = DATA_DIR / 'lstm_world_data_cache.json'
 
 def _load_data_with_cache(symbols=('BTCUSDT', 'ETHUSDT'), days=365, force_refetch=False):
-    """Load training data with pickle cache. Falls back to BTC+ETH 365d if no cache."""
-    import pickle
+    """Load training data with JSON cache. Falls back to BTC+ETH 365d if no cache."""
+    import json
 
     if not force_refetch and WORLD_DATA_CACHE.exists():
         try:
-            with open(WORLD_DATA_CACHE, 'rb') as f:
-                data = pickle.load(f)
+            with open(WORLD_DATA_CACHE, 'r') as f:
+                data = json.load(f)
             print(f"📦 Загружен кеш данных: {len(data)} символов, "
                   f"{sum(len(d['closes']) for d in data)} свечей из {WORLD_DATA_CACHE}")
             return data
@@ -305,8 +305,8 @@ def _load_data_with_cache(symbols=('BTCUSDT', 'ETHUSDT'), days=365, force_refetc
     # Save to cache
     WORLD_DATA_CACHE.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(WORLD_DATA_CACHE, 'wb') as f:
-            pickle.dump(data, f)
+        with open(WORLD_DATA_CACHE, 'w') as f:
+            json.dump(data, f)
         print(f"💾 Кеш сохранён: {WORLD_DATA_CACHE}")
     except Exception as e:
         print(f"⚠️ Не удалось сохранить кеш: {e}")
@@ -447,10 +447,10 @@ def train_world_model(lambda_world=0.03, epochs=200, force=False):
     print(f"💾 Best модель сохранена: {WORLD_MODEL_PATH}")
     print(f"   Latest модель (epoch {epochs}): {latest_path}")
 
-    # Сохранить скейлер
-    import pickle
-    with open(WORLD_SCALER_PATH, 'wb') as f:
-        pickle.dump({'min_': scaler.min_, 'max_': scaler.max_}, f)
+    # Сохранить скейлер (JSON, not pickle)
+    import json as _json
+    with open(WORLD_SCALER_PATH, 'w') as f:
+        _json.dump({'min_': scaler.min_.tolist(), 'max_': scaler.max_.tolist()}, f)
 
     return model, best_val_acc, best_world_mse
 
@@ -474,9 +474,9 @@ def predict_world(symbol='BTCUSDT', days=30):
         return None
 
     try:
-        import pickle
-        with open(WORLD_SCALER_PATH, 'rb') as f:
-            scaler_params = pickle.load(f)
+        import json
+        with open(WORLD_SCALER_PATH, 'r') as f:
+            scaler_params = json.load(f)
     except Exception:
         return None
 
@@ -566,9 +566,9 @@ def _ensure_world_model():
     ckpt = torch.load(WORLD_MODEL_PATH, map_location='cpu')
     model.load_state_dict(ckpt['model_state'])
 
-    import pickle
-    with open(WORLD_SCALER_PATH, 'rb') as f:
-        scaler_params = pickle.load(f)
+    import json
+    with open(WORLD_SCALER_PATH, 'r') as f:
+        scaler_params = json.load(f)
 
     _world_model_instance = model
     _world_scaler_params = scaler_params
