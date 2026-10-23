@@ -365,6 +365,27 @@ def _get_position(symbol: str) -> dict | None:
     return None
 
 
+def _apply_manual_leverage(symbol, leverage):
+    """Ручной вход: плечо ставим ТОЛЬКО если Алексей дал его явно.
+
+    None → на биржу ничего не отправляем (никаких риск-капов и дефолтов из конфига:
+    ручные сделки — его решения, а не наша стратегия).
+
+    Returns:
+        leverage как есть, либо None если не задано.
+    """
+    if leverage is None:
+        return None
+    data = _api_call('POST', '/v5/position/set-leverage', {
+        'category': 'linear', 'symbol': symbol,
+        'buyLeverage': str(leverage), 'sellLeverage': str(leverage),
+    })
+    if not isinstance(data, dict) or data.get('retCode') not in (0, 110043):
+        err = data.get('retMsg', '?') if isinstance(data, dict) else 'no response'
+        add_alert('LEVERAGE', f'⚠️ {symbol}: set-leverage {leverage}x не применился — {err}')
+    return leverage
+
+
 def _get_auth_token() -> str:
     """Получить RPC токен. Автогенерация при первом запуске (SQLite)."""
     try:
@@ -1426,6 +1447,16 @@ class RPCHandler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 return _error(self, 'Invalid tp', 'tp must be a number', 400)
 
+        # ── Плечо (ручной путь): только явное, без дефолтов из конфига ──
+        leverage = body.get('leverage')
+        if leverage is not None:
+            try:
+                leverage = int(leverage)
+            except (ValueError, TypeError):
+                return _error(self, 'Invalid leverage', 'leverage must be an integer', 400, 'invalid_leverage')
+            if leverage < 1 or leverage > 100:
+                return _error(self, 'Invalid leverage', 'Must be 1-100', 400, 'invalid_leverage')
+
         # ── Проверка существующей позиции ──
         existing = _get_position(symbol)
         if existing:
@@ -1441,12 +1472,16 @@ class RPCHandler(BaseHTTPRequestHandler):
                 'symbol': symbol,
                 'side': side,
                 'qty': qty,
+                'leverage': leverage,
                 'sl': _round_price(sl) if sl else None,
                 'tp': _round_price(tp) if tp else None,
                 'confirm_required': True,
                 'message': 'Send with confirm: true to execute',
             }
             return _json_response(self, preview)
+
+        # ── Плечо Алексея → биржа (до ордера). Не задал — ничего не навязываем ──
+        _apply_manual_leverage(symbol, leverage)
 
         # ── Размещение ордера ──
         # Валидация qty
@@ -1526,15 +1561,6 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         order_id = order_result.get('result', {}).get('orderId', 'unknown')
 
-        # ── Пометить как ручную: self-learn исключает, но SL/TP бот ставит сам ──
-        try:
-            from .manual_positions import mark_manual_position
-            _reason = (body.get('reason') or 'manual').strip()[:100]
-            mark_manual_position(symbol, side=side, note=_reason, auto_sltp=True)
-        except Exception as e:
-            from .alerts import log_event
-            log_event(f'⚠️ mark_manual_position failed for {symbol} {side}: {e}')
-
         result = {
             'status': 'ok',
             'symbol': symbol,
@@ -1550,6 +1576,22 @@ class RPCHandler(BaseHTTPRequestHandler):
             pos = _get_position(symbol)
             if pos is not None:
                 break
+
+        # ── Пометить как ручную: self-learn исключает, но SL/TP бот ставит сам.
+        #    Плечо — фактическое (позиция уже видна), одним вызовом: второй вызов
+        #    перезаписал бы note и auto_sltp=True. ──
+        actual_lev = pos.get('leverage') if pos else None
+        result['leverage'] = actual_lev if actual_lev is not None else leverage
+        if leverage is not None:
+            result['leverage_requested'] = leverage
+        try:
+            from .manual_positions import mark_manual_position
+            _reason = (body.get('reason') or 'manual').strip()[:100]
+            mark_manual_position(symbol, side=side, note=_reason, auto_sltp=True,
+                                 leverage=result['leverage'])
+        except Exception as e:
+            from .alerts import log_event
+            log_event(f'⚠️ mark_manual_position failed for {symbol} {side}: {e}')
 
         # ── Размещение SL ──
         if sl is not None and sl > 0:

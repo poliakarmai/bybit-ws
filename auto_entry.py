@@ -2,7 +2,7 @@
 import json, math, os, time
 from . import BYBIT_CLI, DATA_DIR, MAX_POSITION_VALUE
 from . import safe_run
-from .api import bybit, get_bb_data
+from .api import bybit, get_bb_data, set_leverage, verify_leverage
 from .alerts import log_event, add_alert
 from .config import Config
 from .position_sizing import margin_for_strategy
@@ -458,6 +458,22 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     }
 
 
+def _strategy_leverage(side='Buy'):
+    """Плечо стороны из конфига стратегии (long/short). Дефолт 3 — как в config.py."""
+    strat = Config().strategy.long if side == 'Buy' else Config().strategy.short
+    return int(strat.get('leverage', 3))
+
+
+def apply_entry_leverage(sym, side='Buy'):
+    """Единая точка применения плеча перед авто-входом: конфиг → set-leverage.
+
+    Возвращает запрошенное плечо (его же надо сверять после входа).
+    """
+    lev = _strategy_leverage(side)
+    set_leverage(sym, lev)
+    return lev
+
+
 def auto_entry_scan(positions):
     """Скрининг и авто-вход по 9-метричному скорингу (v4.0 + LSTM-режим 5.4)."""
     entries = []
@@ -788,11 +804,16 @@ def auto_entry_scan(positions):
             except Exception as e:
                 log_event(f'⚠️ daily-limit check failed for {sym}: {e}')
 
+            # ── Плечо стратегии на биржу ДО ордера (этап 2 аудита) ──
+            lev = apply_entry_leverage(sym, 'Buy')
+
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
                     'positionIdx': idx, 'timeInForce': 'GTC'}
             result = bybit('POST', '/v5/order/create', body)
             if result and result.get('retCode') == 0:
+                # ── Сверка фактического плеча (mismatch → алерт) ──
+                verify_leverage(sym, lev)
                 # ── Фаза 4.3.2: Telegram-алерт при входе ──
                 mtf_info = ''
                 if 'mtf' in s:
@@ -811,7 +832,7 @@ def auto_entry_scan(positions):
                     f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info}{regime_info}{rl_info})'
                 )
                 add_alert('ENTRY',
-                    f'🚀 LONG {sym}: вход ${price:.4f} ×{qty} ({3}x) | '
+                    f'🚀 LONG {sym}: вход ${price:.4f} ×{qty} ({lev}x) | '
                     f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')

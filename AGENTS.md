@@ -255,7 +255,7 @@ systemctl --user restart bybit-ws-async
 | Эндпоинт | Назначение | Параметры |
 |----------|-----------|-----------|
 | `/scan` | GridSignal-скан | `{mode, interval, symbol?}` |
-| `/enter` | Вход в позицию | `{symbol, side, qty, sl?, tp?, confirm}` |
+| `/enter` | Вход в позицию | `{symbol, side, qty, sl?, tp?, leverage?, confirm}` — `leverage` (1–100) необязателен: передан → ставится ровно он (решение Алексея, без капов), не передан → плечо не навязывается |
 | `/close` | Закрыть позицию | `{symbol}` |
 | `/calc_qty` | Расчёт размера позиции | `{symbol, risk_pct, leverage}` |
 | `/move_sl` | Передвинуть SL | `{symbol, stop_loss}` |
@@ -281,7 +281,7 @@ systemctl --user restart bybit-ws-async
 | `get_positions()` | Позиции + PnL |
 | `get_metrics()` | TP/SL/входы за день |
 | `get_risk_status()` | Лимиты + CB |
-| `place_entry(symbol, side, qty, sl?, tp?, order_type?, price?)` | Вход. **Плечо не задаётся:** в конфиге стратегии `leverage: 3` (`config.py:44,56`), но MCP-вход его не применяет → позиция открывается на биржевом дефолте символа (прецедент 18.10: QUSDT — 10x, хотя просили 5x; стоп 0.158 оказался за ликвидацией ~0.1483). Проверять `get_positions` сразу после входа |
+| `place_entry(symbol, side, qty, sl?, tp?, order_type?, price?, leverage?)` | Вход. **Плечо:** параметр `leverage` (1–100), если не задан — берётся из конфига стратегии (`strategy.long/short.leverage`, `config.py:44,56`). После входа плечо читается обратно из ответа `/enter` (fallback — `/rpc/positions`) и печатается `Leverage: Nx (requested Mx)`; при расхождении — `⚠️ LEVERAGE MISMATCH`. Авто-ветка (`auto_entry`/`auto_short`) выставляет плечо сама через `api.set_leverage()` перед ордером. Ручной `/enter` плечо навязывает только если оно передано явно |
 | `get_journal()` | Журнал (FIFO, bias) |
 
 ## LSTM World Model (v8.1)

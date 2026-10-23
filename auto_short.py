@@ -44,7 +44,7 @@ import math
 import os
 import time
 
-from .api import bybit, get_bb_data, fetch_orders
+from .api import bybit, get_bb_data, fetch_orders, set_leverage, verify_leverage
 from .alerts import log_event, add_alert
 from .config import Config
 from . import DATA_DIR
@@ -658,6 +658,8 @@ def check_auto_short(positions):
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
+            # ── Плечо стратегии на биржу ДО ордера (этап 2 аудита) ──
+            set_leverage(sym, SHORT_LEVERAGE)
             order = None
             for pos_idx in (0, 1, 2):
                 order = bybit('POST', '/v5/order/create', {
@@ -675,6 +677,8 @@ def check_auto_short(positions):
             if not order or order.get('retCode') != 0:
                 log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?") if order else "no response"}')
                 continue
+            # ── Сверка фактического плеча (mismatch → алерт) ──
+            verify_leverage(sym, SHORT_LEVERAGE)
 
             # ── Canary: маркируем SHORT-вход для матчинга при закрытии ──
             try:

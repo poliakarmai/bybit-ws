@@ -280,6 +280,10 @@ async def list_tools() -> list[Tool]:
                         "type": "number",
                         "description": "Limit price (required for Limit orders)",
                     },
+                    "leverage": {
+                        "type": "integer",
+                        "description": "Leverage 1-100. Omitted → from strategy config (strategy.long/short.leverage). Actual leverage is read back after entry; mismatch is reported",
+                    },
                 },
                 "required": ["symbol", "side", "qty"],
             },
@@ -389,6 +393,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         tp = arguments.get("tp")
         order_type = arguments.get("order_type", "Market")
         price = arguments.get("price")
+        leverage = arguments.get("leverage")
+        if leverage is None:
+            # Дефолт — плечо стратегии из конфига (Buy → long, Sell → short)
+            try:
+                from bybit_ws.config import Config
+                _strat = Config().strategy.long if side == "Buy" else Config().strategy.short
+                leverage = int(_strat.get("leverage", 3))
+            except Exception:
+                leverage = None
         
         # ATR-сайзинг: если qty не указан — рассчитать автоматически
         if qty <= 0:
@@ -422,6 +435,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 qty = 0
         
         body = {"symbol": symbol, "side": side, "qty": qty, "confirm": True}
+        if leverage is not None:
+            body["leverage"] = leverage
         
         # Auto-SL/TP из BB если не заданы явно
         if not sl or not tp:
@@ -463,6 +478,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 f")\\n"
                 f"   Order ID: {data.get('order_id', '?')}\\n"
             )
+            # Фактическое плечо: из ответа /enter, иначе из живых позиций
+            actual_lev = data.get("leverage")
+            if actual_lev is None:
+                try:
+                    for _p in (_rpc("rpc/positions") or []):
+                        if isinstance(_p, dict) and _p.get("symbol") == symbol:
+                            actual_lev = _p.get("leverage")
+                            break
+                except Exception:
+                    actual_lev = None
+            text += f"\n   Leverage: {actual_lev if actual_lev is not None else '?'}x"
+            if leverage is not None:
+                text += f" (requested {leverage}x)"
+            text += "\n"
+            if (leverage is not None and actual_lev is not None
+                    and int(float(actual_lev)) != int(leverage)):
+                text += (f"   ⚠️ LEVERAGE MISMATCH: запрошено {leverage}x, на бирже {actual_lev}x — "
+                         f"SL/ликвидация считаются от другого плеча\n")
             if data.get("sl"):
                 text += f"   SL: ${data['sl']['price']} ({data['sl']['status']})\\n"
             if data.get("tp"):

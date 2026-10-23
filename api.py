@@ -5,7 +5,7 @@ v5: замена subprocess(BYBIT_CLI) на httpx (код-ревью 14.06.2026)
 """
 import hashlib, hmac, json, os, time
 import httpx
-from .alerts import log_event
+from .alerts import log_event, add_alert
 
 # === Credentials (читаются один раз при импорте) ===
 _API_KEY = None
@@ -452,6 +452,55 @@ def place_order(symbol, side, order_type, qty, price=None, reduce_only=False, po
     if reduce_only:
         body['reduceOnly'] = True
     return bybit('POST', '/v5/order/create', body)
+
+
+def set_leverage(symbol, leverage):
+    """Выставить плечо ДО входа: POST /v5/position/set-leverage.
+
+    Единая точка применения плеча для авто-ветки (auto_entry / auto_short).
+    Fail-open: не смогли выставить — пишем событие и идём дальше, вход не блокируем
+    (плечо проверит verify_leverage после входа).
+
+    Returns:
+        True если биржа подтвердила (110043 «not modified» = уже такое плечо).
+    """
+    try:
+        lev = int(leverage)
+    except (TypeError, ValueError):
+        log_event(f'⚠️ set-leverage {symbol}: некорректное плечо {leverage!r}')
+        return False
+    data = bybit('POST', '/v5/position/set-leverage', {
+        'category': 'linear', 'symbol': symbol,
+        'buyLeverage': str(lev), 'sellLeverage': str(lev),
+    })
+    ret = data.get('retCode') if isinstance(data, dict) else None
+    if ret in (0, 110043):
+        return True
+    err = data.get('retMsg', '?') if isinstance(data, dict) else 'no response'
+    log_event(f'⚠️ set-leverage {symbol} {lev}x: {err}')
+    return False
+
+
+def verify_leverage(symbol, expected):
+    """Прочитать фактическое плечо открытой позиции; при mismatch — алерт.
+
+    Returns:
+        {'requested': int|None, 'actual': float|None, 'mismatch': bool}
+    """
+    data = bybit('GET', f'/v5/position/list?category=linear&symbol={symbol}')
+    actual = None
+    if isinstance(data, dict) and data.get('retCode') == 0:
+        for p in data.get('result', {}).get('list', []):
+            if float(p.get('size', 0)) > 0:
+                actual = float(p.get('leverage', 0))
+                break
+    mismatch = actual is not None and expected is not None and int(actual) != int(expected)
+    if mismatch and actual is not None and expected is not None:
+        msg = (f'⚠️ LEVERAGE MISMATCH {symbol}: просили {int(expected)}x, '
+               f'на бирже {actual:g}x — SL/ликвидация считаются от другого плеча')
+        log_event(msg)
+        add_alert('LEVERAGE', msg)
+    return {'requested': expected, 'actual': actual, 'mismatch': mismatch}
 
 
 def get_bb_data(symbol, interval='D'):
