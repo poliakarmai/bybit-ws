@@ -73,3 +73,33 @@ def test_lp_report_funding_line():
         finally:
             lp_report.DB = old
         assert '| Funding (факт' in md and '$-0.00 |' in md.split('Funding')[1][:60]
+
+
+# ── Регресс этапа 1.5: пагинация не теряет записи ─────────────────────────
+
+def _fake_exchange(total=120):
+    """Фейковый transaction-log: 120 записей, по 50 на страницу, курсор = смещение.
+
+    Времена — с ненулевыми миллисекундами (как у Bybit): именно на них старый
+    сдвиг окна «до секунды» терял записи.
+    """
+    now = 1792750000
+    recs = [{'id': f'r{i}', 'type': 'SETTLEMENT', 'symbol': 'QUSDT', 'change': '-0.01',
+             'transactionTime': str((now - i * 60) * 1000 + 37)} for i in range(total)]
+
+    def fetch(method, path):
+        off = int(path.split('cursor=')[1]) if 'cursor=' in path else 0
+        page = recs[off:off + 50]
+        nxt = str(off + 50) if off + 50 < total else ''
+        return {'retCode': 0, 'result': {'list': page, 'nextPageCursor': nxt}}
+
+    return recs, fetch
+
+
+def test_iter_window_loses_nothing():
+    """Все записи доходят: курсорная пагинация, дедупа нет, потерь нет."""
+    recs, fetch = _fake_exchange()
+    start, end = 1792750000 - 6 * 86400, 1792750001
+    got = list(fb._iter_window(start, end, fetch=fetch))
+    assert len(got) == len(recs), f'получено {len(got)} из {len(recs)}'
+    assert len({r['id'] for r in got}) == len(recs), 'есть дубли'

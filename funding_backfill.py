@@ -6,9 +6,10 @@
 таких записей всегда '0'. Поэтому фандинг берём из `change`, а cashFlow
 TRADE (для сверки) — из `cashFlow`.
 
-Пагинация: к одному окну Bybit отдаёт максимум ~50 записей, поэтому после
-каждой страницы окно сдвигаем вперёд (endTime = время самой старой записи).
-Иначе в активные дни данные середины окна теряются.
+Пагинация: не своя. Окна по 6 дней (лимит биржи 7, иначе retCode 10001) и
+страницы по `nextPageCursor` — берётся из `reconcile.iter_log`. Прежний сдвиг
+окна до секунды терял записи с ms > 0 (замер 23.10: 19 записей на 6-дневном
+окне, 290 против 309 уникальных), из-за чего `funding_log` был недобран.
 
 Запуск:
     set -a && . ~/.config/bybit-ws/env && set +a
@@ -21,35 +22,13 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, '/home/openclaw')
-from bybit_ws.api import bybit  # noqa: E402
 from bybit_ws.state_db import StateDB  # noqa: E402
 
-WINDOW = 7 * 86400
-MAX_PAGES = 500  # ponytail: ~50 записей/страница → до 25k записей на период
-
-
-def _iter_window(start: int, end: int):
-    """Все записи transaction-log за (start, end]. Окно ≤7 дней, сдвиг после каждой страницы."""
-    cur_end = end
-    for _ in range(MAX_PAGES):
-        cur_start = max(start, cur_end - WINDOW)
-        q = (f'accountType=UNIFIED&category=linear&startTime={cur_start * 1000}'
-             f'&endTime={cur_end * 1000}&limit=50')
-        j = bybit('GET', '/v5/account/transaction-log?' + q)
-        if not j or j.get('retCode') != 0:
-            raise RuntimeError(f'transaction-log: {j and j.get("retMsg")}')
-        page = j['result'].get('list') or []
-        for it in page:
-            yield it
-        if len(page) < 50:
-            return
-        oldest = min(int(it['transactionTime']) for it in page) // 1000
-        if oldest >= cur_end:  # страница целиком на границе — не зацикливаемся
-            oldest = cur_end - 1
-        cur_end = oldest
-        if cur_end <= cur_start:
-            return
-    raise RuntimeError('transaction-log: слишком много страниц, окно не сходится')
+def _iter_window(start: int, end: int, fetch=None):
+    """Все записи transaction-log за [start, end). Одна реализация пагинации на проект —
+    `reconcile.iter_log` (6-дневные окна + nextPageCursor + дедуп по id)."""
+    from reconcile import iter_log
+    yield from iter_log(start, end, fetch=fetch)
 
 
 def fetch_funding(start: int, end: int):

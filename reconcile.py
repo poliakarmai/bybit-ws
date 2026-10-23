@@ -361,7 +361,7 @@ def main():
     ap.add_argument('--offline', action='store_true',
                     help='без сети: прочитать сохранённый отчёт')
     a = ap.parse_args()
-    out_path = os.path.join(OUT_DIR, f'reconcile-{datetime.now(timezone.utc):%Y-%m-%d}.json')
+    out_path = os.path.join(OUT_DIR, f'reconcile-{datetime.now(timezone.utc):%Y-%m-%d}-{a.days}d.json')
 
     if a.offline:
         if not os.path.exists(out_path):
