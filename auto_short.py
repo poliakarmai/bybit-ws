@@ -670,7 +670,7 @@ def check_auto_short(positions):
                     'qty': str(qty),
                     'price': str(limit_price),
                     'positionIdx': pos_idx,
-                    'timeInForce': 'GTC',
+                    'timeInForce': 'PostOnly',
                 })
                 if order and order.get('retCode') == 0:
                     break

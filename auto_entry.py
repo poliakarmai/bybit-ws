@@ -809,8 +809,13 @@ def auto_entry_scan(positions):
 
             body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
                     'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
-                    'positionIdx': idx, 'timeInForce': 'GTC'}
+                    'positionIdx': idx, 'timeInForce': 'PostOnly'}
+            # PostOnly: вход только maker-ом (0.02% вместо 0.055%). Если ордер
+            # пересекает спред, биржа его отклоняет — вход теряется, а не
+            # оплачивается taker-комиссией. Замер: fee_stats.py
             result = bybit('POST', '/v5/order/create', body)
+            if result and result.get('retCode') != 0:
+                log_event(f'⛔ POST-ONLY LONG {sym}: {result.get("retMsg", "?")} — вход не открыт')
             if result and result.get('retCode') == 0:
                 # ── Сверка фактического плеча (mismatch → алерт) ──
                 verify_leverage(sym, lev)
