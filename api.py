@@ -421,6 +421,22 @@ def cancel_order(symbol, order_id):
     return False
 
 
+def cancel_all_orders():
+    """Отменить ВСЕ открытые ордера (linear, USDT).
+
+    Endpoint: POST /v5/order/cancel-all
+    Используется в kill switch — снимает лимитки, PostOnly и стопы одним вызовом.
+    """
+    data = bybit('POST', '/v5/order/cancel-all', {'category': 'linear', 'settleCoin': 'USDT'})
+    if data and data.get('retCode') == 0:
+        n = len((data.get('result') or {}).get('list') or [])
+        log_event(f'🗑️ cancel-all: снято ордеров={n}')
+        return True, n
+    err = data.get('retMsg', '?') if data else 'no response'
+    log_event(f'❌ cancel-all ошибка: {err}')
+    return False, 0
+
+
 def get_bb_lower(symbol, interval='D'):
     """Получить нижнюю полосу Боллинджера (SMA - 2σ).
 

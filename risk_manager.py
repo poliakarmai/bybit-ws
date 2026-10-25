@@ -1049,25 +1049,54 @@ def check_correlation_panic(positions: dict) -> Optional[str]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def emergency_close_all(reason: str, positions: dict = None) -> dict:
-    """Закрыть ВСЕ позиции по рынку. Вызывается из RPC /emergency_close и /kill_switch.
+    """Закрыть ВСЕ позиции по рынку + отменить ВСЕ открытые ордера.
+    Вызывается из RPC /emergency_close и /kill_switch.
 
     Args:
         reason: причина закрытия (для лога)
         positions: словарь позиций {symbol: {...}}. Если None — загрузит сам.
 
     Returns:
-        {'closed': int, 'failed': int, 'message': str}
+        {'closed': int, 'failed': int, 'orders_cancelled': int,
+         'positions_left': int, 'orders_left': int, 'message': str}
     """
-    from .api import bybit, fetch_positions
+    from .api import bybit, fetch_positions, fetch_orders, cancel_all_orders
+    from .alerts import log_event, add_alert
 
+    # 1. Сначала снимаем ВСЕ открытые ордера — иначе они переживут закрытие
+    orders_cancelled = 0
+    try:
+        ok, orders_cancelled = cancel_all_orders()
+        if not ok:
+            log_event(f'⚠️ kill switch: cancel-all вернул ошибку, продолжаю закрытие')
+    except Exception as e:
+        log_event(f'⚠️ kill switch: cancel-all exception: {e}')
+
+    # 2. Закрываем позиции
     if positions is None:
         try:
             positions = fetch_positions()
         except Exception as e:
-            return {'closed': 0, 'failed': 0, 'message': f'fetch_positions error: {e}'}
+            return {'closed': 0, 'failed': 0, 'orders_cancelled': orders_cancelled,
+                    'positions_left': -1, 'orders_left': -1,
+                    'message': f'fetch_positions error: {e}'}
 
     if not positions:
-        return {'closed': 0, 'failed': 0, 'message': 'No open positions'}
+        msg = f'No open positions, orders_cancelled={orders_cancelled}'
+        log_event(f'🚨 EMERGENCY CLOSE: {reason} — {msg}')
+        # Верифицируем, что ордера реально сняты
+        time.sleep(1)
+        try:
+            ord_left = fetch_orders() or {}
+            orders_left = len(ord_left)
+        except Exception:
+            orders_left = -1
+        if orders_left > 0:
+            add_alert('STOP',
+                f'🚨 KILL SWITCH VERIFY: позиций нет, но остались ордера={orders_left} '
+                f'(cancel-all сообщил {orders_cancelled}) — ПРОВЕРЬ РУКАМИ')
+        return {'closed': 0, 'failed': 0, 'orders_cancelled': orders_cancelled,
+                'positions_left': 0, 'orders_left': orders_left, 'message': msg}
 
     closed = 0
     failed = 0
@@ -1109,10 +1138,29 @@ def emergency_close_all(reason: str, positions: dict = None) -> dict:
         msg += f' errors={errors[:3]}'
 
     # Логируем
-    try:
-        from .alerts import log_event
-        log_event(f'🚨 EMERGENCY CLOSE: {reason} — {msg}')
-    except Exception:
-        pass
+    log_event(f'🚨 EMERGENCY CLOSE: {reason} — {msg}')
 
-    return {'closed': closed, 'failed': failed, 'message': msg}
+    # 3. Повторная проверка: позиции и ордера должны быть нулевыми
+    time.sleep(1)  # даём бирже догнать
+    try:
+        pos_left = fetch_positions() or {}
+        ord_left = fetch_orders() or {}
+        positions_left = sum(1 for p in pos_left.values()
+                             if isinstance(p, dict) and float(p.get('size', 0) or 0) > 0)
+        orders_left = len(ord_left)
+    except Exception as e:
+        positions_left = -1
+        orders_left = -1
+        log_event(f'⚠️ kill switch: verify exception: {e}')
+
+    # Эскалация если что-то осталось или были ошибки
+    if failed > 0 or positions_left > 0 or orders_left > 0:
+        add_alert('STOP',
+            f'🚨 KILL SWITCH VERIFY FAILED: closed={closed} failed={failed} '
+            f'positions_left={positions_left} orders_left={orders_left} '
+            f'orders_cancelled={orders_cancelled} — ПРОВЕРЬ РУКАМИ')
+
+    return {'closed': closed, 'failed': failed,
+            'orders_cancelled': orders_cancelled,
+            'positions_left': positions_left, 'orders_left': orders_left,
+            'message': msg}
