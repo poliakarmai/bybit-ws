@@ -21,6 +21,7 @@ WAL-режим: читатели не блокируют писателей.
 
 import os
 import sqlite3
+import threading
 import json
 import time
 from datetime import datetime
@@ -147,18 +148,25 @@ class StateDB:
         self.path = path or DB_PATH
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self._conn = None
+        # ponytail: один глобальный RLock на все writes (asyncio-цикл + RPC-поток);
+        # per-thread lock, если throughput станет узким местом.
+        # RLock, а не Lock: conn ленивый, первый write берёт lock и для init.
+        self._lock = threading.RLock()
 
     @property
     def conn(self):
-        """Ленивое подключение (thread-local не нужно — bybit-ws однопоточный)."""
+        """Ленивое подключение. Соединение одно на процесс (check_same_thread=False),
+        писатели из разных потоков сериализуются self._lock в write-методах."""
         if self._conn is None:
-            self._conn = sqlite3.connect(self.path, check_same_thread=False)
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("PRAGMA busy_timeout=5000")
-            self._conn.executescript(SCHEMA)
-            self._migrate()
-            self._conn.commit()
+            with self._lock:
+                if self._conn is None:
+                    self._conn = sqlite3.connect(self.path, check_same_thread=False)
+                    self._conn.execute("PRAGMA journal_mode=WAL")
+                    self._conn.execute("PRAGMA synchronous=NORMAL")
+                    self._conn.execute("PRAGMA busy_timeout=5000")
+                    self._conn.executescript(SCHEMA)
+                    self._migrate()
+                    self._conn.commit()
         return self._conn
 
     def _migrate(self):
@@ -200,18 +208,19 @@ class StateDB:
                   bb_pct=None, rsi=None, entry_reason=None,
                   dca_count=0, partial_tp_count=0, exit_reason=None, hold_hours=None,
                   manual=0, leverage=None, external_id=None):
-        self.conn.execute("""INSERT INTO trade_history
-            (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at,
-             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours, manual,
-             leverage, external_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, side, strategy, entry_price, exit_price, size, pnl,
-             fees, entry_at or int(time.time()),
-             int(time.time()) if closed_at is _NOW else closed_at,
-             bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours,
-             int(manual), leverage, external_id))
-        self.conn.commit()
-        return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        with self._lock:
+            self.conn.execute("""INSERT INTO trade_history
+                (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at,
+                 bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours, manual,
+                 leverage, external_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (symbol, side, strategy, entry_price, exit_price, size, pnl,
+                 fees, entry_at or int(time.time()),
+                 int(time.time()) if closed_at is _NOW else closed_at,
+                 bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours,
+                 int(manual), leverage, external_id))
+            self.conn.commit()
+            return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     def record_entry(self, symbol, side, strategy, entry_price, size,
                      bb_pct=None, rsi=None, entry_reason=None):
@@ -231,45 +240,50 @@ class StateDB:
 
     def update_trade_exit(self, trade_id, exit_price, pnl, exit_reason=None, hold_hours=None):
         """Обновить сделку при закрытии."""
-        self.conn.execute("""UPDATE trade_history
-            SET exit_price=?, pnl=?, exit_reason=?, hold_hours=?, closed_at=?
-            WHERE id=?""",
-            (exit_price, pnl, exit_reason, hold_hours, int(time.time()), trade_id))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("""UPDATE trade_history
+                SET exit_price=?, pnl=?, exit_reason=?, hold_hours=?, closed_at=?
+                WHERE id=?""",
+                (exit_price, pnl, exit_reason, hold_hours, int(time.time()), trade_id))
+            self.conn.commit()
 
     def update_trade_dca(self, trade_id):
         """Инкрементировать счётчик DCA."""
-        self.conn.execute(
-            "UPDATE trade_history SET dca_count = dca_count + 1 WHERE id=?", (trade_id,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE trade_history SET dca_count = dca_count + 1 WHERE id=?", (trade_id,))
+            self.conn.commit()
 
     def update_trade_partial_tp(self, trade_id):
         """Инкрементировать счётчик partial TP."""
-        self.conn.execute(
-            "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 WHERE id=?", (trade_id,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 WHERE id=?", (trade_id,))
+            self.conn.commit()
 
     def inc_dca_for_symbol(self, symbol):
         """Инкрементировать DCA для последней незакрытой сделки по символу."""
-        self.conn.execute(
-            # подзапрос вместо UPDATE..ORDER BY..LIMIT: тот требует сборки SQLite
-            # с SQLITE_ENABLE_UPDATE_DELETE_LIMIT (в части сборок — syntax error,
-            # а вызывающий код глотает исключение и счётчик молча не растёт)
-            "UPDATE trade_history SET dca_count = dca_count + 1 WHERE id = ("
-            "SELECT id FROM trade_history WHERE symbol=? AND closed_at IS NULL "
-            "ORDER BY id DESC LIMIT 1)", (symbol,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                # подзапрос вместо UPDATE..ORDER BY..LIMIT: тот требует сборки SQLite
+                # с SQLITE_ENABLE_UPDATE_DELETE_LIMIT (в части сборок — syntax error,
+                # а вызывающий код глотает исключение и счётчик молча не растёт)
+                "UPDATE trade_history SET dca_count = dca_count + 1 WHERE id = ("
+                "SELECT id FROM trade_history WHERE symbol=? AND closed_at IS NULL "
+                "ORDER BY id DESC LIMIT 1)", (symbol,))
+            self.conn.commit()
 
     def inc_partial_tp_for_symbol(self, symbol):
         """Инкрементировать partial TP для последней незакрытой сделки по символу."""
-        self.conn.execute(
-            # подзапрос вместо UPDATE..ORDER BY..LIMIT: тот требует сборки SQLite
-            # с SQLITE_ENABLE_UPDATE_DELETE_LIMIT (в части сборок — syntax error,
-            # а вызывающий код глотает исключение и счётчик молча не растёт)
-            "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 WHERE id = ("
-            "SELECT id FROM trade_history WHERE symbol=? AND closed_at IS NULL "
-            "ORDER BY id DESC LIMIT 1)", (symbol,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                # подзапрос вместо UPDATE..ORDER BY..LIMIT: тот требует сборки SQLite
+                # с SQLITE_ENABLE_UPDATE_DELETE_LIMIT (в части сборок — syntax error,
+                # а вызывающий код глотает исключение и счётчик молча не растёт)
+                "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 WHERE id = ("
+                "SELECT id FROM trade_history WHERE symbol=? AND closed_at IS NULL "
+                "ORDER BY id DESC LIMIT 1)", (symbol,))
+            self.conn.commit()
 
     def get_trades(self, symbol=None, since=None, limit=100):
         q = "SELECT * FROM trade_history WHERE 1=1"
@@ -299,17 +313,18 @@ class StateDB:
 
     def save_positions(self, positions_dict):
         """Сохранить снепшот позиций (замена positions.json)."""
-        now = int(time.time())
-        with self.conn:
-            self.conn.execute("DELETE FROM positions")
-            for sym, p in positions_dict.items():
-                self.conn.execute("""INSERT OR REPLACE INTO positions
-                    (symbol, side, entry, mark, size, leverage, stop_loss, take_profit,
-                     position_idx, upnl, liq_price, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (sym, p.get('side'), p.get('entry'), p.get('mark'), p.get('size'),
-                     p.get('leverage'), p.get('stopLoss'), p.get('takeProfit'),
-                     p.get('positionIdx', 0), p.get('upnl', 0), p.get('liqPrice'), now))
+        with self._lock:
+            now = int(time.time())
+            with self.conn:
+                self.conn.execute("DELETE FROM positions")
+                for sym, p in positions_dict.items():
+                    self.conn.execute("""INSERT OR REPLACE INTO positions
+                        (symbol, side, entry, mark, size, leverage, stop_loss, take_profit,
+                         position_idx, upnl, liq_price, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (sym, p.get('side'), p.get('entry'), p.get('mark'), p.get('size'),
+                         p.get('leverage'), p.get('stopLoss'), p.get('takeProfit'),
+                         p.get('positionIdx', 0), p.get('upnl', 0), p.get('liqPrice'), now))
 
     def get_positions(self):
         """Получить все открытые позиции."""
@@ -320,13 +335,14 @@ class StateDB:
 
     def save_short_state(self, symbol, data):
         """Сохранить состояние автошорта (замена short_positions.json)."""
-        self.conn.execute("""INSERT OR REPLACE INTO short_state
-            (symbol, last_short_ts, entry_price, qty, bb_pct, is_junk, dca_level, state_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, data.get('last_short_ts'), data.get('entry_price'), data.get('qty'),
-             data.get('bb_pct'), int(data.get('is_junk', False)), data.get('dca_level', 0),
-             json.dumps(data)))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("""INSERT OR REPLACE INTO short_state
+                (symbol, last_short_ts, entry_price, qty, bb_pct, is_junk, dca_level, state_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (symbol, data.get('last_short_ts'), data.get('entry_price'), data.get('qty'),
+                 data.get('bb_pct'), int(data.get('is_junk', False)), data.get('dca_level', 0),
+                 json.dumps(data)))
+            self.conn.commit()
 
     def get_short_state(self, symbol=None):
         """Получить состояние автошорта для символа или все."""
@@ -349,16 +365,17 @@ class StateDB:
 
     def save_pump_state(self, symbol, data):
         """Сохранить состояние пампа (замена pumps.json)."""
-        self.conn.execute("""INSERT OR REPLACE INTO pump_state
-            (symbol, first_seen_ts, peak_price, alerts_json, daily_pump, weekly_pump,
-             short_entry_ts, manual, state_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, data.get('first_seen_ts'), data.get('peak_price'),
-             json.dumps(data.get('alerts', [])),
-             int(data.get('daily_pump', False)), int(data.get('weekly_pump', False)),
-             data.get('short_entry_ts'), int(data.get('manual', False)),
-             json.dumps(data)))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("""INSERT OR REPLACE INTO pump_state
+                (symbol, first_seen_ts, peak_price, alerts_json, daily_pump, weekly_pump,
+                 short_entry_ts, manual, state_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (symbol, data.get('first_seen_ts'), data.get('peak_price'),
+                 json.dumps(data.get('alerts', [])),
+                 int(data.get('daily_pump', False)), int(data.get('weekly_pump', False)),
+                 data.get('short_entry_ts'), int(data.get('manual', False)),
+                 json.dumps(data)))
+            self.conn.commit()
 
     def get_pump_state(self, symbol=None):
         """Получить pump_state для символа или все."""
@@ -390,10 +407,11 @@ class StateDB:
     # ── x10 ────────────────────────────────────────────────────
 
     def save_x10_limits(self, date, strategy, data):
-        self.conn.execute("""INSERT OR REPLACE INTO x10_limits (date, strategy, losses, pnl, stopped_at)
-            VALUES (?, ?, ?, ?, ?)""",
-            (date, strategy, data.get('losses', 0), data.get('pnl', 0), data.get('stopped_at')))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("""INSERT OR REPLACE INTO x10_limits (date, strategy, losses, pnl, stopped_at)
+                VALUES (?, ?, ?, ?, ?)""",
+                (date, strategy, data.get('losses', 0), data.get('pnl', 0), data.get('stopped_at')))
+            self.conn.commit()
 
     def get_x10_limits(self):
         rows = self.conn.execute("SELECT * FROM x10_limits").fetchall()
@@ -405,28 +423,31 @@ class StateDB:
         return result
 
     def save_x10_position(self, symbol, data):
-        self.conn.execute("""INSERT OR REPLACE INTO x10_positions
-            (symbol, strategy, entry_price, size, opened_at, state_json)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (symbol, data.get('strategy'), data.get('entry_price'), data.get('size'),
-             data.get('opened_at', int(time.time())), json.dumps(data)))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("""INSERT OR REPLACE INTO x10_positions
+                (symbol, strategy, entry_price, size, opened_at, state_json)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (symbol, data.get('strategy'), data.get('entry_price'), data.get('size'),
+                 data.get('opened_at', int(time.time())), json.dumps(data)))
+            self.conn.commit()
 
     def get_x10_positions(self):
         rows = self.conn.execute("SELECT * FROM x10_positions").fetchall()
         return {r[0]: self._row_dict(r, "x10_positions") for r in rows}
 
     def remove_x10_position(self, symbol):
-        self.conn.execute("DELETE FROM x10_positions WHERE symbol=?", (symbol,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("DELETE FROM x10_positions WHERE symbol=?", (symbol,))
+            self.conn.commit()
 
     # ── cooldowns ──────────────────────────────────────────────
 
     def set_cooldown(self, key, seconds):
         """Установить кулдаун на N секунд."""
-        until = int(time.time()) + seconds
-        self.conn.execute("INSERT OR REPLACE INTO cooldowns (key, until) VALUES (?, ?)", (key, until))
-        self.conn.commit()
+        with self._lock:
+            until = int(time.time()) + seconds
+            self.conn.execute("INSERT OR REPLACE INTO cooldowns (key, until) VALUES (?, ?)", (key, until))
+            self.conn.commit()
 
     def is_cooling_down(self, key):
         """Проверить, активен ли кулдаун."""
@@ -443,39 +464,44 @@ class StateDB:
         return max(0, row[0] - int(time.time()))
 
     def clear_cooldown(self, key):
-        self.conn.execute("DELETE FROM cooldowns WHERE key=?", (key,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("DELETE FROM cooldowns WHERE key=?", (key,))
+            self.conn.commit()
 
     def clean_expired_cooldowns(self):
         """Удалить истекшие кулдауны."""
-        now = int(time.time())
-        self.conn.execute("DELETE FROM cooldowns WHERE until < ?", (now,))
-        self.conn.commit()
+        with self._lock:
+            now = int(time.time())
+            self.conn.execute("DELETE FROM cooldowns WHERE until < ?", (now,))
+            self.conn.commit()
 
     # ── alert_dedup ────────────────────────────────────────────
 
     def should_alert(self, key, cooldown_seconds):
         """Проверить, можно ли отправить алерт. True = можно, False = дубликат."""
-        row = self.conn.execute("SELECT last_at FROM alert_dedup WHERE key=?", (key,)).fetchone()
-        now = int(time.time())
-        if row and (now - row[0]) < cooldown_seconds:
-            return False
-        self.conn.execute("INSERT OR REPLACE INTO alert_dedup (key, last_at) VALUES (?, ?)", (key, now))
-        self.conn.commit()
-        return True
+        with self._lock:
+            row = self.conn.execute("SELECT last_at FROM alert_dedup WHERE key=?", (key,)).fetchone()
+            now = int(time.time())
+            if row and (now - row[0]) < cooldown_seconds:
+                return False
+            self.conn.execute("INSERT OR REPLACE INTO alert_dedup (key, last_at) VALUES (?, ?)", (key, now))
+            self.conn.commit()
+            return True
 
     def clean_old_alerts(self, max_age=86400):
         """Удалить старые записи дедупликации (>24ч)."""
-        cutoff = int(time.time()) - max_age
-        self.conn.execute("DELETE FROM alert_dedup WHERE last_at < ?", (cutoff,))
-        self.conn.commit()
+        with self._lock:
+            cutoff = int(time.time()) - max_age
+            self.conn.execute("DELETE FROM alert_dedup WHERE last_at < ?", (cutoff,))
+            self.conn.commit()
 
     # ── kv_store ───────────────────────────────────────────────
 
     def set_kv(self, key, value):
-        self.conn.execute("INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
-                          (key, json.dumps(value) if not isinstance(value, str) else value))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
+                              (key, json.dumps(value) if not isinstance(value, str) else value))
+            self.conn.commit()
 
     def get_kv(self, key, default=None):
         row = self.conn.execute("SELECT value FROM kv_store WHERE key=?", (key,)).fetchone()
@@ -505,12 +531,13 @@ class StateDB:
 
     def get_entry_diagnostic(self, symbol, side):
         """Получить и удалить контекст входа (pop-семантика)."""
-        key = f"entry_diag:{symbol}:{side}"
-        val = self.get_kv(key)
-        if val is not None:
-            self.conn.execute("DELETE FROM kv_store WHERE key=?", (key,))
-            self.conn.commit()
-        return val if isinstance(val, dict) else None
+        with self._lock:
+            key = f"entry_diag:{symbol}:{side}"
+            val = self.get_kv(key)
+            if val is not None:
+                self.conn.execute("DELETE FROM kv_store WHERE key=?", (key,))
+                self.conn.commit()
+            return val if isinstance(val, dict) else None
 
     def get_entry_diagnostic_for_close(self, symbol, closing_side):
         """Диагностика входа по стороне ЗАКРЫТИЯ из closed-pnl.
@@ -526,11 +553,12 @@ class StateDB:
 
     def log_counterfactual(self, symbol, side, score, bb_pos, entry_price, confidence, issues):
         """Log a rejected entry signal for counterfactual PnL analysis."""
-        self.conn.execute("""INSERT INTO counterfactual_entries
-            (symbol, side, score, bb_pos, entry_price, confidence, issues, ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, side, score, bb_pos, entry_price, confidence, issues, int(time.time())))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("""INSERT INTO counterfactual_entries
+                (symbol, side, score, bb_pos, entry_price, confidence, issues, ts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (symbol, side, score, bb_pos, entry_price, confidence, issues, int(time.time())))
+            self.conn.commit()
 
     def get_counterfactual(self, since=None):
         """Get counterfactual entries, optionally filtered by timestamp."""
@@ -547,7 +575,8 @@ class StateDB:
 
     def vacuum(self):
         """Оптимизация БД."""
-        self.conn.execute("VACUUM")
+        with self._lock:
+            self.conn.execute("VACUUM")
 
     def close(self):
         if self._conn:
