@@ -156,10 +156,10 @@
 
 | # | Задача | Доказательство | Пётр | Статус |
 |---|--------|----------------|------|--------|
-| 1 | Fail-closed в риск-проверках LONG | `auto_entry.py:785` корреляция — `except Exception: pass`, вход идёт с `corr_sizer=1.0`; `:798` концентрация — только лог, без `continue`; `:810` chase guard и `:821` дневной лимит — то же | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
-| 2 | Корреляционная проверка для SHORT | `grep -n "corr" auto_short.py` → 0 строк; LONG блокируется при r>0.85, SHORT — никогда | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
+| 1 | Fail-closed в риск-проверках LONG | `auto_entry.py:785` корреляция — `except Exception: pass`, вход идёт с `corr_sizer=1.0`; `:798` концентрация — только лог, без `continue`; `:810` chase guard и `:821` дневной лимит — то же | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ✅ `a6d79cf` |
+| 2 | Корреляционная проверка для SHORT | `grep -n "corr" auto_short.py` → 0 строк; LONG блокируется при r>0.85, SHORT — никогда | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | 🟡 shadow в `a6d79cf`, enforce после замера |
 | 3 | Kill switch до конца: cancel-all + верификация | `rpc.py:1970` ставит pause и зовёт `emergency_close_all`, который закрывает позиции MARKET IOC, но не отменяет открытые лимитки, не делает повторный `fetch_positions`, нет эскалации при `failed>0` | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ✅ `aa9bea9` |
-| 4 | `orderLinkId` во всех точках входа | 18 вызовов `/v5/order/create` в 16 файлах; `orderLinkId` только `dca.py:193` и `recycle.py:108` → при таймауте возможен дубль | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
+| 4 | `orderLinkId` во всех точках входа | 18 вызовов `/v5/order/create` в 16 файлах; `orderLinkId` только `dca.py:193` и `recycle.py:108` → при таймауте возможен дубль | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ✅ `a6d79cf` |
 
 #### P1 — доказательность и наблюдаемость
 
@@ -209,7 +209,8 @@
 | 3 (kill switch) | ✅ `aa9bea9` — cancel-all до закрытия, повторный fetch_positions+fetch_orders, эскалация STOP-алертом при failed>0 или остатках. Тесты `tests/test_kill_switch.py` (4). Живой замер до фикса: 22 открытых ордера (16 TP, 5 SL, 1 LIMIT_ENTRY LTCUSDT) — все бы пережили старый kill switch |
 | 19 (лок sqlite) | ✅ `a5c945d` — `threading.RLock` в `StateDB`, 21 write-метод сериализован. Тест `tests/test_state_db_lock.py` |
 | 14 (suggest_qty) | ✅ `96ee1b2` — `qty < lot_step` → `0` вместо раздувания; fail-closed guard в `mcp_server.py` |
-| 18 (дашборд), 20 (`external_id` UNIQUE) | ⬜ открыты |
+| 20 (external_id UNIQUE) | ✅ `15ffcda` — частичный UNIQUE-индекс (WHERE external_id IS NOT NULL), очистка 1 дубля в миграции. Тест `tests/test_external_id_unique.py` (3) |
+| 18 (дашборд Bearer) | ⬜ открыт |
 
 Тесты: 343 passed → после #3 (kill switch) **143 passed** → после #19+#14 **148 passed** (kill_switch 4 + state_db_lock 2 + suggest_qty 3).
 
