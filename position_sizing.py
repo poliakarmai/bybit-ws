@@ -11,9 +11,10 @@ import time, math, json, os
 from pathlib import Path
 from .alerts import log_event
 from .api import bybit, fetch_atr
-from .config import Config
+from .config import get_config
 
 # === Фоллбек-константы (если конфиг не задан) ===
+# ponytail: значения обязаны совпадать с _DEFAULT_POSITION_SIZING в config.py — расхождение ловит tests/test_position_sizing_config.py
 _FB_LONG_RISK = 0.20       # 20% депозита в риске (LONG/SHORT 3x)
 _FB_X10_RISK = 0.05        # 5% депозита в риске (x10 стратегии)
 _FB_DCA_RISK = 0.10        # 10% для DCA
@@ -28,9 +29,9 @@ DEPOSIT_CACHE_TTL = 120    # кеш на 2 минуты
 
 
 def _ps_cfg():
-    """Загрузить секцию position_sizing из конфига."""
+    """Загрузить секцию position_sizing из конфига (ленивый синглтон)."""
     try:
-        return Config().get('position_sizing', {}) or {}
+        return get_config().get('position_sizing', {}) or {}
     except Exception:
         return {}
 
