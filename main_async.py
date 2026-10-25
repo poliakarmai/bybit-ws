@@ -188,6 +188,11 @@ def _import_bybit_trades(data_dir):
                             manual=_manual,
                             fees=fees, leverage=lev, external_id=ext_id,
                         )
+                        # ── Метрики: TP/SL за день. Единый фаннел всех закрытий
+                        # (async-движок), иначе metrics.json не пополняется —
+                        # record_alert() вызывался только из легаси main.py.
+                        if exit_reason in ('TP', 'SL'):
+                            record_alert(exit_reason, symbol=sym)
                     except Exception as e:
                         log_event(f'⚠️ trade_history insert failed for {sym}: {e}')
                     # ── v4: Exit reason tracking + streak ──
@@ -470,6 +475,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                         ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                         if ok:
                             log_event(f'💰 Funding Entry: {entry_info}')
+                            record_alert('ENTRY', symbol=sym)
                     except Exception as e:
                         log_event(f'⚠️ funding execute error: {e}')
             except Exception as e:
@@ -506,6 +512,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                         ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                         if ok:
                             log_event(f'📊 Mean Revert Entry: {entry_info}')
+                            record_alert('ENTRY', symbol=sym)
                     except Exception as e:
                         log_event(f'⚠️ mean_revert execute error: {e}')
             except Exception as e:
@@ -529,6 +536,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                     if ok:
                         log_event(f'⚡ Scalp Entry: {entry_info}')
+                        record_alert('ENTRY', symbol=sym)
                 except Exception as e:
                     log_event(f'⚠️ scalp execute error: {e}')
         except Exception as e:
@@ -594,6 +602,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         for entry in (entries[0] or []):
             # Извлекаем символ из строки входа для проверки риска
             import re
+            sym = None
             sym_match = re.search(r'\b([A-Z]+USDT)\b', entry)
             if sym_match:
                 sym = sym_match.group(1)
@@ -604,6 +613,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     continue
             add_alert('ENTRY', entry)
             send_telegram_alert(entry)
+            record_alert('ENTRY', symbol=sym)
     except Exception as e:
         log_event(f'⚠️ auto_entry error: {e}')
 
