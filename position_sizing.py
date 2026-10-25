@@ -30,7 +30,7 @@ DEPOSIT_CACHE_TTL = 120    # кеш на 2 минуты
 def _ps_cfg():
     """Загрузить секцию position_sizing из конфига."""
     try:
-        return Config().cfg.get('position_sizing', {}) or {}
+        return Config().get('position_sizing', {}) or {}
     except Exception:
         return {}
 

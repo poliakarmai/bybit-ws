@@ -42,7 +42,7 @@ def check_time_exit(positions: dict, open_orders: dict = None) -> list:
             continue
 
         # Проверяем возраст позиции
-        opened_at = p.get('opened_at') or p.get('entry_ts')
+        opened_at = p.get('openTime') or p.get('opened_at') or p.get('entry_ts')
         if not opened_at:
             continue
 

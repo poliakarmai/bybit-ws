@@ -888,7 +888,9 @@ def check(
     # ── 3. Проверка max positions ──
     dyn_max = get_dynamic_max_positions()
     max_pos = dyn_max['max_positions']
-    current_count = len(positions) if positions else 0
+    # Фаза 11 D1: заглушки _note_entry (size=0) не считаем позициями
+    current_count = sum(1 for p in (positions or {}).values()
+                        if isinstance(p, dict) and float(p.get('size', 0) or 0) > 0)
     if current_count >= max_pos:
         reason = (
             f'Достигнут лимит позиций: {current_count}/{max_pos} '

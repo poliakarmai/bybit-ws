@@ -118,6 +118,8 @@ def _calc_tight_trail(p: dict, is_long: bool, mark: float, entry: float):
     if pnl_pct < 3:
         return None, ''
 
+    # Фаза 11 C3: если SL уже стоит — двигаем только в прибыльную сторону
+    # (раньше при +3% и SL ниже entry tight-trail откатывал SL в убыток).
     if is_long:
         # LONG: SL подтягиваем вверх
         target = round(mark * 0.99, 4)
@@ -218,6 +220,7 @@ def _calc_default_sl(sym: str, p: dict, is_long: bool, mark: float, entry: float
     current_sl = p.get('stopLoss')
     if current_sl is not None:
         return None, ''
+    # Фаза 11 C3: SL ещё не стоит (Tier A/B no_sl) — ставим ATR-SL ниже.
 
     atr = 0.0
     try:

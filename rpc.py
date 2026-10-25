@@ -34,7 +34,7 @@ import os
 import time
 import asyncio
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from collections import defaultdict
 from statistics import mean, stdev
@@ -1638,7 +1638,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                     'orderType': 'Limit',
                     'qty': qty_str,
                     'price': str(_round_price(tp)),
-                    'positionIdx': 0,
+                    'positionIdx': pos.get('positionIdx', 0) if pos else 0,
                     'timeInForce': 'GTC',
                     'reduceOnly': True,
                 })
@@ -1988,7 +1988,7 @@ class RPCHandler(BaseHTTPRequestHandler):
 
 def start_rpc_server(port=8766, bind='127.0.0.1'):
     """Запустить RPC-сервер в фоновом потоке."""
-    server = HTTPServer((bind, port), RPCHandler)
+    server = ThreadingHTTPServer((bind, port), RPCHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="bybit-rpc")
     thread.start()
     return server

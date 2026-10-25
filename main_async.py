@@ -77,20 +77,17 @@ MEAN_REVERT_ENABLED = False  # отключено 01.08.2026 — BB%=0-5% на �
 # Async helpers
 # ═══════════════════════════════════════════════════════════
 def _clean_pump_state(data_dir, positions):
-    """Sync helper: sqlite3 + pumps.json cleanup."""
-    import sqlite3
+    """Sync helper: pump_state + pumps.json cleanup (через StateDB, под его RLock)."""
     from .alerts import log_event
-    db_path = str(data_dir / 'state.db')
-    db = sqlite3.connect(db_path)
-    try:
-        pump_syms = [r[0] for r in db.execute("SELECT symbol FROM pump_state").fetchall()]
+    # Фаза 11 C2: раньше здесь был прямой sqlite3.connect в обход StateDB._lock —
+    # гонка с StateDB на WAL. Теперь только через singleton и его блокировку.
+    with sync_db._lock:
+        pump_syms = [r[0] for r in sync_db.conn.execute("SELECT symbol FROM pump_state").fetchall()]
         orphaned = [s for s in pump_syms if s not in (positions or {})]
         for sym in orphaned:
-            db.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
-            db.commit()
+            sync_db.conn.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
+            sync_db.conn.commit()
             log_event(f'🧹 pump_state clean: {sym} (позиция закрыта)')
-    finally:
-        db.close()
     
     import json as _json
     pump_file = data_dir / 'pumps.json'
@@ -498,6 +495,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         else:
             tasks.append(run_in_thread(check_auto_short, positions or {}, timeout=90))
         tasks.append(run_in_thread(check_short_time_sl, positions or {}))  # Фаза 9
+        tasks.append(run_in_thread(check_junk_dca, positions or {}, timeout=25))  # Фаза 11 A1: hard SL/max_loss/time_sl/max_hold
 
     # Корреляции
     tasks.append(run_in_thread(check_correlation, positions))

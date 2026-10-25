@@ -139,6 +139,15 @@ def check_sl_reentry(positions, correlation_stop=False):
 
         reentry_side = info.get('side', 'Buy')  # 'Buy'=LONG, 'Sell'=SHORT
 
+        # ── Фаза 11 B1: risk-gate (circuit breaker / daily loss / max_positions) ──
+        from .risk_manager import check as risk_check
+        entry_allowed, risk_reason = risk_check(positions, new_symbol=sym, new_side=reentry_side)
+        if not entry_allowed:
+            log_event(f'🛑 SL re-entry {sym}: risk blocked — {risk_reason}')
+            info['pending'] = False
+            state[sym] = info
+            continue
+
         # Режимный фильтр: не входить против тренда
         if reentry_side == 'Buy' and regime == 'TRENDING_DOWN':
             log_event(f'🔕 SL re-entry {sym}: TRENDING_DOWN — LONG запрещён')
@@ -206,9 +215,12 @@ def check_sl_reentry(positions, correlation_stop=False):
                             'orderType': 'Limit', 'qty': str(qty),
                             'price': str(price), 'positionIdx': pos_idx,
                             'timeInForce': 'GTC',
+                            'orderLinkId': f're_{sym.lower()}_{int(time.time())}',
                         })
                         if order.get('retCode') == 0:
                             orders_placed += 1
+                            from .api import set_leverage
+                            set_leverage(sym, rc['leverage'])
                             log_event(f'📌 SL re-entry {sym}: simple @ ${price:.4f} ×{qty} ({reentry_side})')
                             break
                         elif order.get('retCode') == 10001:
@@ -246,9 +258,12 @@ def check_sl_reentry(positions, correlation_stop=False):
                         'orderType': 'Limit', 'qty': str(qty),
                         'price': str(price), 'positionIdx': pos_idx,
                         'timeInForce': 'GTC',
+                        'orderLinkId': f're_{sym.lower()}_{int(time.time())}',
                     })
                     if order.get('retCode') == 0:
                         orders_placed += 1
+                        from .api import set_leverage
+                        set_leverage(sym, rc['leverage'])
                         level_num = rc["levels"].index(level_pct) + 1
                         log_event(f'📌 SL re-entry {sym}: лимитка ${price:.4f} ×{qty} (ур.{level_num}/{len(rc["levels"])}, idx={pos_idx}, {reentry_side})')
                         break

@@ -683,6 +683,7 @@ def check_auto_short(positions):
                     'price': str(limit_price),
                     'positionIdx': pos_idx,
                     'timeInForce': 'PostOnly',
+                    'orderLinkId': f'as_{sym.lower()}_{int(time.time())}',
                 })
                 if order and order.get('retCode') == 0:
                     break
@@ -789,15 +790,12 @@ def check_auto_short(positions):
                     ts_body['takeProfit'] = str(tp_price)
                     ts_body['tpTriggerBy'] = 'MarkPrice'
                 
-                # SL НЕ ставим при входе — auto_sl поставит через 20 мин
-                # Но если шлак (is_junk) — ставим SL сразу
-                if sym not in TIER_AB:
-                    ts_body['stopLoss'] = str(sl_price)
-                    ts_body['slTriggerBy'] = 'MarkPrice'
-                    state_entry['no_sl'] = False
-                else:
-                    state_entry['no_sl'] = True
-                    state_entry['sl_pending'] = sl_price  # будет установлен auto_sl через 20 мин
+                # Фаза 11 C3: SL ставим СРАЗУ для всех (Tier A/B тоже).
+                # Было: Tier A/B → no_sl=True, SL «через 20 мин» через auto_sl —
+                # но auto_sl в async-цикле не вызывается, позиция висела без SL.
+                ts_body['stopLoss'] = str(sl_price)
+                ts_body['slTriggerBy'] = 'MarkPrice'
+                state_entry['no_sl'] = False
                 
                 bybit('POST', '/v5/position/trading-stop', ts_body)
 
@@ -857,14 +855,11 @@ def check_junk_dca(positions):
         if not entry.get('is_junk'):
             continue
 
-        # Если позиция закрылась — пропускаем
+        # Если позиции нет в снапшоте — НЕ трогаем стейт.
+        # Фаза 11 C3: флаг 'entered' нигде не выставляется (всегда False), поэтому
+        # старая ветка «позиция закрылась → del state» не срабатывала никогда.
+        # Очистку закрытых символов делает _clean_pump_state (main_async).
         if sym not in positions:
-            # Но может быть лимитка ещё не сработала
-            if not entry.get('entered', False):
-                continue
-            # Позиция закрылась — очищаем стейт
-            del state[sym]
-            _save_state(state)
             continue
 
         pos = positions[sym]
@@ -985,7 +980,7 @@ def check_short_time_sl(positions: dict) -> list[str]:
 
         # Check entry timestamp — opened_at/entry_ts (внутренний timestamp открытия позиции).
         # НЕ createdTime: оно = время ПЕРВОГО входа в символ, а не текущей позиции (pitfall #14).
-        entry_ts = pos.get('opened_at') or pos.get('entry_ts')
+        entry_ts = pos.get('openTime') or pos.get('opened_at') or pos.get('entry_ts')
         if not entry_ts:
             continue
         try:
