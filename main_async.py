@@ -251,22 +251,34 @@ def _load_trades_for_journal(data_dir):
 
 
 
+def _log_late_result(name: str, fut) -> None:
+    """Поток после таймаута жив — его результат нельзя выбрасывать молча."""
+    try:
+        res = fut.result()
+        log_event(f'⏱ {name}: поздний результат после таймаута — {str(res)[:200]}')
+    except Exception as e:
+        log_event(f'⏱ {name}: поздний сбой после таймаута — {e}')
+
+
 async def run_in_thread(fn, *args, timeout=25):
-    """Выполнить синхронную функцию в потоке с таймаутом."""
+    """Выполнить синхронную функцию в потоке с таймаутом.
+
+    asyncio.wait, а не wait_for: wait_for отменяет future, поток продолжает
+    работу и его результат теряется (ордер может встать уже «в никуда»).
+    Здесь таймаут только отпускает цикл, а поздний результат логируется.
+    """
+    fn_name = fn.__name__ if hasattr(fn, '__name__') else 'unknown'
     try:
         loop = asyncio.get_event_loop()
-        result = await asyncio.wait_for(
-            loop.run_in_executor(None, partial(fn, *args)),
-            timeout=timeout,
-        )
-        return result, None
-    except asyncio.TimeoutError:
-        fn_name = fn.__name__ if hasattr(fn, '__name__') else 'unknown'
-        log_event(f'⚠️ TIMEOUT {fn_name} after {timeout}s — result discarded')
-        return [], fn_name
+        fut = loop.run_in_executor(None, partial(fn, *args))
+        done, _ = await asyncio.wait({fut}, timeout=timeout)
+        if not done:
+            log_event(f'⚠️ TIMEOUT {fn_name} after {timeout}s — поток жив, ждём поздний результат')
+            fut.add_done_callback(partial(_log_late_result, fn_name))
+            return [], fn_name
+        return fut.result(), None
     except Exception as e:
         import traceback
-        fn_name = fn.__name__ if hasattr(fn, '__name__') else 'unknown'
         tb = traceback.format_exc()
         log_event(f'💥 run_in_thread({fn_name}) unhandled: {e}')
         log_event(f'   traceback: {tb[:500]}')
@@ -274,6 +286,7 @@ async def run_in_thread(fn, *args, timeout=25):
 
 
 _ORDERS_CACHE: dict = {}  # последний успешный снимок ордеров (WS-ветка: fallback при ошибке REST)
+_PENDING_ENTRIES: dict = {}  # symbol -> {side, ts}: вход повис по таймауту, ждёт сверки
 
 
 def _note_entry(positions: dict, sym: str, side: str) -> None:
@@ -294,6 +307,27 @@ def _entries_paused() -> bool:
     return bool(rpc_state.get("paused"))
 
 
+PENDING_TTL = 300  # сек: сколько ждём подтверждения «позднего» входа
+
+
+def _pending_reconcile(positions: dict) -> None:
+    """Сверить входы, повисшие по таймауту, с реальным снапшотом.
+
+    run_in_thread не может убить поток: после таймаута execute_* может ещё
+    поставить ордер, а результат уже выброшен. Такой символ помечается pending
+    (новые входы по нему блокируются), и следующий снапшот показывает правду.
+    """
+    for sym, info in list(_PENDING_ENTRIES.items()):
+        pos = (positions or {}).get(sym) or {}
+        if float(pos.get('size') or 0) > 0:
+            log_event(f'⏱ Поздний вход подтверждён: {sym} {info.get("side")} — позиция в снапшоте')
+            record_alert('ENTRY_LATE', symbol=sym)
+            _PENDING_ENTRIES.pop(sym, None)
+        elif time.time() - info.get('ts', 0) > PENDING_TTL:
+            log_event(f'⏱ Поздний вход {sym} {info.get("side")}: позиции нет {PENDING_TTL}с — ордер не встал')
+            _PENDING_ENTRIES.pop(sym, None)
+
+
 async def _maybe_execute(fn, entry_info, label=''):
     """Единая точка исполнения входов: пауза блокирует любой источник.
 
@@ -303,7 +337,18 @@ async def _maybe_execute(fn, entry_info, label=''):
     if _entries_paused():
         log_event(f'⏸ ENTRY {label or fn.__name__} пропущен: пауза')
         return False, 'paused'
-    return await run_in_thread(fn, entry_info)
+
+    sym = entry_info.get('symbol') if isinstance(entry_info, dict) else None
+    if sym and sym in _PENDING_ENTRIES:
+        log_event(f'⏳ ENTRY {label or fn.__name__}: {sym} ждёт сверки прошлого таймаута')
+        return False, 'pending_verify'
+
+    res, err = await run_in_thread(fn, entry_info)
+    if sym and err == getattr(fn, '__name__', None):
+        # timeout внутри run_in_thread: поток жив, ордер может встать
+        _PENDING_ENTRIES[sym] = {'side': entry_info.get('side'), 'ts': time.time()}
+        log_event(f'⏱ ENTRY {label or fn.__name__}: таймаут, {sym} → pending (сверка по снапшоту)')
+    return res, err
 
 
 async def fetch_all_bb_parallel(symbols, interval='D'):
@@ -804,6 +849,7 @@ async def async_main_loop():
                     timeout=20.0
                 )
                 prev_positions, prev_orders = dict(new_positions), dict(new_orders)
+                _pending_reconcile(new_positions)
             except asyncio.TimeoutError:
                 # Пустой снапшот = слепой цикл (manage_sl/auto_tp не увидят позиций) — держим прошлый.
                 log_event(f'⚠️ positions snapshot TIMEOUT (20s) — прошлый снапшот ({len(prev_positions)} поз.)')
