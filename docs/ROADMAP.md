@@ -158,7 +158,7 @@
 |---|--------|----------------|------|--------|
 | 1 | Fail-closed в риск-проверках LONG | `auto_entry.py:785` корреляция — `except Exception: pass`, вход идёт с `corr_sizer=1.0`; `:798` концентрация — только лог, без `continue`; `:810` chase guard и `:821` дневной лимит — то же | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
 | 2 | Корреляционная проверка для SHORT | `grep -n "corr" auto_short.py` → 0 строк; LONG блокируется при r>0.85, SHORT — никогда | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
-| 3 | Kill switch до конца: cancel-all + верификация | `rpc.py:1970` ставит pause и зовёт `emergency_close_all`, который закрывает позиции MARKET IOC, но не отменяет открытые лимитки, не делает повторный `fetch_positions`, нет эскалации при `failed>0` | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
+| 3 | Kill switch до конца: cancel-all + верификация | `rpc.py:1970` ставит pause и зовёт `emergency_close_all`, который закрывает позиции MARKET IOC, но не отменяет открытые лимитки, не делает повторный `fetch_positions`, нет эскалации при `failed>0` | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ✅ `aa9bea9` |
 | 4 | `orderLinkId` во всех точках входа | 18 вызовов `/v5/order/create` в 16 файлах; `orderLinkId` только `dca.py:193` и `recycle.py:108` → при таймауте возможен дубль | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
 
 #### P1 — доказательность и наблюдаемость
@@ -206,9 +206,10 @@
 | 15 персист CB | ✅ `a6d79cf` — `risk_state.json`, восстановление после рестарта |
 | min-lot vs кап | ✅ `fed63f5` — при equity $62.8 кап 5% = $3.15 < `min_margin` $5; минимальный лот разрешён всегда, процент применяется к сумме сверх него |
 | 5 (SHORT-корреляция) | 🟡 shadow-режим: пишется в лог, вход не блокируется — ждём замера |
-| 3 (kill switch), 18 (дашборд), 14 (`suggest_qty`), 19 (лок sqlite), 20 (`external_id` UNIQUE) | ⬜ открыты |
+| 3 (kill switch) | ✅ `aa9bea9` — cancel-all до закрытия, повторный fetch_positions+fetch_orders, эскалация STOP-алертом при failed>0 или остатках. Тесты `tests/test_kill_switch.py` (4). Живой замер до фикса: 22 открытых ордера (16 TP, 5 SL, 1 LIMIT_ENTRY LTCUSDT) — все бы пережили старый kill switch |
+| 18 (дашборд), 14 (`suggest_qty`), 19 (лок sqlite), 20 (`external_id` UNIQUE) | ⬜ открыты |
 
-Тесты: 343 passed (`tests/test_audit2_fixes.py` — 13 проверок на все пункты выше).
+Тесты: 343 passed → после #3 (kill switch) **143 passed** (добавлены `tests/test_kill_switch.py` — 4 проверки; `test_audit2_fixes.py` — 13 проверок).
 
 #### Порядок работ (обновлён после второго аудита)
 
