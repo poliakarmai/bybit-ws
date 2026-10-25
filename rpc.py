@@ -6,6 +6,7 @@
 
 Endpoints:
     GET  /rpc/all         — все данные одним запросом (позиции, ордера, алерты, метрики, трейды)
+    GET  /rpc/dash/{all,risk,signals} — данные дашборда (публичные)
     GET  /rpc/positions   — открытые позиции
     GET  /rpc/orders      — активные ордера
     GET  /rpc/health      — статус монитора (alive, uptime, cycle_count)

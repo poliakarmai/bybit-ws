@@ -1,5 +1,8 @@
 # Testing & Optimization
 
+> ⚠️ **АРХИВ — не читать как инструкцию.** Файл описывает состояние на 2026-08-02 (v7.7, English) и содержит удалённые эндпоинты, старые версии и цифры.
+> Актуальное: [AGENTS.md](../../../AGENTS.md), [docs/INDEX.md](../../../INDEX.md), [ARCHITECTURE.md](../../../ARCHITECTURE.md), [API.md](../../../API.md).
+
 This page covers all test files, CI/CD, parameter optimization tools, and the deployment verification pipeline.
 
 ---

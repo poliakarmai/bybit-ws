@@ -1,9 +1,9 @@
 # ROADMAP — bybit-ws
 
-> План развития. Версия: 11.4.x. Обновлено: 2026-10-25 (внешний аудит, см. Фазу 11).
+> План развития. Версия: 11.5.x. Обновлено: 2026-10-25 (внешний аудит, см. Фазу 11; документация сверена с кодом — `docs/INDEX.md`).
 > Актуальный roadmap также в Obsidian: `bybit-ws/short-analysis-2026-10-19.md` и `bybit-ws/docs-audit-lena-2026-10-19.md` (`hermes/bybit-ws-roadmap.md` отсутствует).
 
-## Текущий статус (v11.4.x)
+## Текущий статус (v11.5.x)
 
 | Компонент | Статус |
 |-----------|--------|
@@ -25,10 +25,10 @@
 | Paper Trading (исторический бэктест) | ✅ prod |
 | Веб-дашборд (SVG + HTML/Chart.js) | ✅ prod |
 | MCP-инструменты (6 шт.) | ✅ prod |
-| RPC REST API (20 эндпоинтов) | ✅ prod |
+| RPC REST API (~44 маршрута GET+POST, см. `docs/API.md`) | ✅ prod |
 | One-click trading через Hermes-чат | ✅ prod |
 | Алерты (ntfy + Telegram) | ✅ prod |
-| Тесты (16 тестов в test_smoke.py; 16 файлов / 171 тест всего) | ✅ prod |
+| Тесты (52 проверки в `test_smoke.py`; `pytest` — 372 теста, 25.10: 372 passed) | ✅ prod |
 
 ## Дорожная карта
 

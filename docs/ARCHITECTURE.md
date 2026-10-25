@@ -1,9 +1,9 @@
-# ARCHITECTURE.md — bybit-ws v11.4
+# ARCHITECTURE.md — bybit-ws v11.5
 
 > **Назначение:** КАК устроен бот (внутренняя архитектура).
 > Для функциональности: [CAPABILITIES.md](CAPABILITIES.md). Для API: [API.md](API.md).
 
-> **Версия:** 11.4 | **Дата:** 2026-10-19 | **Python 3.11+** | **asyncio** | **SQLite SSOT**
+> **Версия:** 11.5 | **Дата:** 2026-10-25 | **Python 3.11+** | **asyncio** | **SQLite SSOT**
 
 ## SSOT (Single Source of Truth)
 
@@ -92,7 +92,7 @@ bybit-ws/
 ├── docs/                 ← Документация
 ├── scripts/              ← DSPy, walkforward
 ├── deploy.sh             ← Атомарный деплой
-└── test_smoke.py         ← 16 тестов (замер 19.10)
+└── test_smoke.py         ← 52 проверки (замер 25.10: PASS=52/FAIL=0)
 ```
 
 ## Auto-SL — ATR-adaptive
@@ -137,12 +137,12 @@ PERM_SKIP с time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 
 ### Entry Judge — hard gate
 
-1. DeepSeek (api.deepseek.com) → verdict pass/revise
-2. Qwen (QwenCloud) — фолбэк
-3. Оба упали → revise (блок)
+1. Одна модель: прямой `api.deepseek.com` (`deepseek-chat`, env `DEEPSEEK_JUDGE_MODEL`) через `~/.hermes/scripts/cross-model-judge.py`, prompt-mode `signal`
+2. Ответ = `content or reasoning_content` (reasoning-модели отдают пустой `content`)
+3. Упало/таймаут → revise (блок, fail-closed)
 4. 3 падения подряд → отключение на 1 час (Judge CB)
-5. Кэш: 300s TTL
-6. Таймаут: 5s
+5. Кэш: 300s TTL, ключ включает `sl_price:tp_price`
+6. Таймаут: 20s (`JUDGE_TIMEOUT`; 5s резало живые вызовы — Qwen/Nemotron убраны 17.10)
 
 ## Self-Learning (event-driven: ≥10 сделок и ≥6ч с прошлого прогона, иначе fallback 24ч)
 
@@ -164,14 +164,19 @@ PERM_SKIP с time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 
 | Флаг | Prod | Что делает |
 |------|------|-----------|
-| BYBIT_WS_BB_ENABLED | 1 | WS для kline/BB-кеша |
-| BYBIT_WS_FULL_ENABLED | 0 | Real-time позиции через WS |
-| BYBIT_ML_ENABLED | 1 | RF ML Gate |
-| BYBIT_DSPY_ENABLED | 0 | DSPy-гейт (нужен LLM) |
-| BYBIT_OPTUNA_ENABLED | 0 | Optuna-параметры |
-| BYBIT_REGIME_AUTO | 0 | LSTM → авто LONG/SHORT |
-| BYBIT_AB_ENABLED | 0 | A/B-тестирование |
-| BYBIT_ATR_TP_ENABLED | 1 | ATR-based TP |
+| BYBIT_WS_BB_ENABLED | 1 (дефолт) | WS для kline/BB-кеша |
+| BYBIT_WS_FULL_ENABLED | 0 (дефолт) | Real-time позиции через WS |
+| BYBIT_ML_ENABLED | **0 (прод env)** | RF ML Gate |
+| BYBIT_DSPY_ENABLED | **1 (прод env)** | DSPy-гейт |
+| BYBIT_OPTUNA_ENABLED | 0 (прод env) | Optuna-параметры |
+| BYBIT_REGIME_AUTO | **1 (прод env)** | LSTM → авто LONG/SHORT + `BYBIT_REGIME_MIN_CONFIDENCE` (60) |
+| BYBIT_WORLD_MODEL | **1 (прод env)** | World-model score в SHORT-скоринге |
+| BYBIT_AB_ENABLED | **1 (прод env)** | A/B-тестирование |
+| BYBIT_ENTRY_JUDGE_ENABLED | **1 (прод env)** | LLM-судья входа |
+| BYBIT_ATR_TP_ENABLED | 1 (дефолт) | ATR-based TP |
+
+> Значения «прод env» считаны из `~/.config/bybit-ws/env` 25.10 — раньше таблица показывала дефолты
+> и расходилась с реальностью (`DSPY/AB/REGIME_AUTO` фактически включены, `ML` выключен).
 
 ## Circuit Breakers (два независимых)
 
@@ -295,9 +300,8 @@ PRAGMA busy_timeout=5000;
 
 | Тип | Описание | Покрытие |
 |-----|---------|---------|
-| Unit | mocks для API, SQLite in-memory | target >80% |
-| Integration | реальный SQLite, fake Bybit API | 45 smoke-тестов |
-| Smoke | deploy validation (deploy.sh) | 16/16 |
+| Unit/integration | `python3 -m pytest -q` | 372 теста, 25.10: 372 passed (`--timeout=90`) |
+| Smoke | deploy validation (`test_smoke.py`) | 52/52 |
 | CI | GitHub Actions, GSC security scan | на каждом push |
 
 ## Security
@@ -338,8 +342,9 @@ curl http://127.0.0.1:8766/positions
 
 **Judge не работает:**
 ```bash
-curl http://127.0.0.1:8766/circuit_breaker
-# Сбросить если нужно: POST /circuit_breaker {"action":"reset"}
+TOKEN=$(sqlite3 ~/.local/share/bybit-ws/state.db "SELECT value FROM kv_store WHERE key='rpc_auth_token'")
+curl -s http://127.0.0.1:8766/rpc/circuit_breaker -H "Authorization: Bearer $TOKEN"
+systemctl --user restart bybit-ws-async   # сброс CB — только рестартом
 ```
 
 **High memory:**

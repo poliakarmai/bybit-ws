@@ -1,5 +1,9 @@
 # Bybit Bollinger Grid Monitor — DESIGN.md
 
+> ⚠️ **ИСТОРИЧЕСКИЙ ДОКУМЕНТ (v3.11.1, 2026-09-25).** Не описывает текущее поведение: версия продукта — 11.5,
+> часть модулей удалена/переписана. Актуально: [AGENTS.md](AGENTS.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+> [docs/CAPABILITIES.md](docs/CAPABILITIES.md), карта — [docs/INDEX.md](docs/INDEX.md).
+
 > **Версия:** 3.11.1 | **Дата:** 25.09.2026 | **Автор:** Alexey Polyakov
 >
 > Автономный трейдинг-монитор для AI-агентов. Стратегия Bollinger Grid (LONG + SHORT), 24/7 без присмотра, REST API + MCP для внешнего управления.

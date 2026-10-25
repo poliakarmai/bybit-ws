@@ -1,5 +1,8 @@
 # Architecture
 
+> ⚠️ **АРХИВ — не читать как инструкцию.** Файл описывает состояние на 2026-08-02 (v7.7, English) и содержит удалённые эндпоинты, старые версии и цифры.
+> Актуальное: [AGENTS.md](../../../AGENTS.md), [docs/INDEX.md](../../../INDEX.md), [ARCHITECTURE.md](../../../ARCHITECTURE.md), [API.md](../../../API.md).
+
 The bybit-ws engine is a **single-process async event loop** that orchestrates trading logic in 30-second cycles. It has no framework dependencies (no Django, no FastAPI) — just raw `asyncio`, `requests`, and `websocket-client`.
 
 ---

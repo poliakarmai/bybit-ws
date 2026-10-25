@@ -3,7 +3,7 @@
 **24/7 автотрейдинг на фьючерсах Bybit. Bollinger Grid + AI-фильтры. Подключил — зарабатывает.**
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-16%2F16-brightgreen)](./test_smoke.py)
+[![Tests](https://img.shields.io/badge/pytest-372%20passed-brightgreen)](./AGENTS.md) [![Smoke](https://img.shields.io/badge/smoke-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
 [![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
 
@@ -18,26 +18,28 @@
 - Защищает депозит: Circuit Breaker, BlackSwan, Anti-ludomania, корреляционный блок
 - Самообучается: LSTM-классификатор рынка, Thompson Sampling, Dynamic Bandit, Drift Detector, Ensemble (20+ механик)
 
-Работает **24/7 на VPS за $5/мес**. 44 теста pytest + 16 smoke, атомарный деплой.
+Работает **24/7 на VPS за $5/мес**. 372 теста pytest + 52 smoke-проверки, атомарный деплой.
 
 ---
 
-## Результаты (на v11.4)
+## Результаты (снимок 2026-10-25)
 
 > **Важно:** результаты конкретной инсталляции (авто-трейдинг, `strategy='auto'`, `manual=0`). Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
 
 | Метрика | Значение |
 |--------|----------|
-| Авто-сделки self-learn (auto, manual=0) | 318 / +$144.21 / WR 74.2% / PF 1.18 |
-| LONG (авто, manual=0) | 213 / +$205.50 / WR 77.0% / PF 1.38 |
-| SHORT (авто, manual=0) | 105 / −$61.29 / WR 68.6% / PF 0.76 |
-| Всего закрытых сделок | 471 |
+| Авто-сделки self-learn (auto, manual=0) | 551 / +$81.39 / WR 70.2% / PF 1.08 |
+| LONG (авто, manual=0) | 220 / +$164.66 / WR 75.0% / PF 1.28 |
+| SHORT (авто, manual=0) | 331 / −$83.26 / WR 67.1% / PF 0.78 |
+| Ручные входы (manual=1) | 31 / −$410.38 |
+| Всего закрытых сделок | 698 / −$441.63 |
 
-> **Снимок на 2026-10-19, сверено с биржей** (`/v5/position/closed-pnl`, 463 из 471 локальной строки сошлись по PnL).
+> **Снимок на 2026-10-25 16:16 из `state.db`.** Последняя сверка с биржей — 23.10 (497 из 505 строк сошлись
+> по `(closed_at, symbol)`); 193 сделки 23–25.10 по бирже ещё не сверялись (`python3 -m bybit_ws.reconcile`).
 > Живой источник — RPC (`/metrics`, `/positions`) + `state.db`. Локальный `trade_history.side` — сторона
 > **закрытия** (`Buy`=закрыл SHORT), а не позиции; в `/positions` — наоборот, сырой Bybit.
 
-*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 471 закрытая сделка (355 auto + 47 historical + 31 NULL/legacy + 30 imported + 6 x10 + 2 x10:scalp).*
+*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 698 закрытых сделок (582 auto + 47 historical + 31 legacy + 30 imported + 6 x10 + 2 x10:scalp).*
 
 ---
 
@@ -75,7 +77,8 @@ chmod 600 ~/.config/bybit-ws/env
 python3 -m bybit_ws.paper_trade SOLUSDT --days 30
 
 # Боевой запуск
-python3 test_smoke.py          # 16 тестов → PASS (плюс 44 теста pytest в tests/)
+python3 test_smoke.py            # 52 проверки → PASS
+python3 -m pytest tests/ -q      # 372 теста (25.10: 372 passed)
 bash deploy.sh                 # атомарный деплой с canary-проверкой
 ```
 
@@ -173,7 +176,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 | [@Gridbolbot](https://t.me/Gridbolbot) | Telegram-бот сигналов (Pro-подписка: безлимит + алерты) |
 | [hermes-trader](https://github.com/poliakarmai/hermes-trader) | Встроенный трейдинг в Hermes Agent |
 | [Paper Trading](bybit_ws/paper_trade.py) | Бэктестинг на истории |
-| [OpenWiki](openwiki/quickstart.md) | Детальная документация |
+| [docs/INDEX.md](docs/INDEX.md) | Карта документации: что актуально, что архив |
 
 ---
 
@@ -183,7 +186,8 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 |------|-----------|
 | [ONBOARDING.md](ONBOARDING.md) | **Пошаговая инструкция:** от нуля до первой сделки |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Архитектура, потоки данных, Mermaid-диаграммы |
-| [docs/API.md](docs/API.md) | RPC API: 20 эндпоинтов, curl-примеры |
+| [docs/API.md](docs/API.md) | RPC API: реальный список эндпоинтов из `rpc.py`, curl-примеры |
+| [docs/INDEX.md](docs/INDEX.md) | Карта документации + статус каждого файла |
 | [docs/SECURITY.md](docs/SECURITY.md) | Безопасность: секреты, модель угроз, аудит |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Решение проблем: 60+ причин |
 | [docs/PRD-one-click.md](docs/PRD-one-click.md) | One-click trading через чат |

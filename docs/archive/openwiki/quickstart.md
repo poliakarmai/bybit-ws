@@ -1,5 +1,8 @@
 # bybit-ws — Quickstart
 
+> ⚠️ **АРХИВ — не читать как инструкцию.** Файл описывает состояние на 2026-08-02 (v7.7, English) и содержит удалённые эндпоинты, старые версии и цифры.
+> Актуальное: [AGENTS.md](../../../AGENTS.md), [docs/INDEX.md](../../../INDEX.md), [ARCHITECTURE.md](../../../ARCHITECTURE.md), [API.md](../../../API.md).
+
 **bybit-ws** is an AI-native, autonomous futures trading engine for [Bybit](https://bybit.com). It runs 24/7 as a systemd service (~45 MB RAM), executing a **Bollinger Grid** strategy across LONG (3x) and SHORT (3x) positions with adaptive ATR-based SL/TP, trailing stops, DCA ladders, correlation hedging, and a multi-tier risk management system.
 
 The engine is built for **AI-agent orchestration**: it exposes a JSON-RPC API (port 8766) and an MCP server that agents use to monitor positions, execute trades, and reload configuration — all without direct exchange API access.

@@ -1,4 +1,7 @@
 ---
+
+> ⚠️ **АРХИВ — не читать как инструкцию.** Файл описывает состояние на 2026-08-02 (v7.x) и содержит удалённые эндпоинты, старые версии и цифры.
+> Актуальное: [AGENTS.md](../../../AGENTS.md), [docs/INDEX.md](../../INDEX.md), [ARCHITECTURE.md](../../ARCHITECTURE.md), [API.md](../../API.md).
 tags: [bybit-ws, documentation, overview, trading, architecture]
 created: 2026-06-16
 updated: 2026-06-18

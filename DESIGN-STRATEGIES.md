@@ -1,5 +1,9 @@
 # Bybit WS Monitor — Архитектура и Стратегии
 
+> ⚠️ **ИСТОРИЧЕСКИЙ ДОКУМЕНТ (v3.12-эпоха, 2026-08-04).** Не описывает текущее поведение: версия продукта — 11.5,
+> часть модулей удалена/переписана. Актуально: [AGENTS.md](AGENTS.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+> [docs/CAPABILITIES.md](docs/CAPABILITIES.md), карта — [docs/INDEX.md](docs/INDEX.md).
+
 > **Версия:** 3.12.0 | **Дата:** 16.06.2026 | **Фаза 2 завершена**
 > **Репозиторий:** [github.com/poliakarmai/bybit-ws](https://github.com/poliakarmai/bybit-ws) (AGPL-3.0)
 > **Строк кода:** ~9500 Python (47 модулей) | **Тесты:** 45 smoke (test_smoke.py)

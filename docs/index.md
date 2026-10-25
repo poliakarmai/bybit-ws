@@ -5,7 +5,9 @@ title: bybit-ws Blog
 
 # bybit-ws — AI-native trading engine
 
-Open source, AGPL-3.0. 8 стратегий, Bollinger Grid, AI scoring, REST API + MCP для AI-агентов.
+Open source, AGPL-3.0. Bollinger Grid (LONG/SHORT), AI scoring, REST API + MCP для AI-агентов.
+
+Документация: [INDEX.md](INDEX.md). Сайт-страница блога, не документация продукта.
 
 ## Blog
 

@@ -1,266 +1,133 @@
 # bybit-ws API Reference
 
-> HTTP API трейдинг-монитора bybit-ws (сервер `rpc.py`, `http.server`; не JSON-RPC). Версия 11.4, обновлено 19.10.2026.
+> HTTP REST API трейдинг-монитора (сервер `rpc.py`, **`http.server`**, не JSON-RPC).
+> Проверено по коду 2026-10-25, версия продукта 11.5.0, `api_version: "v1"` в каждом ответе.
+> Источник истины — таблица маршрутов в `rpc.py` (`do_GET` / `do_POST`); всё, чего там нет, не существует.
 
 ## Аутентификация
 
-Заголовок `Authorization: Bearer <token>` обязателен для всех эндпоинтов, кроме `/health`.
+`Authorization: Bearer <token>`; токен — `kv_store['rpc_auth_token']` в `state.db`, либо JWT (Android).
+Ротация: `POST /reset-token`.
 
-⚠️ **Production: HTTPS only** (nginx + Let's Encrypt или Cloudflare Tunnel).
+**Без токена (публичные):** `/health`, `/rpc/paths`, `/dashboard`, `/rpc/dash/all`, `/rpc/dash/risk`, `/rpc/dash/signals`.
 
-**Ротация токена:** `POST /reset-token`. Grace period: старый токен работает ещё 5 минут.
+**Аварийные** (`/kill_switch`, `/emergency_close`) требуют **два** заголовка: `Authorization: Bearer …` **и** `X-Emergency-Auth: $EMERGENCY_TOKEN` (из env-файла сервиса).
+
+⚠️ Production: только через nginx/Cloudflare (TLS снаружи), сам сервер слушает `127.0.0.1:8766`.
 
 ## Формат ответов
 
-### Успех
 ```json
 {"api_version":"v1","status":"ok","<data>":"..."}
+{"api_version":"v1","error":"описание","detail":"подробности","status":400}
 ```
 
-### Ошибка
-```json
-{"api_version":"v1","error":"описание","detail":"подробности","code":400,"error_code":"invalid_symbol"}
-```
+Коды: `200`, `400` (невалидный JSON/параметры), `401` (токен), `404` (нет маршрута), `429` (rate limit), `500`.
 
-Коды: `200` (успех), `400` (параметры), `401` (токен), `404` (нет ресурса), `429` (rate limit), `500` (сервер), `502` (Bybit API).
+## Rate limit
 
-## Типы данных
-
-⚠️ Все финансовые значения — **строка** (string) для исключения floating-point ошибок.
-
-## Rate Limits
-
-| Группа | Лимит |
-|--------|-------|
-| `/enter`, `/close`, `/move_sl` | 10 запросов/мин |
-| `/scan` | 30 запросов/мин |
-| `/metrics` | 60 запросов/мин |
-| Остальные GET | 100 запросов/мин |
+Один лимит на IP: `rpc.rate_limit_per_min` из конфига (дефолт **60/мин**), применяется к GET и POST одинаково. Разных лимитов по эндпоинтам нет.
 
 ---
 
-## Эндпоинты
+## GET
 
-### Дашборд (GET)
+### Публичные
 
-| Путь | Описание |
-|------|---------|
-| `/positions` | Все открытые позиции + нереализованный PnL |
-| `/risk` | Дневной PnL, маржа, CB, корреляции |
-| `/circuit_breaker` | Статус CB |
-| `/balance` | Баланс кошелька (available, margin, equity) |
-| `/orders` | Активные ордера (SL/TP) |
-| `/alerts` | Накопленные алерты (с пагинацией: `?limit=100&offset=0`) |
-| `/trades` | История сделок (с пагинацией: `?limit=50&offset=0`) |
-| `/signals` | Последние BB-сигналы |
-| `/config` | Конфигурация (без кредов) |
-| `/health` | Статус: alive + timestamp цикла |
-| `/summary` | Краткая сводка (позиции + PnL + алерты) |
+| Путь | Назначение |
+|------|-----------|
+| `/health` | `status` (`alive`/`stale`), `alive`, `uptime`, `cycle_count`, `trading_ready` (пауза/CB → false) |
+| `/rpc/paths` | Пути установки (state.db, events.log, конфиг, порт) для внешних агентов |
+| `/dashboard` | HTML-дашборд |
+| `/rpc/dash/all` · `/rpc/dash/risk` · `/rpc/dash/signals` | Данные для дашборда (all / risk / signals) |
 
-### `/positions`
+### С токеном
 
-```json
-// GET /positions
-{
-  "api_version":"v1",
-  "positions":{
-    "AAVEUSDT":{"symbol":"AAVEUSDT","side":"Sell","leverage":"10","entryPrice":"98.60","markPrice":"93.50","unrealisedPnl":"4.18","stopLoss":"95.00","takeProfit":"90.00","size":"1"}
-  },
-  "total_unrealised_pnl":"4.18",
-  "count":1
-}
-```
+| Путь | Назначение |
+|------|-----------|
+| `/positions` · `/rpc/positions` | Открытые позиции + uPnL (`side` сырой Bybit: **Buy=LONG, Sell=SHORT**) |
+| `/orders` · `/rpc/orders` | Активные ордера (SL/TP) |
+| `/balance` | Баланс: `walletBalance`, `available`, `equity` |
+| `/risk` · `/rpc/risk` · `/rpc/risk_full` | Лимиты, дневной PnL, circuit breaker, корреляции |
+| `/rpc/circuit_breaker` | Статус CB (сброс — рестарт сервиса, отдельного POST нет) |
+| `/signals` · `/rpc/signals` | Последние BB-сигналы LONG/SHORT |
+| `/config` · `/rpc/config` | Конфигурация без секретов |
+| `/rpc/trades` | История сделок из `trades.jsonl` |
+| `/rpc/alerts` | Последние алерты |
+| `/rpc/all` | Всё одним запросом (позиции, ордера, алерты, метрики, трейды) |
+| `/rpc/metrics` | Метрики (JSON) |
+| `/metrics` | **Prometheus** text/plain (`bybit_ws_active_positions`, `bybit_ws_unrealized_pnl`, `bybit_ws_uptime_seconds`, `bybit_ws_cycle_duration_seconds`, `bybit_ws_cycle_count`, `bybit_ws_daily_pnl`) |
+| `/rpc/ab_test_report` · `/rpc/ab_status` | A/B-отчёт и статус |
+| `/rpc/ml_toggle` | Тумблер ML-гейта |
+| `/rpc/symbol_stats` | Статистика по символам |
+| `/rpc/analyze_history` | История анализа |
 
-### Управление (POST)
-
-| Путь | Описание | Идемпотентность |
-|------|---------|----------------|
-| `/enter` | Вход в позицию | ✅ `Idempotency-Key` (UUID) |
-| `/close` | Закрыть позицию | — |
-| `/move_sl` | Подвинуть SL/TP | — |
-| `/cancel_order` | Отменить ордер по order_id | ✅ |
-| `/order` | Статус ордера по order_id | GET |
-
-#### `/enter`
+`/positions`:
 
 ```json
-// POST /enter
-// Headers: Idempotency-Key: <UUID>
-{
-  "symbol": "LINKUSDT",  // required
-  "side": "Sell",        // "Buy" (LONG) | "Sell" (SHORT)
-  "qty": 14,             // required
-  "sl": 15.50,           // optional
-  "tp": 14.00,           // optional
-  "confirm": true        // true = исполнить, false = preview
-}
-
-// Ответ (confirm=true)
-{"api_version":"v1","status":"ok","order_id":"a1b2...","symbol":"LINKUSDT","side":"Sell","qty":"14","entry_price":"15.23","sl":"15.50","tp":"14.00"}
-
-// Ответ (confirm=false — preview)
-{"api_version":"v1","preview":{"symbol":"LINKUSDT","side":"Sell","qty":"14","estimated_entry":"15.23","estimated_sl_distance":"1.77%","estimated_tp_distance":"8.07%","risk_reward_ratio":"4.56"}}
+{"api_version":"v1","positions":{"AAVEUSDT":{"symbol":"AAVEUSDT","side":"Sell","leverage":"10",
+  "entryPrice":"98.60","markPrice":"93.50","unrealisedPnl":"4.18","stopLoss":"95.00","size":"1"}},
+ "total_unrealised_pnl":"4.18","count":1}
 ```
 
-#### `/close`
+## POST (Bearer обязателен)
 
-```json
-// POST /close
-{"symbol": "LINKUSDT"}
-// Ответ: {"api_version":"v1","status":"ok","symbol":"LINKUSDT","closed":true}
+| Путь | Назначение | Тело |
+|------|-----------|------|
+| `/scan` | GridSignal-скан | `{mode:"long"\|"short", interval:"D"\|"W"\|"4h"\|"1h"\|"15m"\|"5m", symbol?}` |
+| `/calc_qty` | Расчёт размера | `{symbol, risk_pct, leverage}` |
+| `/enter` | Вход | `{symbol, side, qty, sl?, tp?, leverage?, confirm}` |
+| `/close` | Закрыть позицию | `{symbol}` |
+| `/move_sl` | Двинуть SL/TP | `{symbol, stop_loss, take_profit?}` |
+| `/set-tp` | Поставить TP | `{symbol, tp}` |
+| `/kill_switch` | Закрыть всё + блокировка до `/resume` | — · **+ `X-Emergency-Auth`** |
+| `/emergency_close` | Закрыть всё без блокировки | `{symbol?}` · **+ `X-Emergency-Auth`** |
+| `/pause` · `/resume` | Пауза/возобновление авто-входов (все источники) | — |
+| `/reload-config` | Перечитать конфиг | — |
+| `/logs` | Последние строки лога | `{lines?}` |
+| `/reset-token` | Новый RPC-токен | — |
+| `/generate-jwt` | JWT для Android | — |
+| `/paper/balance` · `/paper/positions` · `/paper/summary` | Paper Trading (`BYBIT_PAPER_ENABLED=1`) | — |
+
+### `/enter` — двухшаговый confirm
+
+```bash
+# 1) превью
+curl -s -X POST http://127.0.0.1:8766/enter -H "Authorization: Bearer $TOKEN" \
+  -d '{"symbol":"LINKUSDT","side":"Sell","qty":14,"sl":15.50,"tp":14.00}'
+# 2) исполнение (без confirm:true ордер НЕ ставится)
+curl -s -m 60 -X POST http://127.0.0.1:8766/enter -H "Authorization: Bearer $TOKEN" \
+  -d '{"symbol":"LINKUSDT","side":"Sell","qty":14,"sl":15.50,"tp":14.00,"confirm":true}'
 ```
 
-#### `/move_sl`
+`side`: `Buy`=LONG, `Sell`=SHORT. `leverage` (1–100) необязателен: передан → ставится ровно он, не передан → плечо не навязывается (`/enter`), авто-ветка выставляет конфигное через `api.set_leverage()`. `-m 60` обязателен: Bybit отвечает до 30–40 с.
 
-```json
-// POST /move_sl
-{"symbol":"AAVEUSDT","stop_loss":"95.00","take_profit":"90.00"}
-// Ответ: {"api_version":"v1","status":"ok","symbol":"AAVEUSDT","old_sl":"96.60","new_sl":"95.00","new_tp":"90.00"}
-```
+## WebSocket
 
-#### `/cancel_order`
+`ws://127.0.0.1:8768/ws` — **отдельный порт** (aiohttp, поднимается из `main_async.py`; дефолт в `start_ws_server()` — 8767, живой запуск — 8768). Не 8766.
 
-```json
-// POST /cancel_order
-{"order_id":"a1b2c3d4-..."}
-// Ответ: {"api_version":"v1","status":"ok","order_id":"a1b2c3d4-...","cancelled":true}
-```
+Push: снапшот состояния при подключении (`position_update`, `alert`, `order_update`).
+Аутентификация — сетевой уровень (bind на loopback), токена в URL нет.
 
-#### `/order`
+## Чего в API НЕТ
 
-```json
-// GET /order?id=a1b2c3d4-...
-// Ответ: {"api_version":"v1","order":{"order_id":"a1b2...","symbol":"LINKUSDT","type":"LIMIT","price":"15.50","qty":"14","status":"New"}}
-```
-
-### Скан
-
-```
-POST /scan
-```
-
-```json
-// Запрос
-{"mode":"short","interval":"D","limit":10}
-// mode: "long" | "short"
-// interval: "D" | "W" | "4h" | "1h" | "15m" | "5m"
-// limit: 1-20 (default 5)
-```
-
-### Аварийные
-
-| Путь | Описание | Auth |
-|------|---------|------|
-| `/emergency_close` | Закрыть ВСЕ позиции по рынку | `X-Emergency-Auth` |
-| `/emergency_close` + `{symbol}` | Закрыть одну позицию | `X-Emergency-Auth` |
-| `/kill_switch` | Закрыть всё + блокировка новых входов | `X-Emergency-Auth` |
-| `/circuit_breaker` POST `{"action":"reset"}` | Сброс CB | Bearer |
-
-**Kill Switch:** полная блокировка до `/resume`. Без таймаута.
-
-### Служебные
-
-| Путь | Описание |
-|------|---------|
-| `POST /reset-token` | Новый токен (старый + grace 5 мин) |
-| `POST /pause` | Пауза авто-трейдинга |
-| `POST /resume` | Возобновить |
-| `POST /reload-config` | Перезагрузить конфиг |
-| `POST /set_leverage` | `{"symbol":"LINKUSDT","leverage":10}` |
-
-## WebSocket API
-
-`wss://<host>:8766/ws`
-
-Push-уведомления для real-time клиентов (Android, Web):
-
-| Событие | Данные |
-|---------|--------|
-| `position_update` | Позиция изменилась (PnL, марка, SL/TP) |
-| `alert` | Новый алерт (ENTRY, TP, SL, PUMP, CB) |
-| `order_update` | Ордер исполнен/отменён |
-| `heartbeat` | Каждые 30с |
-
-Аутентификация: `?token=<bearer_token>` в URL при подключении.
-
-## Webhook (TradingView)
-
-```
-POST /webhook
-```
-
-```json
-{
-  "symbol": "LINKUSDT",
-  "side": "Sell",
-  "qty": 14,
-  "secret": "<webhook_secret>"
-}
-```
-
-## Prometheus
-
-`GET /metrics` (Bearer auth). Рекомендуется вынести на отдельный порт (:9090).
-
-## CORS
-
-```
-Access-Control-Allow-Origin: https://ваш-домен
-Access-Control-Allow-Headers: Authorization, Content-Type, Idempotency-Key
-```
+Не изобретать: `/alerts`, `/trades`, `/summary`, `/cancel_order`, `/order`, `/webhook`, `/openapi.json`, `/set_leverage`, `POST /circuit_breaker`. Сброс CB — рестарт сервиса. `/rpc/all` существует, но как JSON-агрегат.
 
 ## MCP-инструменты (через Hermes)
 
 | Инструмент | → REST |
 |-----------|--------|
-| `bybit_ws.scan_market(mode, interval, limit)` | `POST /scan` |
-| `bybit_ws.get_positions()` | `GET /positions` |
-| `bybit_ws.get_metrics()` | `GET /metrics` (Prometheus) |
-| `bybit_ws.get_risk_status()` | `GET /risk` |
-| `bybit_ws.place_entry(symbol, side, qty, sl, tp)` | `POST /enter` |
-| `bybit_ws.get_journal()` | `GET /trades` (journal не отдельный эндпоинт) |
+| `scan_market(mode, interval)` | `POST /scan` |
+| `get_positions()` | `GET /positions` |
+| `get_metrics()` | `GET /rpc/metrics` |
+| `get_risk_status()` | `GET /risk` |
+| `place_entry(symbol, side, qty, sl, tp, order_type, price, leverage)` | `POST /enter` |
+| `get_journal()` | `GET /rpc/trades` + FIFO-анализ |
 
-## OpenAPI
+## Изменения
 
-`GET /openapi.json` — OpenAPI 3.0 спецификация для автогенерации клиентов.
-
-## Безопасность (чек-лист)
-
-- [x] HTTPS (nginx + Let's Encrypt)
-- [x] Bearer-токен + ротация
-- [x] X-Emergency-Auth для критических операций
-- [x] Rate limiting (nginx + встроенный)
-- [x] Idempotency-Key для /enter
-- [x] Grace period для /reset-token (5 минут)
-- [x] CORS для Web-клиентов
-- [ ] `/logs` — отключен в проде (утечка токенов)
-- [ ] `/paths` — только с X-Admin-Auth
-
-## Changelog
-
-| Дата | Изменение |
-|------|----------|
-| 28.06.2026 v7.1 | REST (не JSON-RPC), унификация путей, типы string, rate limits, Idempotency-Key, WebSocket API, OpenAPI, CORS, /cancel_order, /order, /balance, /summary, webhook |
-| 29.06.2026 Фаза 7 | Paper Trading: /paper/balance, /paper/positions, /paper/summary |
-
-## Paper Trading API (Фаза 7)
-
-`BYBIT_PAPER_ENABLED=1` для активации.
-
-### GET /paper/balance
-Возвращает баланс paper-счёта.
-```json
-{"enabled": true, "balance": 10000.0, "currency": "USDT"}
-```
-
-### GET /paper/positions
-Возвращает открытые paper-позиции.
-```json
-{"enabled": true, "positions": [{"symbol": "BTCUSDT", "side": "Buy", "size": 0.01, "entry": 85000, "mark": 85500, "upnl": 5.0, "leverage": 3}], "count": 1}
-```
-
-### GET /paper/summary
-Сводка paper-торговли: баланс, кол-во позиций, total_pnl, total_fees, upnl.
-```json
-{"enabled": true, "balance": 10150.0, "positions": 2, "total_pnl": 120.0, "total_fees": 30.0, "trades": 15, "upnl": 15.0}
-```
+| Дата | Что |
+|------|-----|
+| 2026-10-25 | Файл переписан по фактическим маршрутам `rpc.py`: удалены несуществующие эндпоинты, исправлены порт WS (8768), rate limit (один на IP), публичный список, `/health.trading_ready`, `X-Emergency-Auth` |
+| 2026-06-28 v7.1 | REST вместо JSON-RPC, типы string, Idempotency-Key, `/balance`, `/summary` |
+| 2026-06-29 Фаза 7 | Paper Trading `/paper/*` |

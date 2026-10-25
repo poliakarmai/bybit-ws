@@ -1,6 +1,7 @@
-# bybit-ws — Bollinger Grid трейдинг-монитор v11.4.x
+# bybit-ws — Bollinger Grid трейдинг-монитор v11.5.x
 
-> ⚠️ Файл сверен с кодом 2026-10-14 (коммит `49a9a79`); ранее был v7.6 и описывал удалённое поведение.
+> ✅ Сверено с кодом 2026-10-25 (`entry_judge.py`, `config.py`, env сервиса, `rpc.py`).
+> Что именно изменилось — `CHANGELOG.md` §11.5.0. Карта документации — [INDEX.md](INDEX.md).
 
 Автоматическая торговля фьючерсами Bybit. 24/7 systemd-сервис. SQLite WAL (SSOT).
 Документация: [ARCHITECTURE.md](ARCHITECTURE.md) (внутреннее устройство), [API.md](API.md) (эндпоинты), [ROADMAP.md](ROADMAP.md) (план).
@@ -29,14 +30,14 @@ BB-сигнал (score ≥ min_score)
 
 | Параметр | Значение |
 |----------|---------|
-| Цепочка | DeepSeek (`deepseek-v4-pro`) → Qwen (`qwen3.7-max`) → Nemotron (`nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter) |
-| Режим | fail-closed; fail-open только при длительном отказе LLM |
-| Таймаут | 5s |
+| Цепочка | **одна модель**: прямой `api.deepseek.com` через `~/.hermes/scripts/cross-model-judge.py` (`DEEPSEEK_JUDGE_MODEL`, по умолчанию `deepseek-chat`). Qwen/Nemotron/OpenRouter убраны 17.10 |
+| Режим | fail-closed; ответ читается как `content or reasoning_content` |
+| Таймаут | **20s** (`JUDGE_TIMEOUT`; 5s резало живые вызовы) |
+| Prompt-mode | `--mode signal` (оценивает качество входа, а не «полноту артефакта»), `pass` разрешён явно |
 | Все упали | revise (блок) |
 | Judge CB | 3 падения → отключение на 1ч |
-| Fallback >1ч | режим без Judge (fail-open), min_score +20% |
-| Кэш | 300s TTL |
-| Soft timeout | 5 ответов >3s → таймаут 7s |
+| Кэш | 300s TTL, ключ включает `sl_price:tp_price` |
+| Включён | `BYBIT_ENTRY_JUDGE_ENABLED=1` (прод) |
 
 ## 4. Auto-SL — ATR-adaptive
 
@@ -139,16 +140,23 @@ high_vol: max 5 позиций (приоритет над сессионным).
 
 | Флаг | Prod | План активации |
 |------|------|---------------|
-| `BYBIT_WS_BB_ENABLED` | 1 | — |
-| `BYBIT_ML_ENABLED` | 1 | — |
-| `BYBIT_ATR_TP_ENABLED` | 1 | — |
-| `BYBIT_DSPY_ENABLED` | 0 | После 500+ сделок |
-| `BYBIT_OPTUNA_ENABLED` | 0 | После бэктеста 3 мес. |
-| `BYBIT_REGIME_AUTO` | 0 | После валидации LSTM |
-| `BYBIT_AB_ENABLED` | 0 | При тесте PPO vs DQN |
-| `BYBIT_WS_FULL_ENABLED` | 0 | При миграции на WS |
-| `BYBIT_PAPER_ENABLED` | 0 | Paper Trading (без риска) |
-| `STRUCTURED_LOGGING` | 0 | JSON-логи в events.jsonl |
+| Флаг | Прод (env) | Дефолт в коде | Что делает |
+|------|-----------|---------------|-----------|
+| `BYBIT_ENTRY_JUDGE_ENABLED` | **1** | 0 | LLM-судья входа |
+| `BYBIT_REGIME_AUTO` | **1** | 0 | LSTM-режим → гейт сторон (+`BYBIT_REGIME_MIN_CONFIDENCE`, дефолт 60) |
+| `BYBIT_WORLD_MODEL` | **1** | 0 | World-model score в SHORT-скоринге |
+| `BYBIT_AB_ENABLED` | **1** | 0 | A/B в `auto_entry` |
+| `BYBIT_DSPY_ENABLED` | **1** | 0 | DSPy-гейт |
+| `BYBIT_ML_ENABLED` | **0** | 0 | Random-Forest ML Gate |
+| `BYBIT_OPTUNA_ENABLED` | **0** | 0 | Optuna-тюнинг |
+| `BYBIT_WS_BB_ENABLED` | — (дефолт) | 1 | WS-кеш свечей для BB |
+| `BYBIT_WS_FULL_ENABLED` | — (дефолт) | 0 | Позиции/ордера через приватный WS |
+| `BYBIT_ATR_TP_ENABLED` | — (дефолт) | 1 | ATR-based TP |
+| `BYBIT_PAPER_ENABLED` | — (дефолт) | 0 | Paper Trading |
+| `STRUCTURED_LOGGING` | — (дефолт) | 0 | JSON-логи в events.jsonl |
+
+> Значения получены из `~/.config/bybit-ws/env` 25.10. `BYBIT_AB_ENABLED=1` и `BYBIT_DSPY_ENABLED=1`
+> в проде — не «план», как писалось раньше; `BYBIT_ML_ENABLED` наоборот выключен.
 
 ## 14. Аварийные эндпоинты
 
@@ -182,12 +190,14 @@ POST /circuit_breaker {"action":"reset"}
 
 ## 16. Backtesting
 
-| Параметр | Значение |
-|----------|---------|
-| Период | 01.2025–06.2026 (18 мес.) |
-| Данные | 1M+ свечей (1h, 4h, D) |
-| Сделок | 500+ |
-| Win rate | 58% |
-| Profit factor | 1.8 |
-| Max drawdown | -12% |
-| Валидация | Walk-forward 30 дней |
+Живой инструмент — `bybit_ws/experiments/backtest_runner.py` (детерминированный движок, кэш свечей,
+run-манифест) и `paper_trade.py`. **Готовых «результатов бэктеста» в этой таблице больше нет:**
+прежние «500+ сделок / WR 58% / PF 1.8 / DD −12%» не воспроизводимы ни одним артефактом в репо —
+цифры удалены, чтобы не выдавать их за факт.
+
+Воспроизвести честно:
+```bash
+python3 -m bybit_ws.experiments.backtest_runner --symbol SOLUSDT --days 180 --no-db
+python3 -m bybit_ws.paper_trade SOLUSDT --days 90
+```
+Анти-overfit гейт: `experiments/validation.py` (DSR + PBO + permutation test).
