@@ -207,7 +207,8 @@
 | min-lot vs кап | ✅ `fed63f5` — при equity $62.8 кап 5% = $3.15 < `min_margin` $5; минимальный лот разрешён всегда, процент применяется к сумме сверх него |
 | 5 (SHORT-корреляция) | 🟡 shadow-режим: пишется в лог, вход не блокируется — ждём замера |
 | 3 (kill switch) | ✅ `aa9bea9` — cancel-all до закрытия, повторный fetch_positions+fetch_orders, эскалация STOP-алертом при failed>0 или остатках. Тесты `tests/test_kill_switch.py` (4). Живой замер до фикса: 22 открытых ордера (16 TP, 5 SL, 1 LIMIT_ENTRY LTCUSDT) — все бы пережили старый kill switch |
-| 18 (дашборд), 14 (`suggest_qty`), 19 (лок sqlite), 20 (`external_id` UNIQUE) | ⬜ открыты |
+| 19 (лок sqlite) | ✅ `a5c945d` — `threading.RLock` в `StateDB`, 21 write-метод сериализован. Тест `tests/test_state_db_lock.py` |
+| 18 (дашборд), 14 (`suggest_qty`), 20 (`external_id` UNIQUE) | ⬜ открыты |
 
 Тесты: 343 passed → после #3 (kill switch) **143 passed** (добавлены `tests/test_kill_switch.py` — 4 проверки; `test_audit2_fixes.py` — 13 проверок).
 
