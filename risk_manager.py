@@ -69,14 +69,17 @@ def _get_wallet_balance() -> Optional[dict]:
         from .api import bybit
         data = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT')
         if data and isinstance(data, dict) and data.get('retCode') == 0:
-            coins = data['result'].get('list', [])
-            for c in coins:
-                if c.get('coin') == 'USDT':
-                    return {
-                        'availableBalance': c.get('availableToWithdraw', '0'),
-                        'equity': c.get('equity', '0'),
-                        'totalWalletBalance': c.get('walletBalance', '0'),
-                    }
+            # result.list — счета, монеты лежат внутри list[i]['coin'].
+            # Раньше искали coin=='USDT' на уровне счёта → всегда None → проверка
+            # концентрации молча разрешала всё (fail-open), теперь цена ошибки видна.
+            for acc in data['result'].get('list', []):
+                for c in acc.get('coin', []) or []:
+                    if c.get('coin') == 'USDT':
+                        return {
+                            'availableBalance': c.get('availableToWithdraw', '') or c.get('walletBalance', '0'),
+                            'equity': c.get('equity', '0'),
+                            'totalWalletBalance': c.get('walletBalance', '0'),
+                        }
     except Exception:
         pass
     
@@ -156,8 +159,18 @@ def check_symbol_concentration(symbol: str, new_margin: float, positions: dict) 
     
     total_margin = existing_margin + new_margin
     risk_pct = total_margin / total_equity
-    
-    if risk_pct > MAX_RISK_PER_SYMBOL_PCT:
+
+    # Кап не может быть жёстче биржевого минимума: на депозите $63 5% = $3.15,
+    # а min_margin = $5 → без этой оговорки не проходит НИ ОДИН вход.
+    # Правило: минимальный лот разрешён всегда, всё сверх него — по проценту.
+    floor_margin = 0.0
+    try:
+        from .position_sizing import _FB_MIN_MARGIN, _p as _ps_p
+        floor_margin = float(_ps_p('min_margin', _FB_MIN_MARGIN))
+    except Exception:
+        pass
+
+    if risk_pct > MAX_RISK_PER_SYMBOL_PCT and total_margin > floor_margin:
         return False, (
             f'Концентрация {symbol}: ${total_margin:.1f} / ${total_equity:.0f} = '
             f'{risk_pct:.1%} > {MAX_RISK_PER_SYMBOL_PCT:.0%} лимита'

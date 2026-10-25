@@ -27,6 +27,42 @@ def test_concentration_fail_closed(monkeypatch, wallet):
     assert reason
 
 
+def test_min_lot_allowed_even_below_pct_cap(monkeypatch):
+    """На малом депозите 5% от equity меньше min_margin ($5) — минимальный лот проходит.
+
+    Иначе кап жёстче биржевого минимума и не входит вообще ничего (замер 25.10:
+    equity $62.83, 5% = $3.15 < min_margin $5).
+    """
+    monkeypatch.setattr(rm, '_get_wallet_balance', lambda: {'equity': 62.83})
+    allowed, reason, pct = rm.check_symbol_concentration('BTCUSDT', 5.0, {})
+    assert allowed is True, reason
+
+    # сверх минимального лота процент снова работает
+    allowed2, _, _ = rm.check_symbol_concentration('BTCUSDT', 10.0, {})
+    assert allowed2 is False
+
+
+def test_wallet_balance_parses_nested_coin_list(monkeypatch):
+    """Регресс: монеты лежат в result.list[i]['coin'], а не на уровне счёта.
+
+    Пока парсер искал coin=='USDT' на уровне счёта, _get_wallet_balance() всегда
+    возвращал None → проверка концентрации была fail-open по факту.
+    """
+    nested = {'retCode': 0, 'result': {'list': [
+        {'accountType': 'UNIFIED',
+         'coin': [{'coin': 'USDT', 'equity': '62.83', 'walletBalance': '71.01',
+                   'availableToWithdraw': ''}]}]}}
+
+    class _Api:
+        @staticmethod
+        def bybit(method, path, body=None, retries=None):
+            return nested
+
+    monkeypatch.setitem(sys.modules, 'bybit_ws.api', _Api())
+    w = rm._get_wallet_balance()
+    assert w and w['equity'] == '62.83'
+
+
 def test_concentration_ok_with_balance(monkeypatch):
     monkeypatch.setattr(rm, '_get_wallet_balance', lambda: {'equity': 1000.0})
     allowed, _, pct = rm.check_symbol_concentration('BTCUSDT', 5.0, {})
