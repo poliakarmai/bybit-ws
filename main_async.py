@@ -37,6 +37,7 @@ from .snapshot import save_json, load_json
 # Async API
 from .api import (
     fetch_positions_and_orders,
+    fetch_orders_async,
     get_bb_data_async,
     bybit_async,
 )
@@ -267,6 +268,27 @@ async def run_in_thread(fn, *args, timeout=25):
         return [], str(e)
 
 
+_ORDERS_CACHE: dict = {}  # последний успешный снимок ордеров (WS-ветка: fallback при ошибке REST)
+
+
+def _entries_paused() -> bool:
+    """Пауза RPC: блокирует ВСЕ источники входов (не только auto_short/DCA)."""
+    from .rpc import rpc_state
+    return bool(rpc_state.get("paused"))
+
+
+async def _maybe_execute(fn, entry_info, label=''):
+    """Единая точка исполнения входов: пауза блокирует любой источник.
+
+    Раньше paused проверялся только у auto_short/DCA (main_async.py:400,546),
+    а funding/scalp/mean_revert/auto_entry входили на паузе.
+    """
+    if _entries_paused():
+        log_event(f'⏸ ENTRY {label or fn.__name__} пропущен: пауза')
+        return False, 'paused'
+    return await run_in_thread(fn, entry_info)
+
+
 async def fetch_all_bb_parallel(symbols, interval='D'):
     """Параллельная загрузка BB для всех символов."""
     if not symbols:
@@ -319,7 +341,15 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
     if is_full_enabled() and is_private_connected() and not is_private_stale(120):
         # WS-режим: позиции из кеша
         positions = get_all_positions()
-        orders = {}  # ордера из execution-кеша (не полные, но актуальные)
+        # WS даёт позиции, но не ордера: пустой orders → auto_take_profit ставит дубли TP.
+        # При ошибке REST берём последний известный снимок (пустота хуже: дубли TP необратимы).
+        try:
+            orders = await fetch_orders_async() or {}
+            _ORDERS_CACHE.clear()
+            _ORDERS_CACHE.update(orders)
+        except Exception as e:
+            orders = dict(_ORDERS_CACHE)
+            log_event(f'⚠️ WS orders fetch error: {e} — используем последний снимок ({len(orders)})')
 
         # REST-сверка раз в REST_SYNC_INTERVAL
         now = time.time()
@@ -342,6 +372,9 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
                         log_event(f'🔄 WS/REST desync: WS={ws_keys} REST={rest_keys}')
                         positions = rest_positions
                     orders = rest_orders if rest_orders else orders
+                    if rest_orders:
+                        _ORDERS_CACHE.clear()
+                        _ORDERS_CACHE.update(rest_orders)
                     new_last_rest_sync = now
             except Exception as e:
                 log_event(f'⚠️ WS REST sync error: {e}')
@@ -471,7 +504,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                         if not entry_allowed:
                             log_event(f'🛑 Risk blocked funding {sym}: {risk_reason}')
                             continue
-                        exec_result = await run_in_thread(execute_funding_entry, entry_info)
+                        exec_result = await _maybe_execute(execute_funding_entry, entry_info, 'funding')
                         ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                         if ok:
                             log_event(f'💰 Funding Entry: {entry_info}')
@@ -508,7 +541,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                         if not entry_allowed:
                             log_event(f'🛑 Risk blocked mean_revert {sym}: {risk_reason}')
                             continue
-                        exec_result = await run_in_thread(execute_mean_revert, entry_info)
+                        exec_result = await _maybe_execute(execute_mean_revert, entry_info, 'mean_revert')
                         ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                         if ok:
                             log_event(f'📊 Mean Revert Entry: {entry_info}')
@@ -532,7 +565,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     if not entry_allowed:
                         log_event(f'🛑 Risk blocked scalp {sym}: {risk_reason}')
                         continue
-                    exec_result = await run_in_thread(execute_scalp, entry_info)
+                    exec_result = await _maybe_execute(execute_scalp, entry_info, 'scalp')
                     ok = exec_result[0] if isinstance(exec_result, tuple) else exec_result
                     if ok:
                         log_event(f'⚡ Scalp Entry: {entry_info}')
@@ -598,7 +631,11 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
     # ── Авто-вход (после всех проверок) ──
     try:
         # ── Risk Manager: проверка перед авто-входом ──
-        entries = await run_in_thread(auto_entry_scan, positions or {})
+        if _entries_paused():
+            log_event('⏸ ENTRY auto_entry пропущен: пауза')
+            entries = ([], None)
+        else:
+            entries = await run_in_thread(auto_entry_scan, positions or {})
         for entry in (entries[0] or []):
             # Извлекаем символ из строки входа для проверки риска
             import re
@@ -826,8 +863,8 @@ async def async_main_loop():
             # ── Тяжёлый цикл ──
             await heavy_cycle_async(cfg, new_positions, cycle, new_orders)
 
-            # ── SL re-entry ──
-            if new_positions:
+            # ── SL re-entry (тоже ВХОД: на паузе молчит) ──
+            if new_positions and not _entries_paused():
                 reentry_msgs, _ = await run_in_thread(check_sl_reentry, new_positions)
                 if isinstance(reentry_msgs, list):
                     for msg in reentry_msgs:

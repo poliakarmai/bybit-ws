@@ -9,22 +9,24 @@ from .api import place_stop_loss, get_bb_data
 from .alerts import log_event
 from . import TRAIL_SL_PERCENT
 
-# Throttle: не чаще чем раз в N секунд на позицию (по имени символа)
-_last_sl_update: dict[str, float] = {}
+# Throttle: не чаще чем раз в N секунд на позицию (по имени символа).
+# Храним ВРЕМЯ РАЗРЕШЕНИЯ, а не время последней попытки: слот занимается
+# только после успешного вызова API (раньше ошибка вешала позицию без SL на 120с).
+_next_sl_update: dict[str, float] = {}
 SL_THROTTLE = 120  # секунд между реальными обновлениями SL
-SL_BACKOFF = 600    # секунд после "not modified" — не дёргаем API
+SL_ERROR_BACKOFF = 15  # быстрый ретрай, если API не принял SL
 
 # Безубыток — каждые 4 цикла (~2 мин), но не чаще throttling'а
 SL_BREAKEVEN_CYCLES = 4
 
 def _throttled(sym: str) -> bool:
-    """True если обновление SL для этого символа разрешено."""
-    now = time.time()
-    last = _last_sl_update.get(sym, 0)
-    if now - last < SL_THROTTLE:
-        return False
-    _last_sl_update[sym] = now
-    return True
+    """True если обновление SL разрешено. Слот НЕ занимает — см. _mark()."""
+    return time.time() >= _next_sl_update.get(sym, 0)
+
+
+def _mark(sym: str, delay: int = SL_THROTTLE) -> None:
+    """Занять слот: следующая попытка для символа не раньше now+delay."""
+    _next_sl_update[sym] = time.time() + delay
 
 
 def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
@@ -86,12 +88,17 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
         try:
             result = place_stop_loss(sym, idx, side, size, sl_target)
             if result:
+                _mark(sym)  # успех — обычный троттл
                 alerts.append(f'🛡 SL {sym}: ${sl_target:.4f} ({sl_desc})')
             else:
+                _mark(sym, SL_ERROR_BACKOFF)  # API не принял — пробуем скоро
                 alerts.append(f'⚠️ SL {sym} НЕ встал: API error')
         except Exception as e:
             err = str(e)
-            if 'not modified' not in err.lower():
+            if 'not modified' in err.lower():
+                _mark(sym)  # SL уже стоит — дёргать бессмысленно
+            else:
+                _mark(sym, SL_ERROR_BACKOFF)
                 alerts.append(f'⚠️ SL {sym} НЕ встал: {err}')
 
     return alerts
