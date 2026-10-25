@@ -255,13 +255,16 @@ def suggest_qty(margin: float, price: float, leverage: float = 10,
         lot_step: шаг лота (default 0.1)
 
     Returns:
-        float: количество контрактов
+        float: количество контрактов (0 — если позиция меньше шага лота)
     """
     if price <= 0:
         return 0
     usdt_qty = margin * leverage
     qty = math.floor(usdt_qty / price / lot_step) * lot_step
-    return max(qty, lot_step)
+    # ponytail: возвращаем 0 при qty < lot_step — безопаснее, чем раздутая позиция
+    if qty < lot_step:
+        return 0
+    return qty
 
 
 # ═══════════════════════════════════════════════════

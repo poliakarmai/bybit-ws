@@ -433,7 +433,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         qty = 0
             except Exception as e:
                 qty = 0
-        
+
+        # Fail-closed: qty=0 после автосайзинга (позиция меньше шага лота,
+        # цена не получена) — не шлём заведомо невалидный /enter.
+        if qty <= 0:
+            return [TextContent(
+                type="text",
+                text=f"❌ qty too small: ATR-сайзинг дал 0 контрактов для {symbol} "
+                     f"(позиция меньше шага лота) — увеличь маржу или укажи qty вручную",
+            )]
+
         body = {"symbol": symbol, "side": side, "qty": qty, "confirm": True}
         if leverage is not None:
             body["leverage"] = leverage
