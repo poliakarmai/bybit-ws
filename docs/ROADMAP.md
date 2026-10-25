@@ -208,9 +208,10 @@
 | 5 (SHORT-корреляция) | 🟡 shadow-режим: пишется в лог, вход не блокируется — ждём замера |
 | 3 (kill switch) | ✅ `aa9bea9` — cancel-all до закрытия, повторный fetch_positions+fetch_orders, эскалация STOP-алертом при failed>0 или остатках. Тесты `tests/test_kill_switch.py` (4). Живой замер до фикса: 22 открытых ордера (16 TP, 5 SL, 1 LIMIT_ENTRY LTCUSDT) — все бы пережили старый kill switch |
 | 19 (лок sqlite) | ✅ `a5c945d` — `threading.RLock` в `StateDB`, 21 write-метод сериализован. Тест `tests/test_state_db_lock.py` |
-| 18 (дашборд), 14 (`suggest_qty`), 20 (`external_id` UNIQUE) | ⬜ открыты |
+| 14 (suggest_qty) | ✅ `96ee1b2` — `qty < lot_step` → `0` вместо раздувания; fail-closed guard в `mcp_server.py` |
+| 18 (дашборд), 20 (`external_id` UNIQUE) | ⬜ открыты |
 
-Тесты: 343 passed → после #3 (kill switch) **143 passed** (добавлены `tests/test_kill_switch.py` — 4 проверки; `test_audit2_fixes.py` — 13 проверок).
+Тесты: 343 passed → после #3 (kill switch) **143 passed** → после #19+#14 **148 passed** (kill_switch 4 + state_db_lock 2 + suggest_qty 3).
 
 #### Порядок работ (обновлён после второго аудита)
 
