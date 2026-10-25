@@ -84,17 +84,13 @@ WATCH_SYMBOLS = [
     'SANDUSDT', 'MANAUSDT', 'GALAUSDT', 'PEPEUSDT', 'SHIBUSDT',
     'EGLDUSDT', 'ZECUSDT', 'BONKUSDT', 'FLOKIUSDT', 'WIFUSDT',
     'TIAUSDT', 'SEIUSDT', 'STRKUSDT', 'JUPUSDT', 'PYTHUSDT',
-    'WUSDT', 'ENAUSDT', 'MOVEUSDT', 'STGUSDT', 'ESPORTSUSDT',
+    'WUSDT', 'MOVEUSDT', 'STGUSDT', 'ESPORTSUSDT',
 ]
 
 # BB-параметры
 BB_PERIOD = 20
 BB_STD = 2.0
 KLINE_LIMIT = 100
-
-# Таймфреймы для kline-подписки
-KLINES_TO_WATCH = ['D', 'W', '4h', '15m']
-
 
 def _calc_sma(values: List[float], period: int) -> List[float]:
     """Простое скользящее среднее."""
@@ -374,6 +370,11 @@ def _on_message_private(ws, message: str):
         if data.get('success'):
             log_event('🔐 WS private authenticated')
             _private_connected = True
+            private_args = ['position', 'execution', 'wallet']
+            try:
+                ws.send(json.dumps({'op': 'subscribe', 'args': private_args}))
+            except Exception as e:
+                log_event(f'⚠️ WS private subscribe failed: {e}')
         else:
             log_event(f'⚠️ WS private auth failed: {data.get("ret_msg", "unknown")}')
         return
@@ -464,8 +465,8 @@ def _on_message_private(ws, message: str):
                         'equity': float(w.get('equity',
                                     w.get('totalWalletBalance', 0))),
                         'upnl': float(w.get('unrealisedPnl', 0)),
-                        'totalMargin': float(w.get('totalMarginBalance',
-                                         w.get('totalPerpUPL', 0))),
+                        # без фолбэка на totalPerpUPL: uPnL — не маржа
+                        'totalMargin': float(w.get('totalMarginBalance', 0)),
                         'ts': time.time(),
                     }
 
@@ -485,16 +486,12 @@ def _on_open_private(ws):
     """При открытии приватного WS: аутентификация → подписка на приватные топики."""
     log_event('🔌 WS private connected — authenticating...')
 
-    # Аутентификация
+    # Аутентификация. Подписка — только после успешного auth-ответа
+    # (в _on_message_private): раньше она уходила через sleep(0.5) вслепую и при
+    # медленном/отклонённом auth отклонялась, оставляя приватный кеш пустым.
     auth_msg = _ws_auth_message()
     if auth_msg:
         ws.send(json.dumps(auth_msg))
-        time.sleep(0.5)  # Подождать auth-ответ
-
-        # Подписка на приватные топики: position, execution, wallet
-        private_args = ['position', 'execution', 'wallet']
-        ws.send(json.dumps({'op': 'subscribe', 'args': private_args}))
-        log_event(f'🔌 WS private subscribed: {private_args}')
     else:
         log_event('⚠️ WS private: auth message failed — closing')
         ws.close()
@@ -558,13 +555,22 @@ def _run_private_forever():
 # Публичное API
 # ═══════════════════════════════════════════════════════════
 
+_started_threads: list = []
+
+
 def start():
-    """Запустить WebSocket-клиенты в фоновых потоках."""
+    """Запустить WebSocket-клиенты в фоновых потоках (идемпотентно).
+
+    Второй вызов раньше поднимал второй комплект потоков → дубли подписок и
+    двойная нагрузка на лимит соединений.
+    """
+    if _started_threads:
+        return _started_threads[0] if len(_started_threads) == 1 else list(_started_threads)
     if websocket is None:
         log_event('⚠️ WS: websocket-client not installed — install with: pip install websocket-client')
         return None
 
-    threads = []
+    threads = _started_threads
 
     # Публичный WS (всегда)
     t_pub = threading.Thread(target=_run_public_forever, daemon=True, name='bybit-ws-public')

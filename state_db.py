@@ -137,6 +137,9 @@ CREATE TABLE IF NOT EXISTS counterfactual_entries (
 """
 
 
+_NOW = object()  # sentinel для closed_at: не передан → «сейчас», передан None → ещё открыта
+
+
 class StateDB:
     """Thread-safe SQLite database for bybit-ws state."""
 
@@ -193,7 +196,7 @@ class StateDB:
         return dict(zip(cols, row))
 
     def add_trade(self, symbol, side, strategy, entry_price, exit_price,
-                  size, pnl, fees=0.0, entry_at=None, closed_at=None,
+                  size, pnl, fees=0.0, entry_at=None, closed_at=_NOW,
                   bb_pct=None, rsi=None, entry_reason=None,
                   dca_count=0, partial_tp_count=0, exit_reason=None, hold_hours=None,
                   manual=0, leverage=None, external_id=None):
@@ -203,7 +206,8 @@ class StateDB:
              leverage, external_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, side, strategy, entry_price, exit_price, size, pnl,
-             fees, entry_at or int(time.time()), closed_at or int(time.time()),
+             fees, entry_at or int(time.time()),
+             int(time.time()) if closed_at is _NOW else closed_at,
              bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours,
              int(manual), leverage, external_id))
         self.conn.commit()
@@ -211,7 +215,13 @@ class StateDB:
 
     def record_entry(self, symbol, side, strategy, entry_price, size,
                      bb_pct=None, rsi=None, entry_reason=None):
-        """Записать контекст входа (без exit_price/pnl — позиция открыта)."""
+        """Записать контекст входа (без exit_price/pnl — позиция открыта).
+
+        closed_at=None уходит в БД как NULL: раньше `closed_at or now` превращал
+        открытую позицию в «закрытую сейчас» — inc_dca/inc_partial_tp ищут
+        closed_at IS NULL и никогда её не находили, а статистика дня считала
+        незакрытую сделку закрытой.
+        """
         return self.add_trade(
             symbol=symbol, side=side, strategy=strategy,
             entry_price=entry_price, exit_price=0, size=size, pnl=0,
@@ -242,15 +252,23 @@ class StateDB:
     def inc_dca_for_symbol(self, symbol):
         """Инкрементировать DCA для последней незакрытой сделки по символу."""
         self.conn.execute(
-            "UPDATE trade_history SET dca_count = dca_count + 1 "
-            "WHERE symbol=? AND closed_at IS NULL ORDER BY id DESC LIMIT 1", (symbol,))
+            # подзапрос вместо UPDATE..ORDER BY..LIMIT: тот требует сборки SQLite
+            # с SQLITE_ENABLE_UPDATE_DELETE_LIMIT (в части сборок — syntax error,
+            # а вызывающий код глотает исключение и счётчик молча не растёт)
+            "UPDATE trade_history SET dca_count = dca_count + 1 WHERE id = ("
+            "SELECT id FROM trade_history WHERE symbol=? AND closed_at IS NULL "
+            "ORDER BY id DESC LIMIT 1)", (symbol,))
         self.conn.commit()
 
     def inc_partial_tp_for_symbol(self, symbol):
         """Инкрементировать partial TP для последней незакрытой сделки по символу."""
         self.conn.execute(
-            "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 "
-            "WHERE symbol=? AND closed_at IS NULL ORDER BY id DESC LIMIT 1", (symbol,))
+            # подзапрос вместо UPDATE..ORDER BY..LIMIT: тот требует сборки SQLite
+            # с SQLITE_ENABLE_UPDATE_DELETE_LIMIT (в части сборок — syntax error,
+            # а вызывающий код глотает исключение и счётчик молча не растёт)
+            "UPDATE trade_history SET partial_tp_count = partial_tp_count + 1 WHERE id = ("
+            "SELECT id FROM trade_history WHERE symbol=? AND closed_at IS NULL "
+            "ORDER BY id DESC LIMIT 1)", (symbol,))
         self.conn.commit()
 
     def get_trades(self, symbol=None, since=None, limit=100):
