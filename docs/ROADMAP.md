@@ -212,7 +212,7 @@
 | 20 (external_id UNIQUE) | ✅ `15ffcda` — частичный UNIQUE-индекс (WHERE external_id IS NOT NULL), очистка 1 дубля в миграции. Тест `tests/test_external_id_unique.py` (3) |
 | 18 (дашборд Bearer) | ⬜ открыт |
 
-Тесты: 343 passed → после #3 (kill switch) **143 passed** → после #19+#14 **148 passed** → после #6+#7 **164 passed** (health_ready 5 + risk_journal 8).
+Тесты: 343 passed → после #3 (kill switch) **143 passed** → после #19+#14 **148 passed** → после #6+#7 **164 passed** → после #5 **167 passed** (health_ready 5 + risk_journal 8 + engine_fees 3).
 
 #### Порядок работ (обновлён после второго аудита)
 
