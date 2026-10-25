@@ -76,17 +76,22 @@ MEAN_REVERT_ENABLED = False  # отключено 01.08.2026 — BB%=0-5% на �
 # ═══════════════════════════════════════════════════════════
 # Async helpers
 # ═══════════════════════════════════════════════════════════
-def _clean_pump_state(data_dir, positions):
-    """Sync helper: pump_state + pumps.json cleanup (через StateDB, под его RLock)."""
+def _clean_pump_state(data_dir, positions, db=None):
+    """Sync helper: pump_state + pumps.json cleanup (через StateDB, под его RLock).
+
+    db — инъекция для тестов: без неё функция всегда бьёт в ПРОДОВУЮ базу,
+    и прогон теста вычищает живой pump_state (инцидент 25.10).
+    """
     from .alerts import log_event
     # Фаза 11 C2: раньше здесь был прямой sqlite3.connect в обход StateDB._lock —
-    # гонка с StateDB на WAL. Теперь только через singleton и его блокировку.
-    with sync_db._lock:
-        pump_syms = [r[0] for r in sync_db.conn.execute("SELECT symbol FROM pump_state").fetchall()]
+    # гонка с StateDB на WAL. Теперь только через StateDB и его блокировку.
+    db = db if db is not None else sync_db
+    with db._lock:
+        pump_syms = [r[0] for r in db.conn.execute("SELECT symbol FROM pump_state").fetchall()]
         orphaned = [s for s in pump_syms if s not in (positions or {})]
         for sym in orphaned:
-            sync_db.conn.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
-            sync_db.conn.commit()
+            db.conn.execute("DELETE FROM pump_state WHERE symbol=?", (sym,))
+            db.conn.commit()
             log_event(f'🧹 pump_state clean: {sym} (позиция закрыта)')
     
     import json as _json

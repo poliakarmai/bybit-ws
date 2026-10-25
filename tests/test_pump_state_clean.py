@@ -11,11 +11,15 @@
 судил по снапшоту `positions`, взятому в начале цикла — только что открытый
 символ в нём отсутствует.
 
+⚠️ 25.10: функция перешла на StateDB-singleton и БЕЗ инъекции била в ПРОДОВУЮ
+state.db — прогон этих кейсов вычищал живой pump_state. Поэтому db передаётся
+явно третьим аргументом, прод не трогается.
+
 Запуск:
     cd /home/openclaw/bybit-ws && python3 -m pytest tests/test_pump_state_clean.py -q
 """
+import json
 import os
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -25,47 +29,53 @@ sys.path.insert(0, '/home/openclaw')
 import pytest  # noqa: E402
 
 from bybit_ws.main_async import _clean_pump_state  # noqa: E402
+from bybit_ws.state_db import StateDB  # noqa: E402
 
 
 def _make_data_dir(tmp_path, symbols):
-    """Мини-каталог данных: state.db с pump_state + pumps.json."""
-    db = sqlite3.connect(str(tmp_path / 'state.db'))
-    db.execute('CREATE TABLE pump_state (symbol TEXT PRIMARY KEY)')
-    db.executemany('INSERT INTO pump_state VALUES (?)', [(s,) for s in symbols])
-    db.commit()
-    db.close()
+    """Мини-каталог данных: state.db с pump_state + pumps.json. Возвращает (dir, db)."""
+    db = StateDB(str(tmp_path / 'state.db'))
+    db.conn  # схема
+    db.conn.executemany('INSERT OR REPLACE INTO pump_state (symbol) VALUES (?)',
+                        [(s,) for s in symbols])
+    db.conn.commit()
     (tmp_path / 'pumps.json').write_text(
         '{%s}' % ','.join('"%s": {}' % s for s in symbols))
-    return Path(tmp_path)
+    return Path(tmp_path), db
 
 
-def _pump_symbols(data_dir):
-    db = sqlite3.connect(str(data_dir / 'state.db'))
-    got = {r[0] for r in db.execute('SELECT symbol FROM pump_state')}
-    db.close()
-    return got
+def _pump_symbols(db):
+    return {r[0] for r in db.conn.execute('SELECT symbol FROM pump_state')}
 
 
 def test_keeps_symbols_with_open_position(tmp_path):
     """Символ с открытой позицией остаётся — иначе следующий цикл входит повторно."""
-    d = _make_data_dir(tmp_path, ['QUSDT', 'XRPUSDT'])
-    _clean_pump_state(d, {'XRPUSDT': {'size': 100}})
-    assert _pump_symbols(d) == {'XRPUSDT'}
-    import json
-    assert list(json.loads((d / 'pumps.json').read_text())) == ['XRPUSDT']
+    d, db = _make_data_dir(tmp_path, ['QUSDT', 'XRPUSDT'])
+    try:
+        _clean_pump_state(d, {'XRPUSDT': {'size': 100}}, db)
+        assert _pump_symbols(db) == {'XRPUSDT'}
+        assert list(json.loads((d / 'pumps.json').read_text())) == ['XRPUSDT']
+    finally:
+        db.close()
 
 
 def test_removes_symbols_without_position(tmp_path):
     """Символ без позиции вычищается — иначе состояние копится вечно."""
-    d = _make_data_dir(tmp_path, ['QUSDT', 'XRPUSDT'])
-    _clean_pump_state(d, {'XRPUSDT': {'size': 100}})
-    assert 'QUSDT' not in _pump_symbols(d)
+    d, db = _make_data_dir(tmp_path, ['QUSDT', 'XRPUSDT'])
+    try:
+        _clean_pump_state(d, {'XRPUSDT': {'size': 100}}, db)
+        assert 'QUSDT' not in _pump_symbols(db)
+    finally:
+        db.close()
 
 
 def test_removes_all_when_flat(tmp_path):
-    d = _make_data_dir(tmp_path, ['QUSDT'])
-    _clean_pump_state(d, {})
-    assert _pump_symbols(d) == set()
+    d, db = _make_data_dir(tmp_path, ['QUSDT'])
+    try:
+        _clean_pump_state(d, {}, db)
+        assert _pump_symbols(db) == set()
+    finally:
+        db.close()
 
 
 def test_clean_runs_before_pump_entries():

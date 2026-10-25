@@ -80,9 +80,19 @@ def test_max_positions_logged(rm, monkeypatch):
     rm_, db = rm
     monkeypatch.setattr(rm_, 'get_dynamic_max_positions',
                         lambda: {'max_positions': 1, 'volatility_level': 'high'})
-    allowed, _ = rm_.check({'BTCUSDT': {'margin': 5}}, new_symbol='ETHUSDT', config=_Cfg())
+    allowed, _ = rm_.check({'BTCUSDT': {'margin': 5, 'size': 1}}, new_symbol='ETHUSDT', config=_Cfg())
     assert allowed is False
     assert _rows(db)[0]['check'] == 'max_positions'
+
+
+def test_stub_position_with_zero_size_not_counted(rm, monkeypatch):
+    """Фаза 11 D1: заглушки _note_entry (size=0) — не позиция, лимит не съедают."""
+    rm_, db = rm
+    monkeypatch.setattr(rm_, 'get_dynamic_max_positions',
+                        lambda: {'max_positions': 1, 'volatility_level': 'high'})
+    allowed, reason = rm_.check({'BTCUSDT': {'margin': 0, 'size': 0}},
+                                new_symbol='ETHUSDT', config=_Cfg())
+    assert allowed is True, reason
 
 
 def test_daily_loss_logged(rm, monkeypatch):
