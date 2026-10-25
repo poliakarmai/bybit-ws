@@ -995,6 +995,14 @@ class RPCHandler(BaseHTTPRequestHandler):
                 import logging
                 logging.getLogger('bybit.rpc').warning(f'health parse: {e}')
 
+        # Торговая готовность (#6): пауза или circuit breaker → новые входы запрещены.
+        # Импорт локальный: rpc тянет risk_manager лениво, как и остальные хендлеры.
+        try:
+            from .risk_manager import is_circuit_breaker_active
+            cb_active = bool(is_circuit_breaker_active())
+        except Exception:
+            cb_active = False
+
         _json_response(self, {
             "status": "alive" if alive else "stale",
             "alive": alive,
@@ -1003,6 +1011,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             "last_cycle": rpc_state["last_cycle"],
             "cycle_duration": rpc_state["cycle_duration"],
             "paused": rpc_state["paused"],
+            "circuit_breaker_active": cb_active,
+            "trading_ready": not rpc_state["paused"] and not cb_active,
         })
 
     def _handle_dashboard(self):

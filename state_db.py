@@ -125,6 +125,16 @@ CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS risk_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL,
+    symbol TEXT,
+    "check" TEXT,
+    passed INTEGER,
+    reason TEXT,
+    margin REAL,
+    equity REAL
+);
 CREATE TABLE IF NOT EXISTS counterfactual_entries (
     symbol TEXT,
     side TEXT,
@@ -586,6 +596,33 @@ class StateDB:
         q += " ORDER BY ts DESC"
         rows = self.conn.execute(q, params).fetchall()
         return [self._row_dict(r, "counterfactual_entries") for r in rows]
+
+    # ── risk decision journal (#7) ──────────────────────────────
+
+    def add_risk_decision(self, symbol, check, passed, reason='', margin=0.0, equity=0.0):
+        """Записать решение риск-проверки (аудит: почему вход отклонён/разрешён).
+
+        `check` — имя проверки ('concentration', 'daily_loss', 'correlation',
+        'circuit_breaker', ...). В SQL имя колонки в кавычках: CHECK — ключевое слово.
+        """
+        with self._lock:
+            self.conn.execute(
+                'INSERT INTO risk_decisions (ts, symbol, "check", passed, reason, margin, equity) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (time.time(), symbol, check, 1 if passed else 0, reason,
+                 float(margin or 0), float(equity or 0)))
+            self.conn.commit()
+
+    def get_risk_decisions(self, since=None, limit=100):
+        """Последние решения риск-проверок (свежие первыми)."""
+        q, params = 'SELECT * FROM risk_decisions', []
+        if since:
+            q += ' WHERE ts > ?'
+            params.append(since)
+        q += ' ORDER BY id DESC LIMIT ?'
+        params.append(limit)
+        rows = self.conn.execute(q, params).fetchall()
+        return [self._row_dict(r, 'risk_decisions') for r in rows]
 
     # ── maintenance ────────────────────────────────────────────
 

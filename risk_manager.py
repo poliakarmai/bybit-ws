@@ -138,18 +138,26 @@ def check_symbol_concentration(symbol: str, new_margin: float, positions: dict) 
     Returns:
         (allowed: bool, reason: str, total_margin_pct: float)
     """
+    def _dec(allowed: bool, reason: str, pct: float, total_margin: float = 0.0,
+             equity: float = 0.0) -> tuple:
+        """Записать решение в журнал (#7) и вернуть его вызывающему."""
+        _log_decision(symbol, 'concentration', allowed, reason,
+                      margin=total_margin or new_margin, equity=equity)
+        return allowed, reason, pct
+
     wallet = _get_wallet_balance()
     # fail-closed: «не смог проверить» ≠ «проверка пройдена»
     if not wallet:
-        return False, 'Концентрация: баланс недоступен — вход заблокирован', 0.0
+        return _dec(False, 'Концентрация: баланс недоступен — вход заблокирован', 0.0)
 
     try:
         total_equity = float(wallet.get('equity', 0))
     except (TypeError, ValueError):
-        return False, 'Концентрация: equity не число — вход заблокирован', 0.0
+        return _dec(False, 'Концентрация: equity не число — вход заблокирован', 0.0)
 
     if total_equity <= 0:
-        return False, f'Концентрация: equity={total_equity} — вход заблокирован', 0.0
+        return _dec(False, f'Концентрация: equity={total_equity} — вход заблокирован', 0.0,
+                    equity=total_equity)
     
     # Суммируем маржу по всем позициям этого символа
     existing_margin = 0.0
@@ -171,12 +179,12 @@ def check_symbol_concentration(symbol: str, new_margin: float, positions: dict) 
         pass
 
     if risk_pct > MAX_RISK_PER_SYMBOL_PCT and total_margin > floor_margin:
-        return False, (
+        return _dec(False, (
             f'Концентрация {symbol}: ${total_margin:.1f} / ${total_equity:.0f} = '
             f'{risk_pct:.1%} > {MAX_RISK_PER_SYMBOL_PCT:.0%} лимита'
-        ), risk_pct
-    
-    return True, '', risk_pct
+        ), risk_pct, total_margin, total_equity)
+
+    return _dec(True, '', risk_pct, total_margin, total_equity)
 
 
 def _load_risk_state() -> dict:
@@ -802,6 +810,20 @@ def get_dynamic_max_positions() -> dict:
 # Главная проверка risk_manager
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _log_decision(symbol, check, passed, reason='', margin=0.0, equity=0.0):
+    """Записать решение риск-проверки в журнал SQLite (#7).
+
+    Ошибка журнала не должна ломать торговлю: аудит вторичен к решению.
+    equity по умолчанию 0: баланс есть только там, где его уже запросили
+    (концентрация), остальные проверки не тянут лишний REST-вызов.
+    """
+    try:
+        from .state_db import db as _db
+        _db.add_risk_decision(symbol, check, passed, reason, margin, equity)
+    except Exception as e:
+        _log.warning(f'risk_decisions journal: {e}')
+
+
 def check(
     positions: dict,
     new_symbol: Optional[str] = None,
@@ -826,10 +848,8 @@ def check(
     # ── 1. Circuit breaker ──
     breaker_active, breaker_reason = check_circuit_breaker(config)
     if breaker_active:
-        # Если проверка без нового входа — просто возвращаем статус
-        if new_symbol is None:
-            return False, breaker_reason
-        # Новый вход — запрещён
+        # Оба случая (heartbeat и новый вход) возвращают одно и то же — один return.
+        _log_decision(new_symbol, 'circuit_breaker', False, breaker_reason)
         return False, breaker_reason
 
     # Если нет нового входа — всё ок
@@ -847,10 +867,12 @@ def check(
         ).fetchall()
         if len(recent) >= 3 and all(r[0] is not None and r[0] < 0 for r in recent):
             total_loss = sum(r[0] for r in recent)
-            return False, (
+            reason = (
                 f'🛑 Anti-ludomania: 3 убытка подряд за час (${total_loss:.2f}). '
                 f'Пауза 30 минут.'
             )
+            _log_decision(new_symbol, 'anti_ludomania', False, reason)
+            return False, reason
     except Exception as e:
         from .alerts import log_event
         log_event(f'⚠️ anti-ludomania check failed: {e}')
@@ -859,17 +881,21 @@ def check(
     cfg = config if config is not None else _get_config()
     banned = cfg.risk.get('banned_symbols', []) if hasattr(cfg, 'risk') else []
     if new_symbol in banned:
-        return False, f'{new_symbol} в бан-листе — вход запрещён'
+        reason = f'{new_symbol} в бан-листе — вход запрещён'
+        _log_decision(new_symbol, 'banned_symbol', False, reason)
+        return False, reason
 
     # ── 3. Проверка max positions ──
     dyn_max = get_dynamic_max_positions()
     max_pos = dyn_max['max_positions']
     current_count = len(positions) if positions else 0
     if current_count >= max_pos:
-        return False, (
+        reason = (
             f'Достигнут лимит позиций: {current_count}/{max_pos} '
             f'(волатильность: {dyn_max["volatility_level"]})'
         )
+        _log_decision(new_symbol, 'max_positions', False, reason)
+        return False, reason
 
     # ── 4. Проверка корреляции ──
     if new_symbol and positions:
@@ -877,12 +903,14 @@ def check(
             positions, new_symbol, new_side or 'Buy'
         )
         if not corr_ok:
+            _log_decision(new_symbol, 'correlation', False, corr_reason)
             return False, corr_reason
 
     # ── 4b. Cluster risk (stage 1 — shadow mode) ──
     if new_symbol and positions:
         cluster_ok, cluster_reason = check_cluster_risk(positions, new_symbol, new_side or 'Buy', config)
         if not cluster_ok:
+            _log_decision(new_symbol, 'cluster_risk', False, cluster_reason)
             return False, cluster_reason
 
     # ── 5. Проверка daily PnL (лимит) ──
@@ -891,10 +919,12 @@ def check(
     max_daily_loss = float(cfg.risk.get('max_daily_loss', 50))
 
     if daily['total_pnl'] <= -max_daily_loss:
-        return False, (
+        reason = (
             f'Дневной лимит убытка: ${daily["total_pnl"]:.2f} '
             f'(лимит ${max_daily_loss:.2f})'
         )
+        _log_decision(new_symbol, 'daily_loss', False, reason)
+        return False, reason
 
     # ── 6. Проверка максимальной маржи (динамическая) ──
     try:
@@ -914,14 +944,16 @@ def check(
             for p in positions.values()
         ) if positions else 0
         if total_margin >= max_total_margin:
-            return False, (
-                f'Лимит маржи: ${total_margin:.2f} / ${max_total_margin:.2f}'
-            )
+            reason = f'Лимит маржи: ${total_margin:.2f} / ${max_total_margin:.2f}'
+            _log_decision(new_symbol, 'max_margin', False, reason, margin=total_margin)
+            return False, reason
     except Exception as e:
         from .alerts import log_event
         log_event(f'⛔ RISK CHECK FAILED (margin limit): {e}')
+        _log_decision(new_symbol, 'risk_check_failed', False, f'risk check failed: {e}')
         return False, f'risk check failed: {e}'
 
+    _log_decision(new_symbol, 'all_passed', True)
     return True, ''
 
 
