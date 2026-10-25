@@ -199,9 +199,11 @@ def _import_bybit_trades(data_dir):
                     # ── v4: Exit reason tracking + streak ──
                     entry_ts = int(item.get('createdTime', 0)) / 1000
                     try:
-                        hold_h = (ts_val - entry_ts) / 3600 if entry_ts > 0 else 0
+                        hold_h = (ts_val - entry_ts) / 3600 if entry_ts > 0 else None
+                        if hold_h is not None and hold_h <= 0:
+                            hold_h = None  # нет валидного entry_ts — не выдаём 0 за длительность
                         # Bybit returns stopLoss/takeProfit=null. Детект по знаку PnL.
-                        if hold_h > 48:
+                        if hold_h is not None and hold_h > 48:
                             exit_reason = 'Time'
                         elif pnl > 0:
                             exit_reason = 'TP'
@@ -209,21 +211,24 @@ def _import_bybit_trades(data_dir):
                             exit_reason = 'SL'
                         else:
                             exit_reason = 'Unknown'
-                        _record_exit(sym, side, pnl, exit_reason, hold_h,
+                        _record_exit(sym, side, pnl, exit_reason, hold_h or 0,
                                      float(item.get('avgEntryPrice', 0)),
                                      float(item.get('avgExitPrice', 0)))
                         _record_streak(pnl)
                         # ── V9: micro-updates after each trade ──
-                        try:
-                            from .journal.self_learn import on_trade_closed as _micro_update
-                            _micro_update(sym, side, pnl, hold_h, exit_reason)
-                        except Exception as e:
-                            log_event(f'⚠️ self-learn micro-update failed for {sym}: {e}')
+                        if hold_h is None:
+                            log_event(f'⏭ self-learn: {sym} без валидного hold — micro-update пропущен')
+                        else:
+                            try:
+                                from .journal.self_learn import on_trade_closed as _micro_update
+                                _micro_update(sym, side, pnl, hold_h, exit_reason)
+                            except Exception as e:
+                                log_event(f'⚠️ self-learn micro-update failed for {sym}: {e}')
                     except Exception as e:
                         log_event(f'⚠️ self-learn exit/streak failed for {sym}: {e}')
                     # Проброс в canary-трекер: только для канареечных входов
                     try:
-                        if _match_canary(sym, side, ts_val, window=int(ts_val - entry_ts) + 3600):
+                        if entry_ts > 0 and _match_canary(sym, side, ts_val, window=int(ts_val - entry_ts) + 3600):
                             _record_canary(pnl > 0)
                     except Exception as e:
                         log_event(f'⚠️ canary tracking failed for {sym}: {e}')
@@ -269,6 +274,18 @@ async def run_in_thread(fn, *args, timeout=25):
 
 
 _ORDERS_CACHE: dict = {}  # последний успешный снимок ордеров (WS-ветка: fallback при ошибке REST)
+
+
+def _note_entry(positions: dict, sym: str, side: str) -> None:
+    """Учесть только что открытый вход в локальном снапшоте.
+
+    risk_check следующего источника в том же цикле получает снапшот, взятый ДО
+    входа: без этого 3 входа в коррелированные символы за цикл проходят лимиты.
+    size=0 — чтобы manage_sl/auto_tp не приняли заглушку за реальную позицию.
+    """
+    if sym and isinstance(positions, dict):
+        positions.setdefault(sym, {'symbol': sym, 'side': side or 'Buy',
+                                   'size': 0, 'entry': 0, 'mark': 0})
 
 
 def _entries_paused() -> bool:
@@ -509,6 +526,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                         if ok:
                             log_event(f'💰 Funding Entry: {entry_info}')
                             record_alert('ENTRY', symbol=sym)
+                            _note_entry(positions, sym, side)
                     except Exception as e:
                         log_event(f'⚠️ funding execute error: {e}')
             except Exception as e:
@@ -546,6 +564,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                         if ok:
                             log_event(f'📊 Mean Revert Entry: {entry_info}')
                             record_alert('ENTRY', symbol=sym)
+                            _note_entry(positions, sym, side)
                     except Exception as e:
                         log_event(f'⚠️ mean_revert execute error: {e}')
             except Exception as e:
@@ -570,6 +589,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
                     if ok:
                         log_event(f'⚡ Scalp Entry: {entry_info}')
                         record_alert('ENTRY', symbol=sym)
+                        _note_entry(positions, sym, side)
                 except Exception as e:
                     log_event(f'⚠️ scalp execute error: {e}')
         except Exception as e:
@@ -651,6 +671,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             add_alert('ENTRY', entry)
             send_telegram_alert(entry)
             record_alert('ENTRY', symbol=sym)
+            _note_entry(positions, sym, side if sym else None)
     except Exception as e:
         log_event(f'⚠️ auto_entry error: {e}')
 
@@ -757,6 +778,7 @@ async def async_main_loop():
         log_event(f'⚠️ WS start error: {e}')
 
     cycle = 0
+    prev_positions, prev_orders = {}, {}  # последний удачный снапшот (fallback при таймауте)
 
     while not SHUTDOWN:
         try:
@@ -766,7 +788,7 @@ async def async_main_loop():
             # ── Импорт истории Bybit (закрытые PnL) — раз в 10 циклов ──
             if cycle % 10 == 0:
                 try:
-                    _import_bybit_trades(DATA_DIR)
+                    await run_in_thread(_import_bybit_trades, DATA_DIR)
                 except Exception as e:
                     log_event(f'⚠️ bybit history import: {e}')
 
@@ -775,18 +797,20 @@ async def async_main_loop():
 
             # ── Параллельная загрузка позиций + ордеров ──
             # Фаза 6.3: при BYBIT_WS_FULL_ENABLED=1 — WS-push с REST-сверкой
-            # Жёсткий таймаут 20с: httpx keep-alive может виснуть на Bybit
+            # Жёсткий таймаут 20с (< цикла 30с): httpx keep-alive может виснуть на Bybit
             try:
                 new_positions, new_orders, _last_rest_sync = await asyncio.wait_for(
                     async_positions_snapshot_ws(_last_rest_sync, _REST_SYNC_INTERVAL),
-                    timeout=35.0
+                    timeout=20.0
                 )
+                prev_positions, prev_orders = dict(new_positions), dict(new_orders)
             except asyncio.TimeoutError:
-                log_event(f'⚠️ positions snapshot TIMEOUT (35s), using empty')
-                new_positions, new_orders = {}, {}
+                # Пустой снапшот = слепой цикл (manage_sl/auto_tp не увидят позиций) — держим прошлый.
+                log_event(f'⚠️ positions snapshot TIMEOUT (20s) — прошлый снапшот ({len(prev_positions)} поз.)')
+                new_positions, new_orders = dict(prev_positions), dict(prev_orders)
             except Exception as e:
-                log_event(f'⚠️ positions snapshot error: {e}')
-                new_positions, new_orders = {}, {}
+                log_event(f'⚠️ positions snapshot error: {e} — прошлый снапшот ({len(prev_positions)} поз.)')
+                new_positions, new_orders = dict(prev_positions), dict(prev_orders)
 
             # ── Обновляем RPC-состояние ──
             try:
@@ -808,7 +832,7 @@ async def async_main_loop():
             if new_positions:
                 try:
                     from .risk_manager import check_correlation_panic
-                    panic_reason = check_correlation_panic(new_positions)
+                    panic_reason, _ = await run_in_thread(check_correlation_panic, new_positions)
                     if panic_reason:
                         log_event(f'🦢 BLACKSWAN ALERT: {panic_reason}')
                         send_high_alert(f'🦢 BLACKSWAN: {panic_reason}\n\nЗакрыть красные позиции? Напиши «да»', level='CRITICAL')
@@ -825,10 +849,10 @@ async def async_main_loop():
                 # ── V10: Time exit — закрыть позиции-зомби (каждый цикл) ──
                 try:
                     from .time_exit import check_time_exit, apply_time_exits
-                    stale = check_time_exit(new_positions, new_orders)
+                    stale, _ = await run_in_thread(check_time_exit, new_positions, new_orders)
                     if stale:
-                        result = apply_time_exits(stale)
-                        if result.get('closed', 0) > 0:
+                        result, _ = await run_in_thread(apply_time_exits, stale)
+                        if isinstance(result, dict) and result.get('closed', 0) > 0:
                             log_event(f"⏰ Time exit: {result['closed']}/{len(stale)} closed")
                 except Exception as e:
                     log_event(f'⚠️ time_exit error: {e}')

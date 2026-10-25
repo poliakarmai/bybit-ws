@@ -133,21 +133,26 @@ def _calc_tight_trail(p: dict, is_long: bool, mark: float, entry: float):
 
 
 def _calc_simple_trail(p: dict, is_long: bool, mark: float, entry: float):
-    """Simple trailing: every +5% profit, move SL halfway"""
+    """Simple trailing: каждые +5% прибыли двигают SL на половину пройденного пути.
+
+    25.10: убрано требование «SL уже выше entry». Из-за него трейлинг не включался
+    никогда, пока SL не подтянут другими приоритетами: при +5..15% и дефолтном SL
+    ниже entry позиция получала SL −5..−10% вместо половинного трейлинга.
+    Монотонность сохранена: target двигается только в прибыльную сторону.
+    """
     pnl_pct = ((mark - entry) / entry * 100) if is_long else ((entry - mark) / entry * 100)
     current_sl = p.get('stopLoss')
 
     if pnl_pct < 5:
         return None, ''
 
-    if is_long and current_sl and current_sl > entry:
-        # SL уже в плюсе — подтягиваем
+    if is_long:
         target = round(entry + 0.5 * (mark - entry), 4)
-        if target > current_sl:
+        if target > entry and (current_sl is None or target > current_sl):
             return target, f'simple trail LONG +{pnl_pct:.1f}%'
-    elif not is_long and current_sl and current_sl < entry:
+    else:
         target = round(entry - 0.5 * (entry - mark), 4)
-        if target < current_sl:
+        if target < entry and (current_sl is None or target < current_sl):
             return target, f'simple trail SHORT +{pnl_pct:.1f}%'
 
     return None, ''
