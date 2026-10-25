@@ -8,7 +8,8 @@ Paper Trading / Бэктестинг Bollinger Grid на исторически�
 Симулирует:
 - BB-скоринг (6 метрик без ML)
 - Вход на Lower BB, выход по SL/TP
-- Комиссия 0.055%, проскальзывание 0.05%
+- Издержки: вход maker 0.02%, выход taker 0.055% + проскальзывание 0.05%
+- Опционально funding из funding_log (через funding_fn)
 """
 import argparse
 import json
@@ -28,8 +29,9 @@ from bybit_ws.api import bybit
 from bybit_ws.alerts import log_event
 
 # ── Константы ──
-TAKER_FEE = 0.00055    # 0.055%
-SLIPPAGE = 0.0005      # 0.05%
+TAKER_FEE = 0.00055    # 0.055% — выход (SL/TP консервативно считаем taker)
+MAKER_FEE = 0.0002     # 0.02% — вход PostOnly (как в проде)
+SLIPPAGE = 0.0005      # 0.05% — на выходе (стоп/маркет-исполнение)
 DEFAULT_SL_PCT = 0.05  # 5%
 DEFAULT_TP_ATR_MULT = 2.0
 MIN_SCORE = 20  # чуть ниже боевого (25) — бэктест не наказывает за ложные входы
@@ -42,7 +44,8 @@ MIN_SCORE = 20  # чуть ниже боевого (25) — бэктест не 
 class PaperExchange:
     """Симулятор биржи на исторических данных."""
 
-    def __init__(self, symbol: str, klines: list[dict], initial_balance: float = 1000):
+    def __init__(self, symbol: str, klines: list[dict], initial_balance: float = 1000,
+                 funding_fn=None):
         self.symbol = symbol
         self.klines = klines
         self.balance = initial_balance
@@ -50,6 +53,8 @@ class PaperExchange:
         self.position: Optional[dict] = None
         self.trades: list[dict] = []
         self._commission_paid = 0.0
+        # funding_fn(open_ms, close_ms) -> сумма cash_flow за время удержания
+        self._funding_fn = funding_fn
 
     def advance(self, candle: dict):
         """Проверить SL/TP существующей позиции по свече, обновить equity."""
@@ -83,23 +88,25 @@ class PaperExchange:
         self._update_equity(close)
 
     def open_long(self, price: float, sl: float, tp: float | None, qty: float, entry_time: int):
-        entry_fee = qty * price * (TAKER_FEE + SLIPPAGE)
+        entry_fee = qty * price * MAKER_FEE  # PostOnly-вход: maker, без проскальзывания
         self.balance -= entry_fee
-        self._commission_paid += qty * price * TAKER_FEE
+        self._commission_paid += entry_fee
         self.position = {
             'side': 'Buy', 'entry': price, 'qty': qty,
-            'sl': sl, 'tp': tp, 'entry_time': entry_time
+            'sl': sl, 'tp': tp, 'entry_time': entry_time,
+            'entry_fee': entry_fee,
         }
         self.equity = self.balance
         return True
 
     def open_short(self, price: float, sl: float, tp: float | None, qty: float, entry_time: int):
-        entry_fee = qty * price * (TAKER_FEE + SLIPPAGE)
+        entry_fee = qty * price * MAKER_FEE  # PostOnly-вход: maker, без проскальзывания
         self.balance -= entry_fee
-        self._commission_paid += qty * price * TAKER_FEE
+        self._commission_paid += entry_fee
         self.position = {
             'side': 'Sell', 'entry': price, 'qty': qty,
-            'sl': sl, 'tp': tp, 'entry_time': entry_time
+            'sl': sl, 'tp': tp, 'entry_time': entry_time,
+            'entry_fee': entry_fee,
         }
         self.equity = self.balance
         return True
@@ -115,8 +122,11 @@ class PaperExchange:
         else:
             gross_pnl = qty * (entry - exit_price)
 
-        exit_fee = qty * exit_price * TAKER_FEE
-        net_pnl = gross_pnl - exit_fee
+        exit_fee = qty * exit_price * (TAKER_FEE + SLIPPAGE)
+        # Funding: знак уже в cash_flow (минус = заплатили). Нет данных → 0.
+        funding = (self._funding_fn(pos['entry_time'], exit_time)
+                   if self._funding_fn else 0.0)
+        net_pnl = gross_pnl - exit_fee + funding
 
         self.balance += net_pnl
         self._commission_paid += exit_fee
@@ -125,6 +135,8 @@ class PaperExchange:
         self.trades.append({
             'side': pos['side'], 'entry': entry, 'exit': exit_price,
             'pnl': round(net_pnl, 2), 'pnl_pct': round(pnl_pct, 2),
+            'fee': round(pos.get('entry_fee', 0.0) + exit_fee, 6),
+            'funding': round(funding, 6),
             'reason': reason, 'entry_time': pos['entry_time'],
             'exit_time': exit_time,
         })

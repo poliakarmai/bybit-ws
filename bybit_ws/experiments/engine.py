@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sqlite3
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,6 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]          # /home/openclaw/bybit-
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws" / "experiments"
 KLINE_CACHE_DIR = DATA_DIR / "klines_cache"
 RUNS_DIR = DATA_DIR / "runs"
+STATE_DB_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
 
 ENGINE_VERSION = "1.0"
 
@@ -161,15 +163,46 @@ def data_hash(klines: list[dict]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+# ── funding ────────────────────────────────────────────────────
+
+def load_funding(symbol: str, db_path=None) -> list[tuple[int, float]]:
+    """Фандинг-платежи по символу из funding_log: [(ts_sec, cash_flow)].
+
+    Знак как у Bybit: минус = заплатили. Нет БД/таблицы → пустой список.
+    """
+    path = Path(db_path or STATE_DB_PATH)
+    if not path.exists():
+        return []
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                "SELECT ts, cash_flow FROM funding_log WHERE symbol=? ORDER BY ts",
+                (symbol,)).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+    return [(int(ts), float(cf)) for ts, cf in rows]
+
+
+def funding_in_window(rows: list[tuple[int, float]], open_ms: int, close_ms: int) -> float:
+    """Сумма cash_flow за время удержания позиции [open_ms, close_ms]; нет записей → 0.0."""
+    lo, hi = open_ms // 1000, close_ms // 1000
+    return sum(cf for ts, cf in rows if lo <= ts <= hi)
+
+
 # ── симуляция ──────────────────────────────────────────────────
 
 def simulate(klines: list[dict], symbol: str, initial_balance: float,
-             params: dict) -> tuple[list[dict], list[float]]:
+             params: dict, funding_db=None) -> tuple[list[dict], list[float]]:
     """Детерминированный прогон Bollinger Grid на заданных свечах.
 
     Логика зеркалит paper_trade.run_backtest: вход на Lower BB по 6-метричному
-    скорингу, выход по SL/TP, комиссия 0.055% + проскальзывание 0.05% (внутри
-    PaperExchange). Параметры (sl_pct, rr_ratio, min_score, bb_period, ...)
+    скорингу, выход по SL/TP. Издержки внутри PaperExchange: вход maker 0.02%
+    (PostOnly), выход taker 0.055% + проскальзывание 0.05%, плюс funding из
+    funding_log(state.db) за время удержания (funding_db — override пути для
+    тестов). Параметры (sl_pct, rr_ratio, min_score, bb_period, ...)
     берутся из `params`.
 
     Возвращает (trades, equity_curve).
@@ -182,7 +215,9 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
     bb_std = float(params.get("bb_std_mult", 2.0))
     atr_ratio_threshold = params.get("atr_ratio_threshold", None)
 
-    exchange = PaperExchange(symbol, klines, initial_balance)
+    funding_rows = load_funding(symbol, funding_db)
+    exchange = PaperExchange(symbol, klines, initial_balance,
+                             funding_fn=lambda o, c: funding_in_window(funding_rows, o, c))
     closes: list[float] = []
     equity_curve = [initial_balance]
 
@@ -282,6 +317,9 @@ def compute_metrics(trades: list[dict], equity_curve: list[float],
     avg_win_pct = mean([t["pnl_pct"] for t in wins]) if wins else 0.0
     avg_loss_pct = mean([t["pnl_pct"] for t in losses]) if losses else 0.0
 
+    total_fees = sum(t.get("fee", 0.0) for t in trades)
+    total_funding = sum(t.get("funding", 0.0) for t in trades)
+
     peak = initial_balance
     max_dd = 0.0
     for eq in equity_curve:
@@ -321,6 +359,8 @@ def compute_metrics(trades: list[dict], equity_curve: list[float],
         "total_pnl_pct": round(total_pnl_pct, 4),
         "sharpe_ratio": round(sharpe, 4),
         "final_equity": round(final_equity, 4),
+        "total_fees": round(total_fees, 6),
+        "total_funding": round(total_funding, 6),
     }
 
 
@@ -336,6 +376,8 @@ def build_manifest(params: dict, data_range: dict, commit: Optional[str],
         "git_commit": commit,
         "timestamp": timestamp_iso,
         "data_hash": kline_hash,
+        "fees_model": "maker_entry_taker_exit",
+        "funding_model": "funding_log_sqlite",
     }
 
 
