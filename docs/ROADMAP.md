@@ -166,8 +166,8 @@
 | # | Задача | Доказательство | Пётр | Статус |
 |---|--------|----------------|------|--------|
 | 5 | Издержки в бэктест-движке (fee/funding/slippage) | `bybit_ws/experiments/engine.py` (347 строк): 0 упоминаний fee/funding/slippage/commission | ПОДТВЕРЖДАЮ (ВЫСОКАЯ) | ⬜ |
-| 6 | Торговая готовность в `/health` (`TRADING_DISABLED`/`DEGRADED`) | `rpc.py:998` отдаёт status/alive/uptime/cycle/paused, признака готовности нет | ПОДТВЕРЖДАЮ (СРЕДНЯЯ) | ⬜ |
-| 7 | Журнал решений в БД (отказы риск-проверок) | отказы идут только в `events.log` (`alerts.log_event`, файл с ротацией); в БД нет | ПОДТВЕРЖДАЮ (уточнено: лог есть, БД нет) | ⬜ |
+| 6 | Торговая готовность в `/health` (`TRADING_DISABLED`/`DEGRADED`) | `rpc.py:998` отдаёт status/alive/uptime/cycle/paused, признака готовности нет | ПОДТВЕРЖДАЮ (СРЕДНЯЯ) | ✅ `e0bb539` |
+| 7 | Журнал решений в БД (отказы риск-проверок) | отказы идут только в `events.log` (`alerts.log_event`, файл с ротацией); в БД нет | ПОДТВЕРЖДАЮ (уточнено: лог есть, БД нет) | ✅ `e0bb539` |
 | 8 | Кластерный риск: `shadow` → `enforce` | `check_cluster_risk` вызывается (`risk_manager.py:867`), но в `shadow` всегда возвращает True. **Решение Алексея:** сначала замер, сколько входов это резало | ПОДТВЕРЖДЕНО мной (Петру не хватило фрагмента) | ⬜ |
 
 ### Фаза 11.2 — глубокий code audit (25.10, второй заход)
@@ -212,7 +212,7 @@
 | 20 (external_id UNIQUE) | ✅ `15ffcda` — частичный UNIQUE-индекс (WHERE external_id IS NOT NULL), очистка 1 дубля в миграции. Тест `tests/test_external_id_unique.py` (3) |
 | 18 (дашборд Bearer) | ⬜ открыт |
 
-Тесты: 343 passed → после #3 (kill switch) **143 passed** → после #19+#14 **148 passed** (kill_switch 4 + state_db_lock 2 + suggest_qty 3).
+Тесты: 343 passed → после #3 (kill switch) **143 passed** → после #19+#14 **148 passed** → после #6+#7 **164 passed** (health_ready 5 + risk_journal 8).
 
 #### Порядок работ (обновлён после второго аудита)
 
