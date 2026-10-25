@@ -94,6 +94,30 @@ MAX_RISK_PER_SYMBOL_PCT = 0.05     # 5% от депозита на один си
 _circuit_breaker_active = False
 _circuit_breaker_ts = 0.0
 _circuit_breaker_reason = ""
+_cb_restored = False
+
+
+def _cb_persist():
+    """Сохранить состояние CB на диск — рестарт не должен снимать блокировку."""
+    try:
+        _st = _load_risk_state()
+        _st['circuit_breaker'] = {'active': _circuit_breaker_active,
+                                  'ts': _circuit_breaker_ts,
+                                  'reason': _circuit_breaker_reason}
+        _save_risk_state(_st)
+    except Exception as e:
+        _log.warning(f'CB persist: {e}')
+
+
+def _cb_restore():
+    """Восстановить CB из risk_state.json после старта процесса."""
+    global _circuit_breaker_active, _circuit_breaker_ts, _circuit_breaker_reason
+    _st = (_load_risk_state() or {}).get('circuit_breaker') or {}
+    if _st.get('active'):
+        _circuit_breaker_active = True
+        _circuit_breaker_ts = float(_st.get('ts') or time.time())
+        _circuit_breaker_reason = str(_st.get('reason') or 'restored after restart')
+        _log.warning(f'Circuit breaker восстановлен после рестарта: {_circuit_breaker_reason}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -112,16 +136,17 @@ def check_symbol_concentration(symbol: str, new_margin: float, positions: dict) 
         (allowed: bool, reason: str, total_margin_pct: float)
     """
     wallet = _get_wallet_balance()
+    # fail-closed: «не смог проверить» ≠ «проверка пройдена»
     if not wallet:
-        return True, '', 0.0  # нет данных — разрешаем
-    
+        return False, 'Концентрация: баланс недоступен — вход заблокирован', 0.0
+
     try:
         total_equity = float(wallet.get('equity', 0))
     except (TypeError, ValueError):
-        return True, '', 0.0
-    
+        return False, 'Концентрация: equity не число — вход заблокирован', 0.0
+
     if total_equity <= 0:
-        return True, '', 0.0
+        return False, f'Концентрация: equity={total_equity} — вход заблокирован', 0.0
     
     # Суммируем маржу по всем позициям этого символа
     existing_margin = 0.0
@@ -207,45 +232,17 @@ def get_daily_pnl() -> dict:
     except Exception as e:
         _log.debug(f'get_daily_pnl positions: {e}')
 
-    # Realized PnL: из metrics.json
+    # Realized PnL: из trade_history (SSOT). Раньше читался metrics.json['pnl_total'],
+    # которого никто не пишет → realized всегда был 0, и circuit breaker видел только unrealized.
     try:
-        metrics_file = DATA_DIR / "metrics.json"
-        if metrics_file.exists():
-            with open(metrics_file) as f:
-                metrics = json.load(f)
-            today = _today_key()
-            # Ищем ключ за сегодня
-            for k in sorted(metrics.keys(), reverse=True):
-                if k.startswith(today) or (len(k) >= 10 and k[:10] == today):
-                    result['realized_pnl'] = float(metrics[k].get('pnl_total', 0) or 0)
-                    break
+        from .state_db import StateDB
+        day_start = int(datetime.combine(date.today(), datetime.min.time()).timestamp())
+        row = StateDB().conn.execute(
+            'SELECT COALESCE(SUM(pnl), 0) FROM trade_history WHERE closed_at >= ?',
+            (day_start,)).fetchone()
+        result['realized_pnl'] = float(row[0] or 0)
     except Exception as e:
-        _log.debug(f'get_daily_pnl metrics: {e}')
-
-    # Также проверяем trades.jsonl за сегодня
-    try:
-        trades_file = DATA_DIR / "trades.jsonl"
-        today_str = _today_key()
-        if trades_file.exists():
-            with open(trades_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        trade = json.loads(line)
-                        trade_ts = trade.get('ts', '')
-                        if isinstance(trade_ts, (int, float)):
-                            trade_date = datetime.fromtimestamp(trade_ts).strftime('%Y-%m-%d')
-                        else:
-                            trade_date = str(trade_ts)[:10]
-                        if trade_date == today_str:
-                            # Учитываем только если ещё не подсчитано через metrics
-                            pass  # metrics уже содержит сумму
-                    except Exception:
-                        pass
-    except Exception as e:
-        _log.debug(f'get_daily_pnl trades: {e}')
+        _log.warning(f'get_daily_pnl realized (trade_history): {e}')
 
     result['total_pnl'] = result['realized_pnl'] + result['unrealized_pnl']  # realized + unrealized
     result['total_pnl'] = round(result['total_pnl'], 2)
@@ -584,7 +581,11 @@ def check_circuit_breaker(config=None) -> Tuple[bool, str]:
     Returns:
         (breaker_active: bool, reason: str)
     """
-    global _circuit_breaker_active, _circuit_breaker_ts, _circuit_breaker_reason
+    global _circuit_breaker_active, _circuit_breaker_ts, _circuit_breaker_reason, _cb_restored
+
+    if not _cb_restored:
+        _cb_restored = True
+        _cb_restore()
 
     # Загружаем конфиг
     try:
@@ -605,6 +606,7 @@ def check_circuit_breaker(config=None) -> Tuple[bool, str]:
             _circuit_breaker_active = False
             _circuit_breaker_reason = ''
             _log.info('Circuit breaker: новый день — автосброс')
+            _cb_persist()
             return False, ''
         return True, _circuit_breaker_reason
 
@@ -622,6 +624,7 @@ def check_circuit_breaker(config=None) -> Tuple[bool, str]:
             f'Только закрытие позиций, новые входы запрещены.'
         )
         _log.warning(_circuit_breaker_reason)
+        _cb_persist()
         return True, _circuit_breaker_reason
 
     return False, ''
@@ -642,6 +645,7 @@ def reset_circuit_breaker() -> dict:
     was_active = _circuit_breaker_active
     _circuit_breaker_active = False
     _circuit_breaker_reason = ''
+    _cb_persist()
     _log.info('Circuit breaker: ручной сброс')
     return {
         'status': 'ok',

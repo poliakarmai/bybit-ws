@@ -3,7 +3,7 @@
 v5: замена subprocess(BYBIT_CLI) на httpx (код-ревью 14.06.2026).
 Ускорение 10-50x, устранение command injection, переиспользование соединений.
 """
-import hashlib, hmac, json, os, time
+import hashlib, hmac, json, os, time, uuid
 import httpx
 from .alerts import log_event, add_alert
 
@@ -142,6 +142,13 @@ def bybit(method, path, body=None, retries=None):
     _load_credentials()
     session = _get_session()
     url = _BASE_URL + path
+
+    # Идемпотентность: orderLinkId генерим ОДИН раз на вызов, чтобы ретрай
+    # (timeout/HTTP-ошибка) не встал на бирже вторым ордером.
+    # ponytail: покрыт /v5/order/create; create-batch (список в request) — когда появится.
+    if isinstance(body, dict) and path.split('?')[0].endswith('/v5/order/create') and 'orderLinkId' not in body:
+        body = dict(body)
+        body['orderLinkId'] = 'h' + uuid.uuid4().hex[:20]
 
     for attempt in range(retries + 1):
         try:

@@ -203,7 +203,7 @@ print("\n🔍 scan_unpack: проверка двойной распаковки.
 import subprocess
 result = subprocess.run(
     [sys.executable, str(Path(__file__).parent / 'scan_unpack.py')],
-    capture_output=True, text=True, timeout=10
+    capture_output=True, text=True, timeout=90  # замер 25.10: скан занимает 19с, 10с не хватало
 )
 bugs = result.stdout.count('🔴')
 if bugs > 0 or result.returncode != 0:

@@ -782,8 +782,10 @@ def auto_entry_scan(positions):
                         log_event(f'🔗 CORR {sym}: r={max_c:+.2f} с {corr_sym} → size ×0.5')
                     elif max_c < -0.70:
                         log_event(f'🔗 HEDGE {sym}: r={max_c:+.2f} с {corr_sym} (отрицательная — диверсификация)')
-                except Exception:
-                    pass
+                except Exception as e:
+                    # fail-closed: без корреляционной проверки не входим
+                    log_event(f'⚠️ CORR CHECK FAILED {sym}: {e} — вход заблокирован')
+                    continue
             # применяем решение корреляционного сайзинга (см. _apply_corr_sizing)
             margin, qty = _apply_corr_sizing(margin, qty, corr_sizer, price, _strategy_leverage('Buy'))
 
@@ -796,7 +798,8 @@ def auto_entry_scan(positions):
                     log_event(f'⚠️ CONC BLOCK {sym}: {conc_reason}')
                     continue
             except Exception as e:
-                log_event(f'⚠️ concentration check failed for {sym}: {e}')
+                log_event(f'⚠️ concentration check failed for {sym}: {e} — вход заблокирован')
+                continue
 
             # ── Anti-chasing: блок LONG, если монета уже разогналась >CHASE_PCT% ──
             try:
@@ -808,7 +811,8 @@ def auto_entry_scan(positions):
                         log_event(f'⛔ CHASE BLOCK {sym}: рост >{CHASE_PCT}% за {CHASE_LOOKBACK} свечей')
                         continue
             except Exception as e:
-                log_event(f'⚠️ chase guard failed for {sym}: {e}')
+                log_event(f'⚠️ chase guard failed for {sym}: {e} — вход заблокирован')
+                continue
 
             # ── Anti-overtrading: дневной лимит LONG-входов ──
             try:
@@ -819,7 +823,8 @@ def auto_entry_scan(positions):
                     log_event(f'⛔ DAILY LIMIT {sym}: {_reason} ({_today}/{MAX_DAILY_TRADES})')
                     continue
             except Exception as e:
-                log_event(f'⚠️ daily-limit check failed for {sym}: {e}')
+                log_event(f'⚠️ daily-limit check failed for {sym}: {e} — вход заблокирован')
+                continue
 
             # ── Плечо стратегии на биржу ДО ордера (этап 2 аудита) ──
             lev = apply_entry_leverage(sym, 'Buy')

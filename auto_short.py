@@ -654,7 +654,19 @@ def check_auto_short(positions):
                     log_event(f'⚠️ CONC BLOCK SHORT {sym}: {conc_reason}')
                     continue
             except Exception as e:
-                log_event(f'⚠️ auto_short non-critical: {e}')
+                # fail-closed: без проверки концентрации не входим
+                log_event(f'⚠️ CONC CHECK FAILED SHORT {sym}: {e} — вход заблокирован')
+                continue
+
+            # ── Корреляция для SHORT: пока shadow (только лог), решение о блокировке — за Алексеем ──
+            if positions:
+                try:
+                    from .correlation import max_corr_with_open
+                    _mc, _csym = max_corr_with_open(sym, positions)
+                    if _mc > 0.85:
+                        log_event(f'🔗 CORR SHORT (shadow) {sym}: r={_mc:+.2f} с {_csym} > 0.85 — блокировал бы вход')
+                except Exception as e:
+                    log_event(f'⚠️ CORR SHORT (shadow) {sym}: {e}')
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
