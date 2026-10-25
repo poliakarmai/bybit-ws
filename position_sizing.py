@@ -203,12 +203,13 @@ def get_atr(symbol: str, interval: str = 'D', period: int = 14) -> float | None:
 def atr_margin(symbol: str, score: float = 5.5,
                side: str = 'Buy', interval: str = 'D',
                atr_mult: float = None, risk_per_trade: float = None) -> dict:
-    """ATR-based расчёт маржи.
+    """ATR-осведомлённый расчёт маржи.
 
-    Формула: margin = risk_budget / (ATR_$ * multiplier)
-    - risk_budget: $ на риск в одной сделке (default $5)
-    - ATR_$: волатильность в долларах за выбранный интервал
-    - multiplier: сколько ATR держим как стоп (default 2.0)
+    Фактически: margin = risk_per_trade (маржа и есть риск при кросс-марже),
+    но не ниже min_margin. ATR используется для qty/стоп-дистанции, НЕ для
+    деления бюджета — формулы risk_budget/(ATR*mult) в коде нет (аудит #16).
+    - risk_per_trade: $ на риск в одной сделке (default $5)
+    - multiplier: сколько ATR держим как стоп (default 2.0), влияет на qty
 
     Returns:
         dict с ключами: margin, usdt_qty, qty, atr, risk_budget, method
