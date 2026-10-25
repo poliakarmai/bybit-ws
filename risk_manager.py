@@ -492,7 +492,10 @@ def check_cluster_risk(
     new_side: str = 'Buy',
     config=None,
 ) -> Tuple[bool, str]:
-    """Gate used by check(). Blocks ONLY when mode == 'enforce' and used_usd > budget_usd.
+    """Gate used by check(). Blocks ONLY when mode == 'enforce' and the cluster is
+    over budget — where "over" (`cluster_risk()['over']`) means cluster used_usd >
+    budget OR the whole same-side portfolio > budget. Так блокируется и портфельный
+    перегруз, не только кластерный.
 
     In 'shadow' mode always returns (True, reason) and logs via log_event.
     Fail-open (allowed) on: no positions, no snapshot, stale snapshot, empty pairs,
@@ -995,9 +998,11 @@ BLACKSWAN_MIN_RED_POSITIONS = 5   # мин. кол-во позиций в мин
 BLACKSWAN_TOTAL_UPNL_THRESHOLD = -150  # общий uPnL хуже этого → алерт (не закрытие!)
 
 def check_correlation_panic(positions: dict) -> Optional[str]:
-    """BlackSwan v2: если 3+ позиций одновременно в минус — паника.
-    
-    Вызывается каждый цикл из main_async. При срабатывании — emergency close.
+    """BlackSwan v2: алерт (НЕ закрытие) при >=5 позициях в минусе И общем uPnL хуже порога.
+
+    Порог задан константами BLACKSWAN_MIN_RED_POSITIONS (5) и
+    BLACKSWAN_TOTAL_UPNL_THRESHOLD (-150). Вызывается каждый цикл из main_async,
+    возвращает строку-причину для алерта; позиции не закрывает.
     """
     if not positions:
         return None

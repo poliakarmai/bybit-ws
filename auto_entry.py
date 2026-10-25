@@ -31,7 +31,7 @@ AUTO_ENTRY_WATCH = [
 ]
 
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
-MIN_SCORE = 25  # порог для авто-входа (из 50)
+MIN_SCORE = 25  # порог для авто-входа (макс. score = 55: bb15+vol10+down10+fund5+vola5+q5+wm5)
 
 # ── Anti-overtrading / anti-chasing guard'ы ──
 MAX_DAILY_TRADES = 6      # дневной лимит LONG-входов (overtrading-защита)
@@ -226,7 +226,7 @@ def _parse_ticker_line(line: str) -> dict:
             'fundingRate': 0.0,  # bybit-cli tickers не показывает funding, берём из REST
         }
     except Exception as e:
-        log_event(f'⚠️ ticker_parse({sym}): {e}')
+        log_event(f'⚠️ ticker_parse({line[:60]}): {e}')  # line, не sym: в сигнатуре только line
         return {}
 
 
@@ -245,7 +245,7 @@ def _count_down_days(sym: str) -> int:
                     break
             return down
     except Exception as e:
-        log_event(f'⚠️ count_down_days({sym}): {e}')  # ticker parse error — return 0 (no down days detected)
+        log_event(f'⚠️ count_down_days({sym}): {e}')  # kline parse error — return 0 (no down days detected)
     return 0
 
 def _calc_rsi(sym: str, period: int = 14) -> float:
@@ -624,7 +624,9 @@ def auto_entry_scan(positions):
             # Per-symbol оптимальный дисконт × режимный множитель (Фаза 5.2 + 5.4)
             sym_discount = _get_symbol_param(sym, 'entry_discount', 1.0)
             price = round(bb2['lower'] * sym_discount * entry_discount_mult, 4)
-            qty = math.ceil(margin * 3 / price)
+            # плечо берём из того же источника, что apply_entry_leverage ниже:
+            # литерал 3 расходился с конфигом при смене leverage
+            qty = math.ceil(margin * _strategy_leverage('Buy') / price)
             # ── v4: Streak size multiplier — половинный размер при 3+ лосях ──
             try:
                 from bybit_ws.journal.self_learn import get_streak_status
@@ -706,7 +708,8 @@ def auto_entry_scan(positions):
                                 break
                 required = margin * 1.05  # +5% запас на комиссию
                 if available_usdt < required:
-                    log_event(f'💰 LOW FUNDS {sym}: need ${required:.1f}, have ${available_usdt:.1f} — cooling down 30min')
+                    _cd_h = Config().strategy.long.get('cooldown_after_sl', 14400) / 3600
+                    log_event(f'💰 LOW FUNDS {sym}: need ${required:.1f}, have ${available_usdt:.1f} — кулдаун {_cd_h:.0f}ч')
                     record_sl_hit(sym)  # кулдаун через cooldown.json
                     continue
             except Exception as e:
@@ -880,8 +883,10 @@ def auto_entry_scan(positions):
                 try:
                     from .ab_test import is_ab_enabled, assign_variant, _generate_signal_id, record_paper_entry
                     if is_ab_enabled():
-                        signal_id = _generate_signal_id(sym, 'Buy')
-                        variant = assign_variant(sym, 'Buy', s['score'])
+                        # id и группа — из full_score_coin: assign_variant() кидал
+                        # случайный вариант, не тот, что применил ML-гейт
+                        signal_id = s.get('signal_id') or _generate_signal_id(sym, 'Buy')
+                        variant = s.get('ab_group') or assign_variant(sym, 'Buy', s['score'])
                         record_paper_entry(signal_id, variant, sym, 'Buy', 'long',
                                           price, qty, s['score'])
                         log_event(f'🧪 A/B: {sym} → вариант {variant} (score={s["score"]})')
@@ -901,8 +906,10 @@ def auto_entry_scan(positions):
                 try:
                     from .ab_test import is_ab_enabled, assign_variant, _generate_signal_id, record_paper_entry
                     if is_ab_enabled():
-                        signal_id = _generate_signal_id(sym, 'Buy')
-                        variant = assign_variant(sym, 'Buy', s['score'])
+                        # id и группа — из full_score_coin: assign_variant() кидал
+                        # случайный вариант, не тот, что применил ML-гейт
+                        signal_id = s.get('signal_id') or _generate_signal_id(sym, 'Buy')
+                        variant = s.get('ab_group') or assign_variant(sym, 'Buy', s['score'])
                         record_paper_entry(signal_id, variant, sym, 'Buy', 'long',
                                           price, qty, s['score'])
                         log_event(f'🧪 A/B: {sym} → вариант {variant} (score={s["score"]})')
