@@ -458,6 +458,18 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     }
 
 
+def _apply_corr_sizing(margin: float, qty: int, corr_sizer: float, price: float, lev: int):
+    """Корреляционный сайзинг: при r>0.70 corr_sizer=0.5 режет и маржу, и количество.
+
+    Раньше corr_sizer считался и логировался («size ×0.5»), но к размеру не
+    применялся — позиция открывалась полной. Возвращает (margin, qty).
+    """
+    if corr_sizer >= 1.0 or price <= 0:
+        return margin, qty
+    margin *= corr_sizer
+    return margin, max(1, math.ceil(margin * lev / price))
+
+
 def _strategy_leverage(side='Buy'):
     """Плечо стороны из конфига стратегии (long/short). Дефолт 3 — как в config.py."""
     strat = Config().strategy.long if side == 'Buy' else Config().strategy.short
@@ -772,6 +784,8 @@ def auto_entry_scan(positions):
                         log_event(f'🔗 HEDGE {sym}: r={max_c:+.2f} с {corr_sym} (отрицательная — диверсификация)')
                 except Exception:
                     pass
+            # применяем решение корреляционного сайзинга (см. _apply_corr_sizing)
+            margin, qty = _apply_corr_sizing(margin, qty, corr_sizer, price, _strategy_leverage('Buy'))
 
             # ── Symbol concentration check (28.06.2026) ──
             # Не более MAX_RISK_PER_SYMBOL_PCT от депозита на один тикер
