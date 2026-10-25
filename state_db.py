@@ -178,6 +178,22 @@ class StateDB:
             self.conn.execute("ALTER TABLE trade_history ADD COLUMN leverage INTEGER")
         if 'external_id' not in cols:
             self.conn.execute("ALTER TABLE trade_history ADD COLUMN external_id TEXT")
+        # Аудит #20: external_id должен быть уникальным, но ALTER TABLE не умеет
+        # ADD CONSTRAINT — только частичный UNIQUE-индекс (NULL = старые записи,
+        # их не блокируем). Сначала чистим дубли, иначе CREATE INDEX упадёт.
+        dup_ids = [r[0] for r in self.conn.execute("""
+            SELECT id FROM trade_history t
+            WHERE external_id IS NOT NULL
+              AND id > (SELECT MIN(id) FROM trade_history
+                        WHERE external_id = t.external_id)""")]
+        if dup_ids:
+            self.conn.execute(
+                f"DELETE FROM trade_history WHERE id IN ({','.join('?' * len(dup_ids))})",
+                dup_ids)
+            print(f"[state_db] migration #20: удалено дублей external_id: {len(dup_ids)}")
+        self.conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_history_external_id
+            ON trade_history(external_id) WHERE external_id IS NOT NULL""")
         # Фандинг (отдельный денежный поток, не входит в closedPnl).
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS funding_log (
