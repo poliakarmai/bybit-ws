@@ -6,7 +6,7 @@
 
 Endpoints:
     GET  /rpc/all         — все данные одним запросом (позиции, ордера, алерты, метрики, трейды)
-    GET  /rpc/dash/{all,risk,signals} — данные дашборда (публичные)
+    GET  /rpc/dash/{all,risk,signals} — данные дашборда (Bearer, как все /rpc/*)
     GET  /rpc/positions   — открытые позиции
     GET  /rpc/orders      — активные ордера
     GET  /rpc/health      — статус монитора (alive, uptime, cycle_count)
@@ -608,6 +608,12 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_get_config()
         elif path == "/rpc/paths":
             self._handle_paths()
+        elif path == "/rpc/dash/all":
+            self._handle_all()
+        elif path == "/rpc/dash/risk":
+            self._handle_risk()
+        elif path == "/rpc/dash/signals":
+            self._handle_signals()
         elif path == "/dashboard":
             self._handle_dashboard()
         elif path == "/rpc/ab_test_report":
