@@ -214,6 +214,14 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
     bb_period = int(params.get("bb_period", 20))
     bb_std = float(params.get("bb_std_mult", 2.0))
     atr_ratio_threshold = params.get("atr_ratio_threshold", None)
+    # ATR-выходы (None ⇒ старое поведение: фикс. sl_pct и tp = sl_pct*rr_ratio).
+    # Живой код: SL = clamp(1.5*ATR/entry, 3%, 10%) (unified_sl.py:233),
+    # TP = k*ATR (auto_tp.py ATR_TP_LEVELS / REGIME_TP_MULTIPLIERS).
+    sl_atr_mult = params.get("sl_atr_mult")
+    tp_atr_mult = params.get("tp_atr_mult")
+    sl_clamp = params.get("sl_clamp", (0.03, 0.10))
+    time_stop_bars = params.get("time_stop_bars")
+
 
     funding_rows = load_funding(symbol, funding_db)
     exchange = PaperExchange(symbol, klines, initial_balance,
@@ -222,12 +230,17 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
     equity_curve = [initial_balance]
 
     warmup = max(50, bb_period + 1)
+    entry_bar: Optional[int] = None
     for i in range(warmup, len(klines)):
         k = klines[i]
         exchange.advance(k)
         closes.append(k["close"])
 
         if exchange.position:
+            # hard time-stop: держим не дольше time_stop_bars свечей (закрытие по close)
+            if time_stop_bars and entry_bar is not None and i - entry_bar >= time_stop_bars:
+                exchange._close_position(k["close"], "TIME", k["open_time"])
+                entry_bar = None
             equity_curve.append(exchange.equity)
             continue
 
@@ -253,8 +266,12 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
         entry = k["close"]
         atr = calc_atr(klines, i)
         risk_amount = exchange.balance * (risk_pct / 100)
-        sl_distance = entry * sl_pct
-        qty = risk_amount / sl_distance if sl_distance > 0 else 0.0
+        if sl_atr_mult and atr > 0:
+            lo, hi = sl_clamp
+            sl_dist = max(lo, min(hi, float(sl_atr_mult) * atr / entry))
+        else:
+            sl_dist = sl_pct
+        qty = risk_amount / (entry * sl_dist) if sl_dist > 0 else 0.0
 
         # Volatility gate: skip entry if ATR spikes above baseline * threshold
         if atr_ratio_threshold is not None:
@@ -269,14 +286,20 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
                 equity_curve.append(exchange.equity)
                 continue
 
+        if tp_atr_mult and atr > 0:
+            tp_dist = float(tp_atr_mult) * atr / entry
+        else:
+            tp_dist = sl_dist * rr_ratio
+
         if best_side == "Buy":
-            sl = entry * (1 - sl_pct)
-            tp = entry * (1 + sl_pct * rr_ratio) if atr > 0 else None
+            sl = entry * (1 - sl_dist)
+            tp = entry * (1 + tp_dist) if atr > 0 else None
             exchange.open_long(entry, sl, tp, qty, k["open_time"])
         else:
-            sl = entry * (1 + sl_pct)
-            tp = entry * (1 - sl_pct * rr_ratio) if atr > 0 else None
+            sl = entry * (1 + sl_dist)
+            tp = entry * (1 - tp_dist) if atr > 0 else None
             exchange.open_short(entry, sl, tp, qty, k["open_time"])
+        entry_bar = i
 
         equity_curve.append(exchange.equity)
 
