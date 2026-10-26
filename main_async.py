@@ -213,19 +213,24 @@ def _import_bybit_trades(data_dir):
                             exit_reason = 'SL'
                         else:
                             exit_reason = 'Unknown'
-                        _record_exit(sym, side, pnl, exit_reason, hold_h or 0,
-                                     float(item.get('avgEntryPrice', 0)),
-                                     float(item.get('avgExitPrice', 0)))
-                        _record_streak(pnl)
-                        # ── V9: micro-updates after each trade ──
-                        if hold_h is None:
-                            log_event(f'⏭ self-learn: {sym} без валидного hold — micro-update пропущен')
-                        else:
-                            try:
-                                from .journal.self_learn import on_trade_closed as _micro_update
-                                _micro_update(sym, side, pnl, hold_h, exit_reason)
-                            except Exception as e:
-                                log_event(f'⚠️ self-learn micro-update failed for {sym}: {e}')
+                        # Ручные входы владельца в обучение не идут: они кормят WR,
+                        # streak-cooldown, bandit-posterior и exit_stats (замер 26.10:
+                        # manual = -$410 из -$441 общего минуса). Журнал и аналитика
+                        # (trade_history) их по-прежнему видят.
+                        if not _manual:
+                            _record_exit(sym, side, pnl, exit_reason, hold_h or 0,
+                                         float(item.get('avgEntryPrice', 0)),
+                                         float(item.get('avgExitPrice', 0)))
+                            _record_streak(pnl)
+                            # ── V9: micro-updates after each trade ──
+                            if hold_h is None:
+                                log_event(f'⏭ self-learn: {sym} без валидного hold — micro-update пропущен')
+                            else:
+                                try:
+                                    from .journal.self_learn import on_trade_closed as _micro_update
+                                    _micro_update(sym, side, pnl, hold_h, exit_reason)
+                                except Exception as e:
+                                    log_event(f'⚠️ self-learn micro-update failed for {sym}: {e}')
                     except Exception as e:
                         log_event(f'⚠️ self-learn exit/streak failed for {sym}: {e}')
                     # Проброс в canary-трекер: только для канареечных входов

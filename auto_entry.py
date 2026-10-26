@@ -10,6 +10,11 @@ from .position_sizing import margin_for_strategy
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
 
+# Рука bandit, выбранная на текущем скане: (sym, side) -> (regime, arm_idx).
+# Заполняется при скоринге, забирается при успешном входе для record_arm_assignment.
+_SCAN_ARMS = {}
+
+
 def _get_bb_ws(symbol, interval='D'):
     """Получить BB: сначала WS-кеш, fallback на REST."""
     if _WS_BB_ENABLED:
@@ -556,12 +561,16 @@ def auto_entry_scan(positions):
         # v4: Per-symbol min_score: canary → symbol_profile → session → optuna → global
         sym_min_score = _optuna_min_scores.get(sym, min_score)
         try:
-            from bybit_ws.journal.self_learn import get_canary_param, get_symbol_params, get_session_modifier, get_bandit_best_params
+            from bybit_ws.journal.self_learn import (
+                get_canary_param, get_symbol_params, get_session_modifier, pick_bandit_params,
+            )
             sym_min_score = get_canary_param('min_score', sym_min_score, symbol=sym, side='buy')
-            # Bandit best arm (per-regime baseline, если достаточно сделок)
-            _bp = get_bandit_best_params(regime_name)
+            # Bandit: Thompson-сэмпл руки на этот скан. Выбранную руку запоминаем —
+            # при входе она уйдёт в record_arm_assignment, иначе кредит уедет не туда.
+            _bp, _arm_idx = pick_bandit_params(regime_name)
             if _bp and 'min_score' in _bp:
                 sym_min_score = _bp['min_score']
+                _SCAN_ARMS[(sym, 'buy')] = (regime_name, _arm_idx)
             # Per-symbol profile override (специфичнее bandit)
             sym_min_score = get_symbol_params(sym, 'min_score', sym_min_score)
             # Session modifier
@@ -897,6 +906,14 @@ def auto_entry_scan(positions):
                     from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
                     if should_use_canary():
                         mark_canary_entry(sym, 'buy', time.time())
+                except Exception:
+                    pass
+                # ── Bandit: фиксируем руку, которая решала по этому входу ──
+                try:
+                    from bybit_ws.journal.self_learn import record_arm_assignment
+                    _arm = _SCAN_ARMS.pop((sym, 'buy'), None)
+                    if _arm:
+                        record_arm_assignment(sym, 'buy', time.time(), _arm[0], _arm[1])
                 except Exception:
                     pass
                 # -- Фаза 5.3: A/B-тест стратегий (успешный вход) --

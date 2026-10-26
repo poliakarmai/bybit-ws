@@ -38,7 +38,8 @@ CANARY_STATE = DATA_DIR / "canary_state.json"
 CANARY_ENTRIES = DATA_DIR / "canary_entries.jsonl"
 SYMBOL_PROFILES = DATA_DIR / "symbol_profiles.json"      # NEW
 EXIT_STATS = DATA_DIR / "exit_stats.jsonl"               # NEW
-LOSS_STREAK = DATA_DIR / "loss_streak.json"              # NEW
+LOSS_STREAK = DATA_DIR / "loss_streak.json"               # NEW
+ARM_ASSIGNMENTS = DATA_DIR / "bandit_arm_assignments.jsonl"  # какая рука bandit выбрана на входе
 
 _canary_lock = threading.Lock()
 _entries_lock = threading.Lock()
@@ -46,7 +47,13 @@ _profiles_lock = threading.Lock()
 _streak_lock = threading.Lock()
 
 # ── Canary constants ────────────────────────────────
-CANARY_ENTRY_PCT = 0.10
+# ponytail: canary выключен как канал применения параметров.
+# Причина: окно 6ч при потоке ~0.5 сделки/ч даёт E[canary-сделок]=0.3 против порога 5 —
+# промоушен недостижим, а 10% входов при этом получали непроверенные параметры.
+# Рабочий канал самоизменения — per-regime bandit (Thompson). Удаление мёртвого
+# canary-кода — отдельный рефакторинг, здесь только выключено применение.
+CANARY_ENABLED = False
+CANARY_ENTRY_PCT = 0.0
 CANARY_WINDOW_HOURS = 6
 CANARY_WR_DROP_THRESHOLD = 0.10
 CANARY_MATCH_WINDOW = 3600
@@ -395,6 +402,8 @@ def _auto_rollback_idle_canary(state: dict, hours_elapsed: float):
     logger.warning(f"🧪 Canary idle rollback: 0 trades in {hours_elapsed:.1f}h — reset")
 
 def should_use_canary() -> bool:
+    if not CANARY_ENABLED:
+        return False
     if not is_canary_active():
         return False
     return random.random() < CANARY_ENTRY_PCT
@@ -783,7 +792,7 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
         save_params_snapshot(new_params, win_rate, "self_learn")
 
     # ── LAUNCH CANARY ──
-    combined = bool(new_params or symbol_params or session_params)
+    combined = CANARY_ENABLED and bool(new_params or symbol_params or session_params)
     if combined:
         # V6: проверяем walk-forward
         if wf_result and not wf_result.get("approved", True):
@@ -2566,6 +2575,67 @@ def save_ensemble(ensemble: ParameterEnsemble):
     ENSEMBLE_PATH.write_text(json.dumps(ensemble.to_dict(), indent=2))
 
 
+def pick_bandit_params(regime: str = None) -> tuple:
+    """Thompson: sample arm для входа → (params, arm_idx).
+
+    Вызывается в entry-path; выбранную руку ОБЯЗАТЕЛЬНО записать
+    record_arm_assignment(), иначе исход будет зачислен другой руке (шум).
+    """
+    try:
+        params, idx = load_ensemble().select_params(regime)
+        return params or {}, idx
+    except Exception:
+        return {}, -1
+
+
+def record_arm_assignment(symbol: str, side: str, entry_ts: float,
+                          regime: str, arm_idx: int):
+    """Запомнить, какая рука bandit выбрана на входе (для честного кредита)."""
+    if arm_idx is None or arm_idx < 0:
+        return
+    rec = {"symbol": symbol, "side": side, "entry_ts": float(entry_ts),
+           "regime": regime, "arm_idx": int(arm_idx),
+           "ts": datetime.now().isoformat()}
+    try:
+        ARM_ASSIGNMENTS.parent.mkdir(parents=True, exist_ok=True)
+        with open(ARM_ASSIGNMENTS, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception as e:
+        logger.warning(f"bandit assignment write: {e}")
+
+
+def pop_arm_assignment(symbol: str, side: str, close_ts: float,
+                       max_age_h: float = 72) -> Optional[Tuple[str, int]]:
+    """Забрать назначение руки для закрывшейся сделки → (regime, arm_idx) или None."""
+    if not ARM_ASSIGNMENTS.exists():
+        return None
+    try:
+        lines = ARM_ASSIGNMENTS.read_text().strip().split("\n")
+    except Exception:
+        return None
+    found = None
+    kept = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if (found is None
+                and rec.get("symbol") == symbol and rec.get("side") == side
+                and rec.get("entry_ts", 0) <= close_ts
+                and close_ts - rec.get("entry_ts", 0) <= max_age_h * 3600):
+            found = (rec.get("regime", "RANGING"), int(rec.get("arm_idx", -1)))
+            continue
+        kept.append(line)
+    try:
+        ARM_ASSIGNMENTS.write_text("\n".join(kept) + ("\n" if kept else ""))
+    except Exception:
+        pass
+    return found
+
+
 def load_ensemble() -> ParameterEnsemble:
     if ENSEMBLE_PATH.exists():
         try:
@@ -2617,10 +2687,14 @@ def on_trade_closed(symbol: str, side: str, pnl: float, hold_hours: float,
             else:
                 regime = "RANGING"
 
-        # Update bandit для этого режима
-        _, arm_idx = ensemble.select_params(regime)
-        ensemble.update(regime, arm_idx, win)
-        save_ensemble(ensemble)
+        # Кредитуем ТУ руку, что выбиралась на входе. Раньше здесь стоял
+        # ensemble.select_params(regime) — повторный сэмпл, т.е. исход уходил
+        # случайной руке (напр. TRENDING_DOWN набрал 286 сделок одной рукой).
+        assignment = pop_arm_assignment(symbol, side, time.time())
+        if assignment:
+            arm_regime, arm_idx = assignment
+            ensemble.update(arm_regime, arm_idx, win)
+            save_ensemble(ensemble)
     except Exception:
         pass
 
