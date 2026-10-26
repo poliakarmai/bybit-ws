@@ -124,6 +124,13 @@ body { background:var(--bg); color:var(--text); font:13px/1.5 'SF Mono',monospac
 const RPC = window.location.pathname.replace(/\/dashboard$/, '');
 // RPC base = parent path (e.g. /dash from /dash/dashboard)
 const WS_URL = 'ws://127.0.0.1:8767/ws';
+// Токен для /rpc/dash/*: открыть как ?token=<UUID> один раз, дальше берётся из localStorage
+const _tokFromUrl = new URLSearchParams(window.location.search).get('token');
+if (_tokFromUrl) localStorage.setItem('rpc_token', _tokFromUrl);
+const AUTH = (() => {
+  const t = _tokFromUrl || localStorage.getItem('rpc_token') || '';
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
+})();
 let chart = null;
 let equityHistory = [];
 let allOrders = [];
@@ -237,7 +244,11 @@ function applyPositions(data) {
 // ── Полный поллинг (метрики, ордера, сигналы, алерты, риск) — раз в 60с ──
 async function refreshFull() {
   try {
-    const r = await fetch(RPC + '/rpc/dash/all');
+    const r = await fetch(RPC + '/rpc/dash/all', {headers: AUTH});
+    if (r.status === 401) {
+      document.getElementById('alerts').innerHTML = '<div class="metric">401 Unauthorized — открой дашборд с ?token=&lt;rpc token&gt;</div>';
+      return;
+    }
     const data = await r.json();
 
     // ── Positions & Monitor (fallback for mobile/no-WebSocket) ──
@@ -267,7 +278,7 @@ async function refreshFull() {
 
     // Risk (daily PnL)
     try {
-      const rr = await fetch(RPC + '/rpc/dash/risk');
+      const rr = await fetch(RPC + '/rpc/dash/risk', {headers: AUTH});
       const risk = await rr.json();
       const dailyLoss = parseFloat(risk.daily_loss || 0);
       const maxLoss = parseFloat(risk.max_daily_loss || 50);
@@ -287,7 +298,7 @@ async function refreshFull() {
 
     // Signals
     try {
-      const sr = await fetch(RPC + '/rpc/dash/signals');
+      const sr = await fetch(RPC + '/rpc/dash/signals', {headers: AUTH});
       const sig = await sr.json();
       const longs = sig.long || [];
       const shorts = sig.short || [];

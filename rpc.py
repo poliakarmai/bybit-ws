@@ -32,6 +32,7 @@ Endpoints:
 
 import json
 import os
+import hmac
 import time
 import asyncio
 import threading
@@ -125,6 +126,15 @@ rpc_state = {
     "cycle_duration": 0.0,
     "paused": False,
 }
+
+
+def _guard_paused(state: dict) -> str | None:
+    """Причина отказа во входе, если торговля на паузе (kill switch / pause). None — можно входить."""
+    if state.get("paused"):
+        return "Trading paused (%s): new entries blocked. POST /resume to enable." % (
+            state.get("paused_reason") or "manual pause")
+    return None
+
 
 # BB-кеш: {symbol: {data, ts}}. Дневные свечи — валидны 24ч.
 _BB_CACHE = {}
@@ -504,7 +514,9 @@ class RPCHandler(BaseHTTPRequestHandler):
         token = _get_auth_token()
         if not token:
             return False
-        if provided == token:
+        # .encode(): hmac.compare_digest(str, str) падает TypeError на не-ASCII,
+        # а заголовок Authorization приходит от кого угодно — это был бы 500 вместо 401.
+        if hmac.compare_digest(str(provided).encode('utf-8'), str(token).encode('utf-8')):
             pass  # ok
         elif provided and provided in self._OLD_TOKENS and time.time() < self._OLD_TOKENS[provided]:
             pass  # grace period
@@ -512,7 +524,9 @@ class RPCHandler(BaseHTTPRequestHandler):
             return False
         if require_emergency:
             emergency = os.environ.get('EMERGENCY_TOKEN', '')
-            if emergency and self.headers.get('X-Emergency-Auth', '') != emergency:
+            if emergency and not hmac.compare_digest(
+                    str(self.headers.get('X-Emergency-Auth', '')).encode('utf-8'),
+                    str(emergency).encode('utf-8')):
                 return False
         return True
 
@@ -543,22 +557,9 @@ class RPCHandler(BaseHTTPRequestHandler):
         path = self.path.rstrip("/") or "/"
         path = path.split("?")[0]  # strip query string
 
-        # Публичные эндпоинты — без авторизации
-        PUBLIC_PATHS = ("/health", "/rpc/paths", "/dashboard",
-                        "/rpc/dash/all", "/rpc/dash/risk", "/rpc/dash/signals")
-        if path in PUBLIC_PATHS:
-            if path == "/health":
-                return self._handle_health()
-            if path == "/rpc/paths":
-                return self._handle_paths()
-            if path == "/dashboard":
-                return self._handle_dashboard()
-            if path == "/rpc/dash/all":
-                return self._handle_all()
-            if path == "/rpc/dash/risk":
-                return self._handle_risk()
-            if path == "/rpc/dash/signals":
-                return self._handle_signals()
+        # Публичный эндпоинт — только /health (дашборд и /rpc/* требуют Bearer)
+        if path == "/health":
+            return self._handle_health()
 
         if not self._check_auth():
             return _error(self, 'Unauthorized', 'Invalid or missing Bearer token', 401)
@@ -607,6 +608,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             self._handle_get_config()
         elif path == "/rpc/paths":
             self._handle_paths()
+        elif path == "/dashboard":
+            self._handle_dashboard()
         elif path == "/rpc/ab_test_report":
             self._handle_ab_test_report()
         elif path == "/rpc/ab_status":
@@ -1420,6 +1423,11 @@ class RPCHandler(BaseHTTPRequestHandler):
                       "sl": 0.50, "tp": 0.55, "confirm": true}
         Если confirm: true — исполнение. Если false — только превью.
         """
+        # ── Пауза (kill switch / pause): новых входов нет, закрывать можно ──
+        paused_reason = _guard_paused(rpc_state)
+        if paused_reason:
+            return _error(self, 'Trading paused', paused_reason, 409, 'paused')
+
         # ── Идемпотентность ──
         idem_key = self.headers.get('Idempotency-Key', '')
         if idem_key:
@@ -1597,9 +1605,18 @@ class RPCHandler(BaseHTTPRequestHandler):
             result['leverage_requested'] = leverage
         try:
             from .manual_positions import mark_manual_position
+            from .state_db import db as _diag_db
+            # BB/RSI из кеша скана (24ч) — иначе в trade_history у ручных входов NULL.
+            _bb = _get_bb_for_symbol(symbol) or {}
             _reason = (body.get('reason') or 'manual').strip()[:100]
             mark_manual_position(symbol, side=side, note=_reason, auto_sltp=True,
-                                 leverage=result['leverage'])
+                                 leverage=result['leverage'],
+                                 bb_pct=_bb.get('bb_pct'), rsi=_bb.get('bb_rsi'),
+                                 margin=pos.get('positionIM') if pos else None)
+            # SL/TP «на память»: ручной TP — обычный limit-ордер, в снепшоте его нет,
+            # а closed-pnl отдаёт stopLoss/takeProfit=null (exit_reason был по знаку PnL).
+            if pos:
+                _diag_db.save_position_sltp(symbol, side, sl, tp, entry=pos.get('entry'))
         except Exception as e:
             from .alerts import log_event
             log_event(f'⚠️ mark_manual_position failed for {symbol} {side}: {e}')

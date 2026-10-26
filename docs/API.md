@@ -9,7 +9,8 @@
 `Authorization: Bearer <token>`; токен — `kv_store['rpc_auth_token']` в `state.db`, либо JWT (Android).
 Ротация: `POST /reset-token`.
 
-**Без токена (публичные):** `/health`, `/rpc/paths`, `/dashboard`, `/rpc/dash/all`, `/rpc/dash/risk`, `/rpc/dash/signals`.
+**Без токена (публичные):** только `/health`. `/rpc/paths`, `/dashboard`, `/rpc/dash/*` требуют Bearer.
+Дашборд открывать как `/dash/dashboard?token=<UUID>` (токен запоминается в localStorage).
 
 **Аварийные** (`/kill_switch`, `/emergency_close`) требуют **два** заголовка: `Authorization: Bearer …` **и** `X-Emergency-Auth: $EMERGENCY_TOKEN` (из env-файла сервиса).
 

@@ -107,7 +107,7 @@ API-ключи создаются в **Bybit → Account → API Management** с
 
 #### Аутентификация
 - **Bearer-токен** (UUID v4) обязателен для всех защищённых эндпоинтов.
-- Публичные эндпоинты без авторизации: `/health`, `/rpc/paths`.
+- Публичные эндпоинты без авторизации: `/health` (единственный). `/dashboard`, `/rpc/dash/*`, `/rpc/paths` требуют Bearer.
 - Токен передаётся в заголовке: `Authorization: Bearer <uuid>`.
 
 #### Rate-limiting
