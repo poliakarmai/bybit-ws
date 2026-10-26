@@ -895,6 +895,11 @@ def auto_entry_scan(positions):
                         bb_pct=s.get('bb_pos'),
                         rsi=s.get('rsi'),
                         entry_reason=entry_reason,
+                        score=s.get('score'),
+                        min_score=s.get('max_score'),
+                        regime=regime_name,
+                        leverage=lev,
+                        margin=margin,
                     )
                 except Exception as e:
                     log_event(f'⚠️ entry telemetry failed for {sym}: {e}')

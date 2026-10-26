@@ -106,6 +106,30 @@ def _clean_pump_state(data_dir, positions, db=None):
             log_event(f'🧹 pumps.json clean: {len(stale)} orphaned entries removed')
 
 
+SLTP_MATCH_TOL = 0.003  # 0.3%: цена выхода считается «на уровне» нашего SL/TP
+
+
+def classify_exit(exit_price, sl, tp, hold_hours, tol=SLTP_MATCH_TOL):
+    """Механизм выхода по цене против выставленных нами SL/TP.
+
+    Знак PnL НЕ используется: он давал «TP» на убытке (частичные закрытия, DCA)
+    и кормил этим self-learn. Нет уровней — честный 'Unknown'.
+    """
+    def _at(level):
+        try:
+            return bool(level) and abs(float(exit_price) - float(level)) / float(level) <= tol
+        except (TypeError, ValueError, ZeroDivisionError):
+            return False
+
+    if _at(tp):
+        return 'TP'
+    if _at(sl):
+        return 'SL'
+    if hold_hours and hold_hours > 48:
+        return 'Time'
+    return 'Unknown'
+
+
 def _import_bybit_trades(data_dir):
     """Sync helper: import closed trades from Bybit API + dedup + canary tracking."""
     import json as _json
@@ -156,31 +180,29 @@ def _import_bybit_trades(data_dir):
                     imported += 1
                     existing_keys.add(key)
                     # ── SQLite: запись в trade_history для self-learn ──
+                    entry_ts_raw = int(item.get('createdTime', 0))
+                    hold_h = (ts_val - entry_ts_raw/1000) / 3600 if entry_ts_raw else None
+                    if hold_h is not None and hold_h <= 0:
+                        hold_h = None  # мусор (createdTime≈closedTime) — не пишем 0.0
+                    # closed-pnl и trade_history живут стороной ЗАКРЫТИЯ (Sell закрывает
+                    # LONG), а диагностика входа и SL/TP — стороной ВХОДА.
+                    closing_side = 'Buy' if side == 'buy' else 'Sell'
+                    entry_side = 'Sell' if closing_side == 'Buy' else 'Buy'
+                    # Bybit отдаёт stopLoss/takeProfit=null → механизм выхода берём
+                    # из SL/TP, которые мы держали у позиции, а не из знака PnL.
+                    sltp = sync_db.get_position_sltp(
+                        sym, entry_side,
+                        entry_price=float(item.get('avgEntryPrice') or 0) or None) or {}
+                    exit_reason = classify_exit(price, sltp.get('sl'), sltp.get('tp'), hold_h)
                     try:
-                        entry_ts_raw = int(item.get('createdTime', 0))
-                        hold_h = (ts_val - entry_ts_raw/1000) / 3600 if entry_ts_raw else None
-                        if hold_h is not None and hold_h <= 0:
-                            hold_h = None  # мусор (createdTime≈closedTime) — не пишем 0.0
-                        # Bybit returns stopLoss/takeProfit=null for closed positions.
-                        # Детект по знаку PnL — надёжнее avgEntry/avgExit: те бывают
-                        # null/перепутаны при DCA и массовых закрытиях (давали «TP» на убытке).
-                        if hold_h and hold_h > 48:
-                            exit_reason = 'Time'
-                        elif pnl > 0:
-                            exit_reason = 'TP'
-                        elif pnl < 0:
-                            exit_reason = 'SL'
-                        else:
-                            exit_reason = 'Unknown'
-                        diag = sync_db.get_entry_diagnostic_for_close(
-                            sym, 'Buy' if side == 'buy' else 'Sell') or {}
+                        diag = sync_db.get_entry_diagnostic_for_close(sym, closing_side) or {}
                         try:
                             from .manual_positions import is_manual_position
                             _manual = 1 if is_manual_position(sym) else 0
                         except Exception:
                             _manual = 0
                         sync_db.add_trade(
-                            symbol=sym, side='Buy' if side == 'buy' else 'Sell',
+                            symbol=sym, side=closing_side,
                             strategy='auto', entry_price=float(item.get('avgEntryPrice', 0)),
                             exit_price=price, size=qty, pnl=pnl,
                             entry_at=int(entry_ts_raw / 1000) if entry_ts_raw else None,
@@ -204,15 +226,7 @@ def _import_bybit_trades(data_dir):
                         hold_h = (ts_val - entry_ts) / 3600 if entry_ts > 0 else None
                         if hold_h is not None and hold_h <= 0:
                             hold_h = None  # нет валидного entry_ts — не выдаём 0 за длительность
-                        # Bybit returns stopLoss/takeProfit=null. Детект по знаку PnL.
-                        if hold_h is not None and hold_h > 48:
-                            exit_reason = 'Time'
-                        elif pnl > 0:
-                            exit_reason = 'TP'
-                        elif pnl < 0:
-                            exit_reason = 'SL'
-                        else:
-                            exit_reason = 'Unknown'
+                        # exit_reason посчитан выше из SL/TP позиции (не из знака PnL).
                         # Ручные входы владельца в обучение не идут: они кормят WR,
                         # streak-cooldown, bandit-posterior и exit_stats (замер 26.10:
                         # manual = -$410 из -$441 общего минуса). Журнал и аналитика

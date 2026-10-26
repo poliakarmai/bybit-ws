@@ -45,7 +45,8 @@ def is_manual_position(sym):
     return entry.get('manual', False)
 
 
-def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, auto_sltp=False):
+def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, auto_sltp=False,
+                         **diag):
     """Пометить позицию как ручную — монитор её не трогает (кроме auto_sltp).
 
     Args:
@@ -55,6 +56,7 @@ def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, au
         note: заметка (например 'x10 wide-SL')
         leverage: плечо (опционально)
         auto_sltp: True → SL/TP бот ставит сам (по стратегии), но self-learn исключает
+        diag: bb_pct/rsi/margin — что известно о входе, уйдёт в entry_diag
     """
     state = _load_state()
     entry_data = state.get(sym, {})
@@ -72,10 +74,10 @@ def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, au
     state[sym] = entry_data
     _save_state(state)
     # логируем причину ручного входа → trade_history.entry_reason (через entry_diag)
-    if note:
+    if note or diag:
         try:
             from .state_db import db
-            db.save_entry_diagnostic(sym, side, entry_reason=note)
+            db.save_entry_diagnostic(sym, side, entry_reason=note, **diag)
         except Exception as e:
             log_event(f'⚠️ mark_manual_position entry_reason: {e}')
 

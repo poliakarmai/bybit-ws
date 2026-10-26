@@ -313,6 +313,15 @@ def execute_rotation(rotation: dict, positions: dict) -> bool:
 
         log_event(f'🔄 Ротация: открыт {to_sym} ({side}, {size} контрактов)')
 
+        # Телеметрия входа: иначе у ротаций в trade_history rsi/bb_pct/entry_reason NULL.
+        try:
+            from .state_db import db as _diag_db
+            _diag_db.save_entry_diagnostic(
+                to_sym, side, bb_pct=rotation.get('bb_pct'),
+                entry_reason=f"funding_rotation {rotation.get('reason', '')}".strip()[:100])
+        except Exception as e:
+            log_event(f'⚠️ Ротация: diag {to_sym} не записан: {e}')
+
         # 2. Немедленно ставим SL на новую позицию
         sl_price = _calc_rotation_sl(rotation, side)
         from .api import place_stop_loss

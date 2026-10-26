@@ -351,6 +351,10 @@ class StateDB:
                         (sym, p.get('side'), p.get('entry'), p.get('mark'), p.get('size'),
                          p.get('leverage'), p.get('stopLoss'), p.get('takeProfit'),
                          p.get('positionIdx', 0), p.get('upnl', 0), p.get('liqPrice'), now))
+                    # SL/TP «на память» для exit_reason: closed-pnl их отдаёт null,
+                    # а снепшот позиции затирается при закрытии.
+                    self.save_position_sltp(sym, p.get('side'), p.get('stopLoss'),
+                                            p.get('takeProfit'), entry=p.get('entry'))
 
     def get_positions(self):
         """Получить все открытые позиции."""
@@ -541,19 +545,60 @@ class StateDB:
 
     # ── entry diagnostics ─────────────────────────────────────
 
-    def save_entry_diagnostic(self, symbol, side, bb_pct=None, rsi=None, entry_reason=None):
+    def save_entry_diagnostic(self, symbol, side, bb_pct=None, rsi=None, entry_reason=None, **extra):
         """Сохранить контекст входа (телеметрия) — переживает закрытие позиции.
 
         Ключ: entry_diag:{symbol}:{side} (Buy/Sell).
         Используется _import_bybit_trades для записи bb_pct/rsi/entry_reason в trade_history.
+        extra: score/min_score/regime/leverage/margin — что было известно в момент входа.
         """
         key = f"entry_diag:{symbol}:{side}"
-        self.set_kv(key, {
+        payload = {
             'bb_pct': bb_pct,
             'rsi': rsi,
             'entry_reason': entry_reason,
             'ts': int(time.time()),
-        })
+        }
+        payload.update({k: v for k, v in extra.items() if v is not None})
+        self.set_kv(key, payload)
+
+    # ── SL/TP позиции (для честного exit_reason) ───────────────
+
+    def save_position_sltp(self, symbol, side, stop_loss=None, take_profit=None, entry=None):
+        """Запомнить SL/TP открытой позиции; переживает её закрытие.
+
+        Bybit в /v5/position/closed-pnl отдаёт stopLoss/takeProfit=null, а снепшот
+        positions затирается каждым циклом — без этой памяти механизм выхода
+        приходится угадывать по знаку PnL (та и была ошибка).
+        Пустые поля не затирают уже известный уровень: ручной TP — обычный
+        limit-ордер, в снепшоте позиции его нет.
+        """
+        key = f"sltp:{symbol}:{side}"
+        cur = self.get_kv(key)
+        cur = cur if isinstance(cur, dict) else {}
+        cur['sl'] = stop_loss if stop_loss else cur.get('sl')
+        cur['tp'] = take_profit if take_profit else cur.get('tp')
+        if entry:
+            cur['entry'] = entry
+        cur['ts'] = int(time.time())
+        self.set_kv(key, cur)
+
+    def get_position_sltp(self, symbol, entry_side, entry_price=None, entry_tol=0.005):
+        """SL/TP, которые мы держали у этой позиции. None — данных нет (честный Unknown).
+
+        entry_tol: если запомненная цена входа расходится с avgEntryPrice сделки,
+        это память от другой (уже закрытой) позиции — не используем.
+        """
+        val = self.get_kv(f"sltp:{symbol}:{entry_side}")
+        if not isinstance(val, dict):
+            return None
+        try:
+            if entry_price and val.get('entry'):
+                if abs(float(val['entry']) - float(entry_price)) / float(entry_price) > entry_tol:
+                    return None
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+        return val
 
     def get_entry_diagnostic(self, symbol, side):
         """Получить и удалить контекст входа (pop-семантика)."""

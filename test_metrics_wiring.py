@@ -34,6 +34,14 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(ma, 'record_alert', lambda level, is_false=False, symbol=None: alerts.append((level, symbol)))
     monkeypatch.setattr(ma.sync_db, 'add_trade', lambda **kw: None)
     monkeypatch.setattr(ma.sync_db, 'get_entry_diagnostic_for_close', lambda *a, **kw: {})
+    # exit_reason теперь идёт от SL/TP позиции (не от знака PnL) — уровни, которые
+    # «держал» бот для фейковых сделок ниже.
+    _levels = {
+        'BTCUSDT': {'sl': 95.0, 'tp': 100.0},    # выход 100 → TP
+        'ETHUSDT': {'sl': 100.0, 'tp': 110.0},   # выход 100 → SL
+    }
+    monkeypatch.setattr(ma.sync_db, 'get_position_sltp',
+                        lambda sym, side, entry_price=None: _levels.get(sym))
     import bybit_ws.journal.self_learn as sl
     for name in ('record_exit', 'record_trade_result', 'match_canary_entry',
                  'record_canary_result', 'on_trade_closed'):
