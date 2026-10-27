@@ -5,7 +5,7 @@ Consolidates: auto_sl, trailing_sl, simple_trailing_sl, tight_trailing_sl, break
 Priority: tight_trail > simple_trail > hard_trail > breakeven > auto_sl > default_fix
 """
 import time
-from .api import place_stop_loss, get_bb_data
+from .api import place_stop_loss, get_bb_data, round_price_safe
 from .alerts import log_event
 from . import TRAIL_SL_PERCENT
 
@@ -74,6 +74,20 @@ def manage_sl(positions: dict, cycle: int = 0) -> list[str]:
                         sl_target, sl_desc = _calc_default_sl(sym, p, is_long, mark, entry, leverage)
 
         if sl_target is None:
+            continue
+
+        # Стоп обязан быть по правильную сторону рынка. Причина отказа биржи
+        # (RVNUSDT 27.10): безубыток round(entry*0.99, 4) при entry 0.0014 дал
+        # 0.0014 — выше mark 0.001364, 70 отказов, позиция висела без стопа.
+        # Если расчётный стоп невалиден — считаем заново от mark с зазором 3%
+        # (не вплотную к mark: стоп в 0.1% выбьет шумом).
+        if (is_long and sl_target >= mark) or (not is_long and sl_target <= mark):
+            sl_target = mark * 0.97 if is_long else mark * 1.03
+            sl_desc = f'{sl_desc} → от mark 3% (расчётный был за рынком)'.strip()
+        sl_target = round_price_safe(sym, sl_target, is_long)
+        if (is_long and sl_target >= mark) or (not is_long and sl_target <= mark):
+            alerts.append(f'⚠️ SL {sym} пропущен: {sl_target} по неверную сторону mark {mark}')
+            _mark(sym, SL_ERROR_BACKOFF)
             continue
 
         # Skip if SL hasn't changed meaningfully (>0.1% от entry)

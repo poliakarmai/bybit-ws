@@ -357,6 +357,46 @@ def fetch_open_orders() -> list[dict]:
     return all_orders
 
 
+_TICK_CACHE: dict = {}
+_TICK_TTL = 3600
+
+
+def get_tick_size(sym: str):
+    """priceFilter.tickSize символа, кэш 1ч. None — биржа не ответила."""
+    hit = _TICK_CACHE.get(sym)
+    if hit and time.time() - hit[1] < _TICK_TTL:
+        return hit[0]
+    tick = None
+    try:
+        data = bybit('GET', f'/v5/market/instruments-info?category=linear&symbol={sym}')
+        lst = (data or {}).get('result', {}).get('list') or []
+        if lst:
+            tick = float(lst[0]['priceFilter']['tickSize'])
+    except Exception as e:  # noqa: BLE001
+        log_event(f'⚠️ get_tick_size({sym}): {e}')
+    if tick:
+        _TICK_CACHE[sym] = (tick, time.time())
+    return tick
+
+
+def round_price_safe(sym: str, price: float, is_long: bool) -> float:
+    """Округлить цену стопа к тику в безопасную сторону: LONG — вниз, SHORT — вверх.
+
+    Округление к ближайшему тику может поднять стоп выше рынка и биржа его
+    отклонит. Так было с RVNUSDT (27.10): цену 0.00136 фиксированный round(..., 4)
+    превращал в 0.0014 при mark 0.001364 → «StopLoss should lower than base_price»,
+    70 отказов, позиция висела без стопа.
+    """
+    from decimal import Decimal, ROUND_DOWN, ROUND_UP
+    tick = get_tick_size(sym)
+    if not tick or price <= 0:
+        return price
+    t = Decimal(str(tick))
+    steps = (Decimal(str(price)) / t).to_integral_value(
+        rounding=ROUND_DOWN if is_long else ROUND_UP)
+    return float(steps * t)
+
+
 def place_stop_loss(symbol, positionIdx, side, qty, stop_price):
     """Поставить/обновить стоп-лосс через trading-stop.
 
