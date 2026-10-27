@@ -12,8 +12,8 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: poliakarmai/gsc@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0 (pinned, GSC-009)
+      - uses: poliakarmai/gsc@937dfd89fac4762594b5258158c750b98cfd3bef  # v1 (pinned, GSC-009)
         with:
           fail_on_critical: false
           deep_scan: false
