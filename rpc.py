@@ -729,8 +729,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             "rpc_host": "127.0.0.1",
             "repo": os.path.expanduser("~/bybit-ws"),
             "config_file": os.path.expanduser("~/.config/bybit-ws/config.yaml"),
-            "service": "bybit-ws",
-            "restart_command": "systemctl --user restart bybit-ws",
+            "service": "bybit-ws-async",
+            "restart_command": "systemctl --user restart bybit-ws-async",
             "deploy_command": "bash ~/bybit-ws/deploy.sh",
             "venv": os.path.expanduser("~/bybit-ws/.venv"),
         }
