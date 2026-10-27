@@ -1,6 +1,6 @@
 # Карта документации bybit-ws
 
-> Обновлено 2026-10-25. Версия продукта — **11.5.0** (`pyproject.toml`, `CHANGELOG.md` §11.5.0).
+> Обновлено 2026-10-27. Версия продукта — **11.5.0** (`pyproject.toml`, `CHANGELOG.md` §11.5.0).
 > Правило: **если файл противоречит коду — прав код.** Живые числа: `state.db`, RPC `/metrics`/`/positions`, `verify.sh`.
 
 ## Читать (актуальное)
@@ -19,6 +19,8 @@
 | [history.md](history.md) | История фаз 1–8 | 📜 историческое |
 | [PRD-one-click.md](PRD-one-click.md) | One-click торговля | 📜 ТЗ, не отчёт о реализации |
 | [experiment-tree-design.md](experiment-tree-design.md), [experiment-tree-TZ.md](experiment-tree-TZ.md) | Experiment Tree: дизайн и ТЗ | ✅ соответствует `bybit_ws/experiments/` |
+| [experiment-sweep-results.md](experiment-sweep-results.md) | Свип параметров 16.09: 10 тикеров × 15 вариантов — вывод «эдж в выборе символа» | 📜 отчёт, числа со датой 16.09 |
+| [WEBHOOKS.md](WEBHOOKS.md) | Payload-структура alert-событий (ENTRY/SL/TP/…) для внешних потребителей | ✅ 26.10 |
 | [research/](research/) | A/B-эксперименты с датой и вердиктом | 📜 отчёты, не инструкции |
 | [TZ-audit-bes-2026-10-23.md](TZ-audit-bes-2026-10-23.md) | ТЗ внешнего аудита (Фаза 11) | 📜 вход в Фазу 11 |
 | [../REVIEW.md](../REVIEW.md) | Правила ревью (что считается поломкой) | ✅ 20.10 |
@@ -39,4 +41,4 @@
 3. Деньги аккаунта — `transaction-log.change` (net) / `cashFlow` (gross), не `Σ trade_history.pnl`.
 4. Эндпоинты — только те, что есть в `do_GET`/`do_POST` в `rpc.py`.
 5. Флаги — «прод» = значение из `~/.config/bybit-ws/env`, «дефолт» = значение в коде; не смешивать.
-6. Тесты: `python3 test_smoke.py` → 52; `python3 -m pytest -q --timeout=90` → 408 (26.10).
+6. Тесты: `python3 test_smoke.py` → 52; `python3 -m pytest -q --timeout=90` → 413 (27.10, мой прогон 39.9 с).
