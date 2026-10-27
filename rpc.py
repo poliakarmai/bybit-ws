@@ -397,6 +397,19 @@ def _apply_manual_leverage(symbol, leverage):
     return leverage
 
 
+def _risk_limits():
+    """Лимиты риска из YAML-конфига (`~/.config/bybit-ws/config.yaml`).
+
+    Не из `DATA_DIR/config.json`: такого файла не существует, из-за чего /risk
+    и MCP get_risk_status показывали дефолт 50 вместо конфижных 200.
+    """
+    try:
+        from .config import Config
+        return Config().risk
+    except Exception:
+        return {}
+
+
 def _get_auth_token() -> str:
     """Получить RPC токен. Автогенерация при первом запуске (SQLite)."""
     try:
@@ -1134,8 +1147,7 @@ class RPCHandler(BaseHTTPRequestHandler):
         metrics = _load_json(DATA_DIR / "metrics.json")
         positions = _load_json(DATA_DIR / "positions.json")
 
-        cfg = _load_json(DATA_DIR / "config.json") if os.path.exists(DATA_DIR / "config.json") else {}
-        risk_cfg = cfg.get("risk", {})
+        risk_cfg = _risk_limits()
         max_daily_loss = risk_cfg.get("max_daily_loss", 50)
         max_total_margin = risk_cfg.get("max_total_margin", 300)
 
