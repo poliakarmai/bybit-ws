@@ -642,9 +642,9 @@ alerts:
 
 ## 5. Быстрый старт (для AI-агента)
 
-> **Полный гайд:** [`QUICKSTART.md`](./QUICKSTART.md) — установка за 5 минут.
-> **Справочник ошибок:** [`ERRORS.md`](./ERRORS.md) — как обрабатывать каждую ошибку Bybit.
-> **Формат алертов:** [`WEBHOOKS.md`](./WEBHOOKS.md) — payload'ы SL/TP/входов.
+> **Навигация:** [`docs/INDEX.md`](docs/INDEX.md) — карта документации, установка и запуск.
+> **Справочник ошибок:** [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — коды Bybit API и RPC.
+> **Формат алертов:** [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md) — payload'ы SL/TP/входов.
 > **SDK:** [`bybit_ws_sdk.py`](./bybit_ws_sdk.py) — Python-клиент с классами `Monitor` + `WebhookHandler`.
 
 ### 1. Клонировать и настроить
@@ -705,13 +705,15 @@ m.close("ADAUSDT")
 }
 ```
 
-Доступные MCP-инструменты: `scan_market`, `get_positions`, `get_metrics`, `health_check`.
+Доступные MCP-инструменты (7): `scan_market`, `get_positions`, `get_metrics`, `get_risk_status`,
+`get_journal`, `place_entry`, `vpn_status`. Инструмента `health_check` нет — здоровье смотреть через RPC `/health`.
 
 ---
 
 ## 6. Scoring
 
-> ⚠️ **Текущая реализация (v3.10.1):** `quick_score_bb()` — вход при 0 < BB% < 25. Простой BB-threshold, не 9 метрик.
+> ⚠️ **Историческая пометка (v3.10.1).** Функции `quick_score_bb()` в коде больше нет (26.10.2026:
+> `grep` находит только упоминание в `test_modules.py`); текущий вход — MTF + orderbook + Entry Judge.
 
 **Полный 9-метричный скоринг — v4.0 planned.** Ниже — целевая архитектура:
 

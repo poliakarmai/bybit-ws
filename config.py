@@ -277,8 +277,8 @@ strategy:
     leverage: {_DEFAULT_STRATEGY_SHORT['leverage']}
     margin: {_DEFAULT_STRATEGY_SHORT['margin']}
     entry_offset: {_DEFAULT_STRATEGY_SHORT['entry_offset']}       # +2% above market
-    sl_tier_ab: {_DEFAULT_STRATEGY_SHORT['sl_tier_ab']}         # +5% SL for Tier A/B
-    sl_tier_cd: {_DEFAULT_STRATEGY_SHORT['sl_tier_cd']}         # +7% SL for Tier C/D
+    sl_tier_ab: {_DEFAULT_STRATEGY_SHORT['sl_tier_ab']}         # +6% SL for Tier A/B
+    sl_tier_cd: {_DEFAULT_STRATEGY_SHORT['sl_tier_cd']}         # +5% SL for Tier C/D
     bb_threshold: {_DEFAULT_STRATEGY_SHORT['bb_threshold']}         # BB% > threshold triggers SHORT
     max_positions: {_DEFAULT_STRATEGY_SHORT['max_positions']}
     cooldown_seconds: {_DEFAULT_STRATEGY_SHORT['cooldown_seconds']}

@@ -1161,8 +1161,7 @@ du -sh ~/.local/share/bybit-ws/*
 
 ## Связанные документы
 
-- [ERRORS.md](../ERRORS.md) — коды ошибок Bybit API и RPC
-- [MONITOR.md](../MONITOR.md) — архитектура и мониторинг
+- [ARCHITECTURE.md](ARCHITECTURE.md) — архитектура и мониторинг (файлов ERRORS.md и MONITOR.md в репо нет)
 - [AGENTS.md](../AGENTS.md) — навигация для AI-агентов
 - [ARCHITECTURE.md](ARCHITECTURE.md) — детальная архитектура
 - [API.md](API.md) — API-документация

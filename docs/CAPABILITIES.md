@@ -41,17 +41,14 @@ BB-сигнал (score ≥ min_score)
 
 ## 4. Auto-SL — ATR-adaptive
 
-SL = entry ± k × ATR(14), capped -50%/+50% от входа.
+Живой контур: `main_async.py` → `unified_sl.manage_sl` (5 модулей слиты, приоритет
+tight > simple > hard > BE > auto > default). `auto_sl.py` — **legacy**, подключён только к
+`main.py`, сервисом не используется.
 
-| Режим | ATR/Price | k |
-|-------|-----------|---|
-| high_vol | >5% | 2.5 |
-| trending | 3-5% | 2.0 |
-| normal | 1-3% | 1.5 |
-| low_vol | <1% | 1.3 |
+**Default SL:** 1.5×ATR(14), расстояние clamp **3–10%** от входа, fallback −10% (`unified_sl.py:215-233`).
 
-**Trailing SL:** активируется при PnL >15%. Шаг: каждые 1% движения цены.
-Distance: 1.0×ATR(14) от тек. цены. Минимум: 0.5% от entry.
+**Trailing (hard trail):** по недельному BB — LONG при `bb_pos > 75`, SHORT при `bb_pos < 25`;
+SL = `entry ± 0.15 × (mark − entry)` (`TRAIL_SL_PERCENT = 0.15`), двигается только в сторону прибыли.
 
 ## 5. Auto-TP — ATR-adaptive (3 ноги)
 
@@ -67,19 +64,22 @@ Distance: 1.0×ATR(14) от тек. цены. Минимум: 0.5% от entry.
 
 | Параметр | Значение |
 |----------|---------|
-| Условие | Позиция в убытке >5% + цена на след. уровне BB |
-| Volume | vol > SMA(20) × 1.2 |
-| Размер | 50% от исходной позиции |
-| Максимум | 1 DCA на позицию |
-| SL после DCA | Средневзвешенная цена ± 1.5×ATR |
+| Условие | Просадка до уровня: **−10% / −20% / −30%**, множитель маржи **1.5 / 2.0 / 2.5** (`dca.py:35-44`) |
+| Максимум | **2 DCA** на позицию (`max_dca_count`) |
+| Маржа | база $10, `max_pos_value` $40, `max_margin_per_symbol` $80 |
+| Volume-фильтр | **нет** в коде (проверено 26.10: ни `vol`, ни `sma` в `dca.py`) |
+| SL после DCA | **не ставится** в `dca.py` |
 
 ## 7. Pump Detection
 
 | Уровень | Критерий | Действие |
 |--------|---------|---------|
 | Early warning | Volume spike >5×SMA(20) + price >20%/1h | алерт, не шортить |
-| JUNK | +80% за день | SHORT с SL +5% (`sl_tier_cd`), max_loss 10%, max_hold 24h, time-SL 6h |
-| JUNK CB | 2 закрытия по SL | отключить JUNK на 24ч |
+| JUNK | +80% за день (`PUMP_THRESHOLD = 0.80`) | SHORT с SL 5% (`sl_tier_cd`), `max_loss_pct` 15%, `max_hold_hours` 48 |
+
+JUNK-circuit-breaker («2 закрытия по SL → off на 24ч») **в коде отсутствует** (проверено 26.10).
+Похожий по смыслу механизм — `should_disable_short(window=30, min_pf=1.0)` в `auto_short.py:341`,
+но это фильтр по profit factor, а не JUNK-CB.
 
 > `check_junk_dca` — legacy (DCA-логика шлака), не вызывается из live-цикла.
 
@@ -100,14 +100,18 @@ Event-driven: ≥10 сделок **и** ≥6ч с прошлого прогон�
 - journal/self_learn.py — адаптация min_score (±30%), SL/TP (±20%)
 - post_trade.py — кластерный анализ, блок <40% WR
 
-**Canary-режим (с v7.1, код живой в v11.4):**
-- Новые параметры → только 10% входов (canary group)
-- 48ч окно оценки: WR canary vs baseline
-- Падение WR >10% → авто-rollback
-- WR canary >= baseline → promote на все входы
-- Состояние: `canary_state.json`, лог: `self_learn.jsonl`
+**Canary — в проде ВЫКЛЮЧЕН (проверено 26.10.2026).** `CANARY_ENABLED = False`,
+`CANARY_ENTRY_PCT = 0.0`, `CANARY_WINDOW_HOURS = 6` (`bybit_ws/journal/self_learn.py:55-57`);
+в env-файле сервиса слова `CANARY` нет вообще. Код канарейки живой и покрыт тестом
+(`tests/test_self_learn_attribution.py:95` фиксирует `False`), но к live-входам не применяется:
+промоушена параметров через canary сейчас нет.
 
 ## 10. Session Params
+
+> ⚠️ **Мёртвый модуль.** `bybit_ws/session_params.py` никем не импортируется — `grep -rn SESSION_PARAMS`
+> находит только сам файл (проверено 26.10.2026). Таблица ниже историческая, к live-входам не применяется.
+> Живой сессионный модификатор — `journal/self_learn.get_session_modifier`: множители `min_score`
+> (US 0.85 → порог ниже) и `tp_mult` (US 1.2 → TP шире); лимитов позиций и SL-множителей там нет.
 
 Max позиций = **min(сессионный_лимит, high_vol_лимит)**.
 
@@ -125,9 +129,10 @@ high_vol: max 5 позиций (приоритет над сессионным).
 | Параметр | Значение |
 |----------|---------|
 | Max позиций | min(session, high_vol) |
-| Max дневной убыток | -$50 |
-| Max маржа | $300 |
-| Risk CB | 80% от max_daily_loss |
+| Max дневной убыток | **−$200** (`risk.max_daily_loss` в `Config()`) |
+| Max маржа | **$300** (`risk.max_total_margin`) |
+| Risk CB | 80% от max_daily_loss → **$160** |
+| DCA-маржа на символ | $80 (`strategy.dca.max_margin_per_symbol`) |
 | Kill Switch | полная блокировка до /resume (без таймаута) |
 
 ## 12. SQLite (SSOT)

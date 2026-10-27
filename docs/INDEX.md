@@ -39,4 +39,4 @@
 3. Деньги аккаунта — `transaction-log.change` (net) / `cashFlow` (gross), не `Σ trade_history.pnl`.
 4. Эндпоинты — только те, что есть в `do_GET`/`do_POST` в `rpc.py`.
 5. Флаги — «прод» = значение из `~/.config/bybit-ws/env`, «дефолт» = значение в коде; не смешивать.
-6. Тесты: `python3 test_smoke.py` → 52; `python3 -m pytest -q --timeout=90` → 372 (25.10).
+6. Тесты: `python3 test_smoke.py` → 52; `python3 -m pytest -q --timeout=90` → 408 (26.10).

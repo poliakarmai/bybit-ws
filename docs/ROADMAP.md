@@ -28,7 +28,7 @@
 | RPC REST API (~44 маршрута GET+POST, см. `docs/API.md`) | ✅ prod |
 | One-click trading через Hermes-чат | ✅ prod |
 | Алерты (ntfy + Telegram) | ✅ prod |
-| Тесты (52 проверки в `test_smoke.py`; `pytest` — 372 теста, 25.10: 372 passed) | ✅ prod |
+| Тесты (52 проверки в `test_smoke.py`; `pytest` — 408 тестов, 26.10: 408 passed) | ✅ prod |
 
 ## Дорожная карта
 

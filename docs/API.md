@@ -38,14 +38,17 @@
 | Путь | Назначение |
 |------|-----------|
 | `/health` | `status` (`alive`/`stale`), `alive`, `uptime`, `cycle_count`, `trading_ready` (пауза/CB → false) |
-| `/rpc/paths` | Пути установки (state.db, events.log, конфиг, порт) для внешних агентов |
-| `/dashboard` | HTML-дашборд |
-| `/rpc/dash/all` · `/rpc/dash/risk` · `/rpc/dash/signals` | Данные для дашборда (all / risk / signals) |
+
+Единственный публичный GET. Всё остальное, включая `/rpc/paths`, `/dashboard` и `/rpc/dash/*`,
+отвечает `401` без Bearer — проверено живьём 26.10.2026.
 
 ### С токеном
 
 | Путь | Назначение |
 |------|-----------|
+| `/rpc/paths` | Пути установки (state.db, events.log, конфиг, порт, имя systemd-юнита) для внешних агентов |
+| `/dashboard` · `/dash/dashboard` | HTML-дашборд (`?token=<UUID>`, токен кладётся в localStorage) |
+| `/rpc/dash/all` · `/rpc/dash/risk` · `/rpc/dash/signals` | Данные для дашборда (all / risk / signals) |
 | `/positions` · `/rpc/positions` | Открытые позиции + uPnL (`side` сырой Bybit: **Buy=LONG, Sell=SHORT**) |
 | `/orders` · `/rpc/orders` | Активные ордера (SL/TP) |
 | `/balance` | Баланс: `walletBalance`, `available`, `equity` |

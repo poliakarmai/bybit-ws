@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=openclaw
-ExecStart=/home/openclaw/bybit-ws/.venv2/bin/python -c "from bybit_ws.main import run_cli; run_cli()"
+ExecStart=/home/openclaw/bybit-ws/.venv/bin/python -c "from bybit_ws.main import run_cli; run_cli()"
 WorkingDirectory=/home/openclaw/bybit-ws
 Restart=always
 RestartSec=10

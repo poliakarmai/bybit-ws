@@ -11,9 +11,13 @@ When `alerts.telegram_enabled: true`, bybit-ws emits events. This document descr
 | `ENTRY` | Position opened (auto or manual) | info |
 | `SL` | Stop-loss hit | warning |
 | `TP` | Take-profit hit | success |
-| `CLOSE` | Manual close or timeout | info |
 | `STOP` | Risk breach (drawdown, margin, correlation) | critical |
-| `WARN` | Soft warning (high margin, stale data) | warning |
+| `INFO` | Информационное событие (статус, пауза, сводка) | info |
+| `LEVERAGE` | Плечо выставлено/расхождение с запрошенным | warning |
+| `CONFLUENCE` | Несколько подтверждений сигнала сходятся | info |
+
+Уровней `CLOSE` и `WARN` в коде нет (проверено 26.10.2026 по всем `add_alert(...)`):
+ручное закрытие уходит как `INFO`, мягкие предупреждения — как `WARN` не эмитятся.
 
 ---
 

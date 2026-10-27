@@ -7,7 +7,7 @@
 
 ## SSOT (Single Source of Truth)
 
-**SQLite state.db — единственный источник истины.** Все JSON-файлы (`metrics.json`, `positions_snapshot.json`, `short_positions.json`) — read-only кэши/резервные копии. Данные пишутся ТОЛЬКО в SQLite. При старте JSON-кэши пересоздаются из SQLite. Dual-write не применяется.
+**SQLite state.db — единственный источник истины.** Все JSON-файлы (`metrics.json`, `short_positions.json`) — read-only кэши/резервные копии (позиции отдаёт `async_positions_snapshot_ws()`, это функция, не файл). Данные пишутся ТОЛЬКО в SQLite. При старте JSON-кэши пересоздаются из SQLite. Dual-write не применяется.
 
 ## Главный цикл (async, 30с)
 
@@ -300,7 +300,7 @@ PRAGMA busy_timeout=5000;
 
 | Тип | Описание | Покрытие |
 |-----|---------|---------|
-| Unit/integration | `python3 -m pytest -q` | 372 теста, 25.10: 372 passed (`--timeout=90`) |
+| Unit/integration | `python3 -m pytest -q` | 408 тестов, 26.10: 408 passed (`--timeout=90`) |
 | Smoke | deploy validation (`test_smoke.py`) | 52/52 |
 | CI | GitHub Actions, GSC security scan | на каждом push |
 

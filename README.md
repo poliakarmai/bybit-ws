@@ -3,7 +3,7 @@
 **24/7 автотрейдинг на фьючерсах Bybit. Bollinger Grid + AI-фильтры. Подключил — зарабатывает.**
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![Tests](https://img.shields.io/badge/pytest-372%20passed-brightgreen)](./AGENTS.md) [![Smoke](https://img.shields.io/badge/smoke-52%2F52-brightgreen)](./test_smoke.py)
+[![Tests](https://img.shields.io/badge/pytest-408%20passed-brightgreen)](./AGENTS.md) [![Smoke](https://img.shields.io/badge/smoke-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
 [![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
 
@@ -18,7 +18,7 @@
 - Защищает депозит: Circuit Breaker, BlackSwan, Anti-ludomania, корреляционный блок
 - Самообучается: LSTM-классификатор рынка, Thompson Sampling, Dynamic Bandit, Drift Detector, Ensemble (20+ механик)
 
-Работает **24/7 на VPS за $5/мес**. 372 теста pytest + 52 smoke-проверки, атомарный деплой.
+Работает **24/7 на VPS за $5/мес**. 408 тестов pytest + 52 smoke-проверки, атомарный деплой.
 
 ---
 
@@ -78,7 +78,7 @@ python3 -m bybit_ws.paper_trade SOLUSDT --days 30
 
 # Боевой запуск
 python3 test_smoke.py            # 52 проверки → PASS
-python3 -m pytest tests/ -q      # 372 теста (25.10: 372 passed)
+python3 -m pytest tests/ -q      # 408 тестов (26.10: 408 passed)
 bash deploy.sh                 # атомарный деплой с canary-проверкой
 ```
 
@@ -92,7 +92,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Bollinger Grid** LONG/SHORT на дневном таймфрейме
 - **9-метричный скоринг**: BB%, объём, падающие дни, фондинг, волатильность, качество + ML Gate
 - **LSTM-классификатор** рынка (5 режимов; 82.3% — заявлено 01.08, не перезамерялось)
-- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek → Qwen, fail-closed, fail-open только при длительном отказе LLM)
+- **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek, fail-closed, fail-open только при длительном отказе LLM)
 - **Auto-TP**: ATR-adaptive, 3 ноги `[0.40, 0.35, 0.25]` (% размера), множители ATR по режиму. BB 20% Middle / 80% Upper — fallback, когда ATR недоступен
 - **Unified SL**: 5 механизмов → один приоритетный (tight > simple > hard > BE > default)
 
@@ -124,7 +124,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Composite Score**: WR+PF+Sharpe+MaxDD+AvgHold с adaptive per-regime весами и exponential decay
 - **Micro-updates**: обучение после каждой сделки с outlier-защитой (>3σ)
 - **Canary mode**: Bayesian A/B тест, адаптивный 5-20%, авто-rollback
-- **Entry Judge**: cross-model validation (DeepSeek → Qwen, fail-closed; Nemotron в коде вызова отсутствует)
+- **Entry Judge**: одна модель (DeepSeek, fail-closed); Qwen убран 17.10, Nemotron в коде вызова нет
 - **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% — заявлено, не перезамерялось)
 - **LSTM World Model**: multi-task OHLCV prediction для скоринга входов
 
