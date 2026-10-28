@@ -25,6 +25,7 @@ from datetime import datetime
 from .api import bybit
 from .alerts import log_event, add_alert
 from .manual_positions import is_manual_position
+from .file_utils import safe_json_write
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 ROTATION_STATE_FILE = os.path.join(DATA_DIR, 'funding_rotation_state.json')
@@ -57,10 +58,7 @@ def _load_state():
 
 def _save_state(state):
     os.makedirs(os.path.dirname(ROTATION_STATE_FILE), exist_ok=True)
-    with open(ROTATION_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-
+    safe_json_write(str(ROTATION_STATE_FILE), state, indent=2)
 def _reset_daily(state):
     today = datetime.now().strftime('%Y-%m-%d')
     if state.get('last_reset') != today:

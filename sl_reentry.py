@@ -11,6 +11,7 @@ from .api import bybit, get_bb_data
 from .alerts import log_event, add_alert, _is_duplicate
 from .config import Config
 from .position_sizing import margin_for_strategy
+from .file_utils import safe_json_write
 
 SL_REENTRY_FILE = os.path.expanduser('~/.local/share/bybit-ws/sl_reentry.json')
 
@@ -45,9 +46,11 @@ def _load_state():
 
 
 def _save_state(state):
+    # Атомарно: open('w') усекает файл до нуля, и параллельный _load_state
+    # ловит 'Expecting value: line 1 column 1' (28.10: 0-байтный файл от ENOSPC
+    # спамил это в events.log каждые 30 секунд).
     os.makedirs(os.path.dirname(SL_REENTRY_FILE), exist_ok=True)
-    with open(SL_REENTRY_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+    safe_json_write(SL_REENTRY_FILE, state)
 
 
 def notify_sl_hit(symbol, sl_price, entry_price, side='Buy'):

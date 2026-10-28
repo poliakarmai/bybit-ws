@@ -16,6 +16,7 @@ import os
 import time
 from datetime import datetime
 from .state_db import db  # SQLite dual-write
+from .file_utils import safe_json_write
 
 _log = logging.getLogger('bybit.x10_limits')
 
@@ -36,8 +37,7 @@ def _load():
 
 def _save(state):
     os.makedirs(os.path.dirname(X10_STATE_FILE), exist_ok=True)
-    with open(X10_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+    safe_json_write(str(X10_STATE_FILE), state, indent=2)
     # Dual-write в SQLite
     for key, data in state.items():
         try:
@@ -138,8 +138,7 @@ def track_x10_entry(sym: str, strategy: str):
         else:
             data = {}
         data[sym] = {'strategy': strategy, 'ts': time.time()}
-        with open(X10_POSITIONS_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
+        safe_json_write(str(X10_POSITIONS_FILE), data, indent=2)
     except Exception as e:
         _log.warning(f'⚠️ x10_limits: {e}')
 
@@ -164,7 +163,6 @@ def clear_x10_position(sym: str):
                 data = json.load(f)
             if sym in data:
                 del data[sym]
-                with open(X10_POSITIONS_FILE, 'w') as f:
-                    json.dump(data, f, indent=2)
+                safe_json_write(str(X10_POSITIONS_FILE), data, indent=2)
     except Exception as e:
         _log.warning(f'⚠️ x10_limits: {e}')

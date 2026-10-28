@@ -10,6 +10,7 @@ import os
 import time
 from pathlib import Path
 from collections import defaultdict
+from .file_utils import safe_json_write
 
 DATA_DIR = Path.home() / '.local' / 'share' / 'bybit-ws'
 POST_TRADE_FILE = DATA_DIR / 'post_trade_features.jsonl'
@@ -88,9 +89,7 @@ def analyze_clusters() -> dict:
             })
 
     # Сохранить заблокированные
-    with open(BLOCKED_CLUSTERS_FILE, 'w') as f:
-        json.dump({'blocked': blocked, 'updated': now}, f, indent=2)
-
+    safe_json_write(str(BLOCKED_CLUSTERS_FILE), {'blocked': blocked, 'updated': now}, indent=2)
     return {
         'blocked': blocked,
         'stats': {k: {'wr': round(v['wins']/(v['wins']+v['losses']), 2),

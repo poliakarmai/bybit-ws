@@ -20,6 +20,10 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 DB_PATH = Path.home() / ".local" / "share" / "gridsignal-bot" / "users.db"
 MODEL_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_scorer.pkl"
@@ -193,16 +197,14 @@ def train():
         pickle.dump(model, f)
     _sign_file(MODEL_PATH)
 
-    with open(FEATURES_PATH, "w") as f:
-        json.dump({
+    safe_json_write(str(FEATURES_PATH), {
             "feature_names": feature_names,
             "cv_f1_mean": float(cv_scores.mean()),
             "cv_f1_std": float(cv_scores.std()),
             "n_samples": len(signals),
             "n_tp": n_pos,
             "model_type": "RandomForestClassifier",
-        }, f, indent=2)
-
+        }, indent=2)
     print(f"✅ Модель сохранена: {MODEL_PATH}")
     return model
 

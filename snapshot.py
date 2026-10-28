@@ -1,6 +1,10 @@
 """Снепшоты и сравнение состояний."""
 import json
 from filelock import FileLock
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 
 def load_json(path):
@@ -14,9 +18,7 @@ def load_json(path):
 def save_json(path, data):
     lock = FileLock(path + '.lock', timeout=5)
     with lock:
-        with open(path, 'w') as f:
-            json.dump(data, f, indent=2)
-
+        safe_json_write(str(path), data, indent=2)
 def check_position_changes(old, new):
     changes = []
     for sym in old:

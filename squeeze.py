@@ -7,6 +7,7 @@
 import os, time, json
 from . import DATA_DIR
 from .api import bybit
+from .file_utils import safe_json_write
 
 SQUEEZE_STATE_FILE = os.path.join(DATA_DIR, 'squeeze.json')
 BB_WIDTH_THRESHOLD = 5.0    # % ширины BB
@@ -25,10 +26,7 @@ def _load_state():
 
 
 def _save_state(state):
-    with open(SQUEEZE_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-
+    safe_json_write(str(SQUEEZE_STATE_FILE), state, indent=2)
 def check_squeeze():
     """Проверить топ-40 монет на BB-сжатие + объёмный всплеск на 15-минутках."""
     alerts = []

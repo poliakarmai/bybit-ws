@@ -37,6 +37,11 @@ from typing import Optional
 import numpy as np
 
 try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone: python3 lstm_regime.py --predict
+    from file_utils import safe_json_write
+
+try:
     import torch
     import torch.nn as nn
     import torch.optim as optim
@@ -602,8 +607,7 @@ def train_model(force=False, candidate=False):
         _sign_lstm_file(scaler_path)
     # Макро-значения для логов
     macro_vals = _get_macro_features()
-    with open(features_path, 'w') as f:
-        json.dump({
+    safe_json_write(str(features_path), {
             'n_samples': len(X),
             'n_features': N_FEATURES,
             'seq_length': SEQUENCE_LENGTH,
@@ -617,8 +621,7 @@ def train_model(force=False, candidate=False):
             'val_accuracy': round(best_val_acc, 3),
             'trained_at': datetime.now().isoformat(),
             'symbols': [d['symbol'] for d in data],
-        }, f, indent=2)
-
+        }, indent=2)
     print(f"   Модель: {model_path}")
     print(f"   Скейлер: {scaler_path}")
 
@@ -780,10 +783,11 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
             'timestamp': datetime.now().isoformat(),
         }
 
-        # Кеширование
+        # Кеширование. Атомарно: open('w') усекает файл до нуля, и любой
+        # читатель (watchdog, self_learn, auto_short) в этот момент ловит
+        # "Expecting value: line 1 column 1" на пустом файле.
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(CACHE_PATH, 'w') as f:
-            json.dump(result, f, indent=2)
+        safe_json_write(str(CACHE_PATH), result)
 
         return result
 

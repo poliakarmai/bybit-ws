@@ -14,6 +14,10 @@ import os
 import time
 from pathlib import Path
 from typing import Optional
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 DATA_DIR = Path.home() / '.local' / 'share' / 'bybit-ws'
 WEIGHTS_PATH = DATA_DIR / 'ensemble_weights.json'
@@ -237,9 +241,7 @@ def update_weights(rf_weight=None, lstm_weight=None, rl_weight=None):
         weights = {k: v / total for k, v in weights.items()}
 
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(WEIGHTS_PATH, 'w') as f:
-        json.dump(weights, f, indent=2)
-
+    safe_json_write(str(WEIGHTS_PATH), weights, indent=2)
     return weights
 
 

@@ -3,6 +3,7 @@ import json, os, time
 from . import safe_run
 from . import BYBIT_CLI, DATA_DIR, SHORT_ALERT_LAST, SHORT_ALERT_COOLDOWN, WATCHLIST_UPDATED_FILE, _save_short_alerts
 from .api import get_bb_data, get_bb_data_async
+from .file_utils import safe_json_write
 
 # Статический watchlist (fallback)
 STATIC_WATCHLIST = [
@@ -30,9 +31,7 @@ def _load_watchlist():
     return list(STATIC_WATCHLIST)
 
 def _save_watchlist(symbols):
-    with open(WATCHLIST_FILE, 'w') as f:
-        json.dump({'symbols': symbols, 'updated': time.time()}, f)
-
+    safe_json_write(str(WATCHLIST_FILE), {'symbols': symbols, 'updated': time.time()})
 def rotate_watchlist():
     """Обновить watchlist из топ-30 по объёму (раз в 24ч)."""
     try:

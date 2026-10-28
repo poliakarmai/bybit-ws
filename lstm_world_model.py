@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 try:
     import torch
@@ -305,8 +309,7 @@ def _load_data_with_cache(symbols=('BTCUSDT', 'ETHUSDT'), days=365, force_refetc
     # Save to cache
     WORLD_DATA_CACHE.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(WORLD_DATA_CACHE, 'w') as f:
-            json.dump(data, f)
+        safe_json_write(str(WORLD_DATA_CACHE), data)
         print(f"💾 Кеш сохранён: {WORLD_DATA_CACHE}")
     except Exception as e:
         print(f"⚠️ Не удалось сохранить кеш: {e}")
@@ -448,10 +451,7 @@ def train_world_model(lambda_world=0.03, epochs=200, force=False):
     print(f"   Latest модель (epoch {epochs}): {latest_path}")
 
     # Сохранить скейлер (JSON, not pickle)
-    import json as _json
-    with open(WORLD_SCALER_PATH, 'w') as f:
-        _json.dump({'min_': scaler.min_.tolist(), 'max_': scaler.max_.tolist()}, f)
-
+    safe_json_write(str(WORLD_SCALER_PATH), {'min_': scaler.min_.tolist(), 'max_': scaler.max_.tolist()})
     return model, best_val_acc, best_world_mse
 
 

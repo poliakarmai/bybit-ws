@@ -16,6 +16,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
+from .file_utils import safe_json_write
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 TRACKER_FILE = DATA_DIR / "confluence_tracker.json"
@@ -35,10 +36,7 @@ def _load() -> dict:
 def _save(data: dict):
     """Сохранить трекер."""
     TRACKER_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(TRACKER_FILE, "w") as f:
-        json.dump(data, f, indent=2, default=str)
-
-
+    safe_json_write(str(TRACKER_FILE), data, indent=2, default=str)
 def track_signal(
     symbol: str,
     direction: str,

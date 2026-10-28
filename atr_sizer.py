@@ -19,6 +19,7 @@ import time
 
 from .api import bybit
 from .alerts import log_event, _is_duplicate
+from .file_utils import safe_json_write
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 ATR_CACHE_FILE = os.path.join(DATA_DIR, 'atr_cache.json')
@@ -44,10 +45,7 @@ def _load_cache():
 
 def _save_cache(cache):
     os.makedirs(os.path.dirname(ATR_CACHE_FILE), exist_ok=True)
-    with open(ATR_CACHE_FILE, 'w') as f:
-        json.dump(cache, f, indent=2)
-
-
+    safe_json_write(str(ATR_CACHE_FILE), cache, indent=2)
 def _get_atr(sym, interval=ATR_INTERVAL, period=ATR_PERIOD):
     """Рассчитать ATR за период."""
     try:

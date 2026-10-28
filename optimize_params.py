@@ -14,6 +14,10 @@ import time
 from pathlib import Path
 
 from backtest import fetch_klines, calc_bb, walk_forward
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 OPTIMAL_CONFIG = DATA_DIR / "per_symbol_optimal.json"
@@ -200,8 +204,7 @@ def optimize_all(symbols: list[str]) -> dict:
 
     # Сохраняем
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(OPTIMAL_CONFIG, "w") as f:
-        json.dump(results, f, indent=2)
+    safe_json_write(str(OPTIMAL_CONFIG), results, indent=2)
     print(f"\n✅ Сохранено {len(results)} тикеров → {OPTIMAL_CONFIG}")
     return results
 

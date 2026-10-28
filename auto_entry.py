@@ -6,6 +6,7 @@ from .api import bybit, get_bb_data, set_leverage, verify_leverage
 from .alerts import log_event, add_alert
 from .config import Config
 from .position_sizing import margin_for_strategy
+from .file_utils import safe_json_write
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -212,8 +213,7 @@ def record_sl_hit(sym: str):
     cd = _load_cooldown()
     cd[sym] = time.time()
     try:
-        with open(COOLDOWN_FILE, 'w') as f:
-            json.dump(cd, f)
+        safe_json_write(str(COOLDOWN_FILE), cd)
     except Exception as e:
         log_event(f'⚠️ auto_entry: {e}')
 

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from .file_utils import safe_json_write
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 STATE_DB = DATA_DIR / "state.db"
@@ -382,9 +383,7 @@ def generate_report(trades: list[dict] | None = None,
     # Save
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with open(output, "w") as f:
-        json.dump(report, f, indent=2, default=str)
-
+    safe_json_write(str(output), report, indent=2, default=str)
     return report
 
 

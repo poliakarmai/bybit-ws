@@ -15,6 +15,7 @@ from datetime import datetime
 from .constants import ALERTS, EVENTS_LOG, ALERTS_LOG, HERMES_BIN, ALERT_DEDUP_FILE, ALERT_DEDUP_TTL
 from .constants import safe_run
 from .state_db import db  # SQLite-дедупликация (persistent)
+from .file_utils import safe_json_write
 
 # Минимальный интервал между алертами одного типа на один символ
 CATEGORY_COOLDOWN = {
@@ -173,8 +174,7 @@ def _is_duplicate(msg, level="INFO"):
             return True
         dedup[norm_key] = now
 
-        with open(ALERT_DEDUP_FILE, 'w') as f:
-            json.dump(dedup, f)
+        safe_json_write(str(ALERT_DEDUP_FILE), dedup)
         return False
     except Exception:
         return False

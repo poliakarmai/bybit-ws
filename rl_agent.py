@@ -20,6 +20,10 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 try:
     import torch
@@ -139,8 +143,7 @@ def train(symbols=('BTCUSDT', 'ETHUSDT'), days=365, timesteps=100_000):
     model.save(str(MODEL_PATH))
 
     # Метаданные
-    with open(META_PATH, 'w') as f:
-        json.dump({
+    safe_json_write(str(META_PATH), {
             'model_type': 'DQN',
             'n_actions': N_ACTIONS,
             'action_names': ACTION_NAMES,
@@ -149,8 +152,7 @@ def train(symbols=('BTCUSDT', 'ETHUSDT'), days=365, timesteps=100_000):
             'days': days,
             'trained_at': datetime.now().isoformat(),
             'n_features': 13,
-        }, f, indent=2)
-
+        }, indent=2)
     print(f"\n✅ Модель сохранена: {MODEL_PATH}")
     return model
 

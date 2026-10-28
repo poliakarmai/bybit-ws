@@ -25,6 +25,10 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 try:
     import optuna
@@ -394,9 +398,7 @@ def optimize_all(
 
     # Сохраняем результаты
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(OPTUNA_CONFIG, 'w') as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-
+    safe_json_write(str(OPTUNA_CONFIG), results, indent=2, ensure_ascii=False)
     print(f'\n{"="*60}')
     print(f'✅ Оптимизация завершена: {total_ok} OK, {total_fail} FAIL '
           f'за {total_elapsed:.0f}с')
@@ -533,8 +535,7 @@ def main():
         existing = load_optuna_params()
         existing[args.symbol] = {k: v for k, v in r.items() if not k.startswith('_')}
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(OPTUNA_CONFIG, 'w') as f:
-            json.dump(existing, f, indent=2, ensure_ascii=False)
+        safe_json_write(str(OPTUNA_CONFIG), existing, indent=2, ensure_ascii=False)
         print(f'\n✅ {args.symbol}: параметры сохранены в {OPTUNA_CONFIG}')
         return 0
 

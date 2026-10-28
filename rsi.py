@@ -7,6 +7,7 @@
 import os, time, json
 from . import DATA_DIR
 from .api import bybit, get_bb_data
+from .file_utils import safe_json_write
 
 RSI_PERIOD = 14
 DIVERGENCE_STATE_FILE = os.path.join(DATA_DIR, 'rsi_divergence.json')
@@ -24,10 +25,7 @@ def _load_state():
 
 
 def _save_state(state):
-    with open(DIVERGENCE_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-
+    safe_json_write(str(DIVERGENCE_STATE_FILE), state, indent=2)
 def _calc_rsi(closes):
     """RSI(14) по списку закрытий (от старых к новым)."""
     if len(closes) < RSI_PERIOD + 1:

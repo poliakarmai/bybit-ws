@@ -18,6 +18,7 @@ import time
 from .api import bybit
 from .alerts import log_event, _is_duplicate
 from .position_sizing import margin_for_strategy
+from .file_utils import safe_json_write
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 MEAN_STATE_FILE = os.path.join(DATA_DIR, 'mean_revert_state.json')
@@ -57,10 +58,7 @@ def _load_state():
 
 def _save_state(state):
     os.makedirs(os.path.dirname(MEAN_STATE_FILE), exist_ok=True)
-    with open(MEAN_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-
+    safe_json_write(str(MEAN_STATE_FILE), state, indent=2)
 def _get_daily_bb(sym):
     """Получить Daily BB: (lower, middle, upper, bb_pct)."""
     try:

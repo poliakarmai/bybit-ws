@@ -4,11 +4,14 @@
 Проверяет out-of-sample F1 с 30-дневным gap.
 Если OOS F1 < 0.65 — рекомендует отключить BYBIT_ML_ENABLED.
 """
-import os, sys, json, sqlite3, time
+import os, sys, sqlite3, time
 from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import f1_score, classification_report
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from file_utils import safe_json_write
 
 DATA_DIR = Path.home() / '.local' / 'share' / 'bybit-ws'
 STATE_DB = DATA_DIR / 'state.db'
@@ -158,8 +161,7 @@ def main():
         **result,
     }
     out_path = DATA_DIR / 'rf_walkforward.json'
-    with open(out_path, 'w') as f:
-        json.dump(output, f, indent=2)
+    safe_json_write(str(out_path), output, indent=2)
     print(f'  Результат сохранён: {out_path}')
 
     sys.exit(0 if result['verdict'] == 'PASS' else 1)

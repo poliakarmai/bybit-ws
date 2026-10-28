@@ -23,6 +23,10 @@ from typing import Optional
 
 import dspy
 import numpy as np
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 # ── Пути ──────────────────────────────────────────────────────────────────────
 HOME = Path.home()
@@ -412,8 +416,7 @@ def _save_program(
         log_event(f'⚠️ DSPy: ошибка сохранения программы: {e}')
 
     # Сохраняем метаданные
-    with open(DSPY_FEATURES_PATH, 'w') as f:
-        json.dump({
+    safe_json_write(str(DSPY_FEATURES_PATH), {
             'feature_keys': feature_keys,
             'n_samples': int(len(X)),
             'n_profit': n_profit,
@@ -423,9 +426,7 @@ def _save_program(
             'model_type': 'DSPy TradeSignalModule',
             'dspy_version': dspy.__version__,
             'created_at': int(time.time()),
-        }, f, indent=2, ensure_ascii=False)
-
-
+        }, indent=2, ensure_ascii=False)
 # ── Инференс ──────────────────────────────────────────────────────────────────
 
 def predict(signal_data: dict) -> Optional[float]:

@@ -15,6 +15,7 @@ import time
 
 from .api import cancel_order, place_take_profit
 from .alerts import log_event, add_alert
+from .file_utils import safe_json_write
 
 TRAIL_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/junk_trail.json')
 
@@ -31,10 +32,7 @@ def _load_state():
 
 def _save_state(state):
     os.makedirs(os.path.dirname(TRAIL_STATE_FILE), exist_ok=True)
-    with open(TRAIL_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-
+    safe_json_write(str(TRAIL_STATE_FILE), state, indent=2)
 def _round_to_tick(price):
     """Округление цены до разумного тика."""
     if price < 1:

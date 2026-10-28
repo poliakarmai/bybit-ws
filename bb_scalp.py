@@ -18,6 +18,7 @@ import time
 from .api import bybit
 from .alerts import log_event, _is_duplicate
 from .position_sizing import margin_for_strategy
+from .file_utils import safe_json_write
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 SCALP_STATE_FILE = os.path.join(DATA_DIR, 'scalp_state.json')
@@ -54,10 +55,7 @@ def _load_state():
 
 def _save_state(state):
     os.makedirs(os.path.dirname(SCALP_STATE_FILE), exist_ok=True)
-    with open(SCALP_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-
-
+    safe_json_write(str(SCALP_STATE_FILE), state, indent=2)
 def _get_kline(sym, interval='5', limit=30):
     """Получить свечи и посчитать BB + RSI."""
     try:

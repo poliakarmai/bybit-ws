@@ -27,6 +27,10 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
+try:
+    from .file_utils import safe_json_write
+except ImportError:  # standalone
+    from file_utils import safe_json_write
 
 sys.path.insert(0, '/home/openclaw')
 
@@ -377,8 +381,7 @@ def main():
     rep = build(a.days, start, end, ex, db)
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    with open(out_path, 'w') as f:
-        json.dump(rep, f, ensure_ascii=False, indent=1)
+    safe_json_write(str(out_path), rep, ensure_ascii=False, indent=1)
     print(json.dumps(rep, ensure_ascii=False, indent=1) if a.json else render(rep))
     if not a.json:
         print(f'JSON-отчёт: {out_path}')

@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 
 from .api import bybit
+from .file_utils import safe_json_write
 
 # Cache: avoid calling API too often
 _regime_cache = {
@@ -259,8 +260,7 @@ def _save_regime_file(result: dict) -> None:
             "confidence": result["confidence"],
             "details": result["details"],
         }
-        with open(REGIME_FILE, "w") as f:
-            json.dump(payload, f, indent=2)
+        safe_json_write(str(REGIME_FILE), payload, indent=2)
     except Exception as e:
         log_event(f'⚠️ regime: {e}')
 
