@@ -3,7 +3,7 @@
 **24/7 автотрейдинг на фьючерсах Bybit. Bollinger Grid + AI-фильтры. Подключил — зарабатывает.**
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
-[![Tests](https://img.shields.io/badge/pytest-408%20passed-brightgreen)](./AGENTS.md) [![Smoke](https://img.shields.io/badge/smoke-52%2F52-brightgreen)](./test_smoke.py)
+[![Tests](https://img.shields.io/badge/pytest-passing-brightgreen)](./AGENTS.md) [![Smoke](https://img.shields.io/badge/smoke-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
 [![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
 
@@ -18,28 +18,25 @@
 - Защищает депозит: Circuit Breaker, BlackSwan, Anti-ludomania, корреляционный блок
 - Самообучается: LSTM-классификатор рынка, Thompson Sampling, Dynamic Bandit, Drift Detector, Ensemble (20+ механик)
 
-Работает **24/7 на VPS за $5/мес**. 408 тестов pytest + 52 smoke-проверки, атомарный деплой.
+Работает **24/7 на VPS за $5/мес**. pytest-набор + 52 smoke-проверки, атомарный деплой.
 
 ---
 
-## Результаты (снимок 2026-10-25)
+## Результаты
 
-> **Важно:** результаты конкретной инсталляции (авто-трейдинг, `strategy='auto'`, `manual=0`). Не гарантия доходности. Backtest на своих параметрах через `paper_trade`.
+Статистику здесь не держим: она меняется несколько раз в день, а статичный снимок в README
+через сутки врёт. Живые числа — из самого бота:
 
-| Метрика | Значение |
-|--------|----------|
-| Авто-сделки self-learn (auto, manual=0) | 551 / +$81.39 / WR 70.2% / PF 1.08 |
-| LONG (авто, manual=0) | 220 / +$164.66 / WR 75.0% / PF 1.28 |
-| SHORT (авто, manual=0) | 331 / −$83.26 / WR 67.1% / PF 0.78 |
-| Ручные входы (manual=1) | 31 / −$410.38 |
-| Всего закрытых сделок | 698 / −$441.63 |
+```bash
+curl -s localhost:8766/metrics          # сделки, входы, SL/TP за день
+curl -s localhost:8766/positions        # открытые позиции + PnL (Bearer)
+python3 -m bybit_ws.reconcile --days 30 # сходимость state.db с биржей
+python3 -m bybit_ws.paper_trade SOLUSDT --days 90   # бэктест на своих параметрах
+```
 
-> **Снимок на 2026-10-25 16:16 из `state.db`.** Последняя сверка с биржей — 23.10 (497 из 505 строк сошлись
-> по `(closed_at, symbol)`); 193 сделки 23–25.10 по бирже ещё не сверялись (`python3 -m bybit_ws.reconcile`).
-> Живой источник — RPC (`/metrics`, `/positions`) + `state.db`. Локальный `trade_history.side` — сторона
-> **закрытия** (`Buy`=закрыл SHORT), а не позиции; в `/positions` — наоборот, сырой Bybit.
-
-*Авто-трейдинг Bollinger Grid LONG/SHORT. Всего 698 закрытых сделок (582 auto + 47 historical + 31 legacy + 30 imported + 6 x10 + 2 x10:scalp).*
+> **Не гарантия доходности.** Цифры конкретной инсталляции (`strategy='auto'`, `manual=0`) —
+> не обещание. `trade_history.side` — сторона **закрытия** (`Buy`=закрыл SHORT), в `/positions`
+> наоборот: сырой Bybit.
 
 ---
 
@@ -78,7 +75,8 @@ python3 -m bybit_ws.paper_trade SOLUSDT --days 30
 
 # Боевой запуск
 python3 test_smoke.py            # 52 проверки → PASS
-python3 -m pytest tests/ -q      # 408 тестов (26.10: 408 passed)
+python3 -m pytest -q             # весь набор (должно быть зелёным)
+python3 -m pytest tests/ -q      # только tests/
 bash deploy.sh                 # атомарный деплой с canary-проверкой
 ```
 
@@ -91,7 +89,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 ### 🤖 Авто-трейдинг
 - **Bollinger Grid** LONG/SHORT на дневном таймфрейме
 - **9-метричный скоринг**: BB%, объём, падающие дни, фондинг, волатильность, качество + ML Gate
-- **LSTM-классификатор** рынка (5 режимов; 82.3% — заявлено 01.08, не перезамерялось)
+- **LSTM-классификатор** рынка (5 классов; 82.3% — заявлено 01.08, не перезамерялось)
 - **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek, fail-closed, fail-open только при длительном отказе LLM)
 - **Auto-TP**: ATR-adaptive, 3 ноги `[0.40, 0.35, 0.25]` (% размера), множители ATR по режиму. BB 20% Middle / 80% Upper — fallback, когда ATR недоступен
 - **Unified SL**: 5 механизмов → один приоритетный (tight > simple > hard > BE > default)
@@ -110,7 +108,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - Метрики: Sharpe, макс. просадка, profit factor, винрейт
 
 ### 🔌 Интерфейсы
-- **RPC API** (порт 8766): `/scan`, `/enter`, `/close`, `/positions`, `/metrics`
+- **RPC API** (порт 8766): `/health`, `/scan`, `/enter`, `/close`, `/positions`, `/metrics`, `/risk`, `/balance` — полный список путей в `do_GET`/`do_POST` (`rpc.py`)
 - **HTTP RPC** для ботов и интеграций (`http.server`, не JSON-RPC)
 - **MCP Server** для AI-агентов (Claude Code, Hermes, Codex)
 - **Telegram-алерты**: входы, SL, TP, DCA, пампы, ошибки
@@ -118,7 +116,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 
 ### 🧠 AI & Self-Learning (v10 — 20+ механик)
 - **Thompson Sampling**: Dynamic Bandit — авто-прунинг + генерация рук, Uncertainty-aware selection
-- **Ensemble Learning**: отдельный bandit для каждого режима рынка (6 режимов)
+- **Ensemble Learning**: отдельный bandit на режим — 6 (5 классов LSTM + `CHOPPY`)
 - **Drift Detector**: per-regime окна с EMA baseline, Causal inference (market vs parameters)
 - **Stress Testing**: 4 исторических backtest-сценария + 1000 Pareto Monte Carlo симуляций
 - **Composite Score**: WR+PF+Sharpe+MaxDD+AvgHold с adaptive per-regime весами и exponential decay
@@ -210,7 +208,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - API-ключи через `env` (chmod 600) — никогда в коде
 - RPC write-эндпоинты требуют Bearer-токен
 - IP-whitelist на уровне Bybit
-- Атомарный деплой: 6 pre-deploy проверок + 8 canary checks
+- Атомарный деплой: 3 pre-deploy шага (чистота репо → logic → smoke) + 8 canary-проверок
 - Kill Switch: мгновенное закрытие всех позиций
 
 [Подробнее →](docs/SECURITY.md)

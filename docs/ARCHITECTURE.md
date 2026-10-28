@@ -300,7 +300,7 @@ PRAGMA busy_timeout=5000;
 
 | Тип | Описание | Покрытие |
 |-----|---------|---------|
-| Unit/integration | `python3 -m pytest -q` | 408 тестов, 26.10: 408 passed (`--timeout=90`) |
+| Unit/integration | `python3 -m pytest -q` | весь набор зелёный (`--timeout=90`); число — из вывода прогона |
 | Smoke | deploy validation (`test_smoke.py`) | 52/52 |
 | CI | GitHub Actions, GSC security scan | на каждом push |
 
