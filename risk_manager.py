@@ -809,9 +809,18 @@ def _log_decision(symbol, check, passed, reason='', margin=0.0, equity=0.0):
     Ошибка журнала не должна ломать торговлю: аудит вторичен к решению.
     equity по умолчанию 0: баланс есть только там, где его уже запросили
     (концентрация), остальные проверки не тянут лишний REST-вызов.
+
+    BYBIT_LOG_SILENT=1 (pytest) — не пишем В БОЕВУЮ state.db: тесты гоняют
+    check() на фикстурах (BTCUSDT/FOOUSDT/AAAUSDT), из-за чего журнал замеров
+    shadow-режима набирался запусками pytest (30.10.2026: 22 «срабатывания»).
+    Тесты, которые проверяют сам журнал, инжектят временную БД (db.path != DB_PATH)
+    — им гейт не мешает.
     """
     try:
-        from .state_db import db as _db
+        from .state_db import DB_PATH, db as _db
+        if (os.environ.get('BYBIT_LOG_SILENT') == '1'
+                and getattr(_db, 'path', None) == DB_PATH):
+            return
         _db.add_risk_decision(symbol, check, passed, reason, margin, equity)
     except Exception as e:
         _log.warning(f'risk_decisions journal: {e}')
