@@ -109,8 +109,15 @@ def _clean_pump_state(data_dir, positions, db=None):
 
 SLTP_MATCH_TOL = 0.003  # 0.3%: цена выхода считается «на уровне» нашего SL/TP
 
+# Биржа сама говорит, когда позицию закрыл не рынок, а ликвидатор:
+# BustTrade — принудительное закрытие по марже (кросс: убыток может превышать
+# залог позиции), Liquidation/PartialLiquidation — то же в разных версиях API,
+# AdlTrade — авто-делеверидж (не наша ликвидация, но и не рыночный выход).
+LIQ_EXEC_TYPES = {'BustTrade', 'Liquidation', 'PartialLiquidation'}
+ADL_EXEC_TYPES = {'AdlTrade'}
 
-def classify_exit(exit_price, sl, tp, hold_hours, tol=SLTP_MATCH_TOL):
+
+def classify_exit(exit_price, sl, tp, hold_hours, tol=SLTP_MATCH_TOL, exec_type=None):
     """Механизм выхода по цене против выставленных нами SL/TP.
 
     Знак PnL НЕ используется: он давал «TP» на убытке (частичные закрытия, DCA)
@@ -122,6 +129,12 @@ def classify_exit(exit_price, sl, tp, hold_hours, tol=SLTP_MATCH_TOL):
         except (TypeError, ValueError, ZeroDivisionError):
             return False
 
+    # execType главнее цены: ликвидация случается и без касания нашего SL
+    # (кросс-маржа, гэп), и наоборот — цена у SL при BustTrade уже не наша заслуга.
+    if str(exec_type or '') in LIQ_EXEC_TYPES:
+        return 'LIQ'
+    if str(exec_type or '') in ADL_EXEC_TYPES:
+        return 'ADL'
     if _at(tp):
         return 'TP'
     if _at(sl):
@@ -194,7 +207,8 @@ def _import_bybit_trades(data_dir):
                     sltp = sync_db.get_position_sltp(
                         sym, entry_side,
                         entry_price=float(item.get('avgEntryPrice') or 0) or None) or {}
-                    exit_reason = classify_exit(price, sltp.get('sl'), sltp.get('tp'), hold_h)
+                    exit_reason = classify_exit(price, sltp.get('sl'), sltp.get('tp'), hold_h,
+                                                exec_type=item.get('execType'))
                     try:
                         diag = sync_db.get_entry_diagnostic_for_close(sym, closing_side) or {}
                         try:
@@ -219,6 +233,17 @@ def _import_bybit_trades(data_dir):
                         # record_alert() вызывался только из легаси main.py.
                         if exit_reason in ('TP', 'SL'):
                             record_alert(exit_reason, symbol=sym)
+                        if exit_reason in ('LIQ', 'ADL'):
+                            # Ликвидация не должна проходить молча: 30.10 она ушла
+                            # в базу как 'Unknown' и всплыла только при разборе PnL.
+                            log_event(f'💀 {exit_reason} {sym}: PnL ${pnl:.2f} '
+                                      f'(плечо {lev}x, {qty} шт, execType={item.get("execType")})')
+                            try:
+                                from .alerts import send_telegram_alert as _tg
+                                _tg(f'💀 {exit_reason} {sym} ({closing_side}): ${pnl:.2f} '
+                                    f'при {lev}x, {qty} шт', level='STOP')
+                            except Exception:
+                                pass
                     except Exception as e:
                         log_event(f'⚠️ trade_history insert failed for {sym}: {e}')
                     # ── v4: Exit reason tracking + streak ──

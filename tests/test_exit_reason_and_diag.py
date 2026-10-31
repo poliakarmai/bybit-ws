@@ -48,6 +48,32 @@ def test_tolerance_is_relative_and_bounded():
     assert ma.classify_exit(105.2 * 1.005, sl=None, tp=105.2, hold_hours=1) == 'Unknown'
 
 
+# ── (б) ликвидация: биржа говорит сама (execType), цена тут не судья ────
+
+def test_bust_trade_is_liq_even_without_sl_hit():
+    """30.10: 4 позиции ушло в BustTrade по цене, далёкой от нашего SL, и легло
+    в базу как 'Unknown' — ликвидация не должна прятаться в неопределённость."""
+    assert ma.classify_exit(0.8847, sl=None, tp=None, hold_hours=2,
+                            exec_type='BustTrade') == 'LIQ'
+
+
+def test_liq_beats_nearby_sl_level():
+    """Цена у нашего SL, но биржа закрыла ликвидатором — метка LIQ."""
+    assert ma.classify_exit(95.0, sl=95.0, tp=110.0, hold_hours=2,
+                            exec_type='PartialLiquidation') == 'LIQ'
+
+
+def test_adl_is_not_liq():
+    assert ma.classify_exit(102.0, sl=None, tp=None, hold_hours=2,
+                            exec_type='AdlTrade') == 'ADL'
+
+
+def test_plain_trade_keeps_price_classification():
+    """Обычный рыночный выход не меняет прежнего поведения."""
+    assert ma.classify_exit(105.0, sl=95.0, tp=105.2, hold_hours=3,
+                            exec_type='Trade') == 'TP'
+
+
 # ── SL/TP «на память»: переживают закрытие позиции ─────────────────────
 
 def test_sltp_memory_survives_position_close(tmp_path):
