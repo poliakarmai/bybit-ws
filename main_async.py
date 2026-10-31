@@ -77,6 +77,29 @@ MEAN_REVERT_ENABLED = False  # отключено 01.08.2026 — BB%=0-5% на �
 # ═══════════════════════════════════════════════════════════
 # Async helpers
 # ═══════════════════════════════════════════════════════════
+def _sync_manual_marks(positions):
+    """Позиция, открытая в приложении, сама получает ручную метку.
+
+    Иначе auto_sl/auto_tp считают её своей: двигают SL, ставят TP, закрывают по
+    профиту. Метка из /enter у таких входов не появляется — её физически некому
+    поставить, знает только биржа (createType=CreateByUser).
+    """
+    from .alerts import log_event
+    from .manual_positions import is_manual_position, mark_manual_position, entry_origin
+    for sym, p in (positions or {}).items():
+        if is_manual_position(sym):
+            continue
+        origin, link = entry_origin(sym, int(p.get('openTime') or 0) or None)
+        # Только пустой link — гарантированно приложение (CreateByUser, не наш код).
+        # 'h…' до 31.10 мог поставить и /enter, и авто-модуль без префикса —
+        # такие не метим, чтобы не отобрать у бота управление его же позицией.
+        if origin != 'manual' or link:
+            continue
+        mark_manual_position(sym, entry=p.get('entry'), side=p.get('side'),
+                             leverage=p.get('leverage'), note='вход из приложения (link пуст)')
+        log_event(f'🖐 {sym} помечена ручной: ордер открыт из приложения (link пуст)')
+
+
 def _clean_pump_state(data_dir, positions, db=None):
     """Sync helper: pump_state + pumps.json cleanup (через StateDB, под его RLock).
 
@@ -230,8 +253,15 @@ def _import_bybit_trades(data_dir):
                     try:
                         diag = sync_db.get_entry_diagnostic_for_close(sym, closing_side) or {}
                         try:
-                            from .manual_positions import is_manual_position
+                            from .manual_positions import is_manual_position, entry_origin
                             _manual = 1 if is_manual_position(sym, include_closed=True) else 0
+                            # Ордер входа решает: если он без нашего префикса —
+                            # вход ручной, чья бы метка ни лежала в pumps.json.
+                            _origin = entry_origin(sym, int(entry_ts_raw) or None)[0]
+                            if _origin == 'auto':
+                                _manual = 0
+                            elif _origin == 'manual':
+                                _manual = 1
                         except Exception:
                             _manual = 0
                         sync_db.add_trade(
@@ -580,6 +610,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
         # причём шорт «БЕЗ SL». Тот же дубль: 17:46:38 (Sell 150) → 17:51:38 (Sell 140).
         try:
             await run_in_thread(_clean_pump_state, DATA_DIR, positions)
+            await run_in_thread(_sync_manual_marks, positions)
         except Exception as e:
             log_event(f'⚠️ pump_state clean error: {e}')
 

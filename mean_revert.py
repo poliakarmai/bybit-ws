@@ -169,6 +169,8 @@ def execute_mean_revert(entry_info):
             'orderType': 'Limit', 'qty': str(entry_info['qty']),
             'price': str(entry_info['entry']),
             'positionIdx': idx, 'timeInForce': 'GTC',
+            # префикс = метка «это бот» для атрибуции ручных/авто сделок
+            'orderLinkId': f'mr_{sym.lower()}_{int(time.time())}',
         })
         if order.get('retCode') == 0:
             log_event(f'🔄 MEAN-REVERT {sym}: лимитка ${entry_info["entry"]:.4f} x{MEAN_LEVERAGE} idx={idx}')

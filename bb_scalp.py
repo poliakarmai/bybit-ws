@@ -199,6 +199,8 @@ def execute_scalp(entry_info):
             'category': 'linear', 'symbol': sym, 'side': side,
             'orderType': 'Market', 'qty': str(entry_info['qty']),
             'positionIdx': idx, 'timeInForce': 'IOC',
+            # префикс = метка «это бот» для атрибуции ручных/авто сделок
+            'orderLinkId': f'bb_{sym.lower()}_{int(time.time())}',
         })
         if order.get('retCode') == 0:
             log_event(f'⚡ СКАЛЬП {sym} {entry_info["direction"]}: market @ ~${entry_info["entry"]:.4f} '

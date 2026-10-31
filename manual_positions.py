@@ -90,6 +90,127 @@ def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, au
             log_event(f'⚠️ mark_manual_position entry_reason: {e}')
 
 
+# ── Атрибуция по бирже (кто поставил ордер) ─────────────────────────────
+# Каждый ордер, который ставит бот, помечен своим orderLinkId-префиксом. Что
+# пришло с другим/пустым link — ручной вход: приложение (link пустой), /enter,
+# MCP. createType для этого НЕ годится: Bybit отдаёт CreateByUser и для наших
+# API-ордеров без явного link (проверено на JCTUSDT 27.10).
+AUTO_LINK_PREFIXES = ('ae_', 'as_', 're_', 'dca_', 'bb_', 'mr_', 'fe_', 'pd_')
+_ORIGIN_TTL = 600
+_origin_cache: dict = {}   # sym -> (ts, origin, link)
+
+
+def origin_by_link(link):
+    """'auto' — ордер бота (наш префикс), иначе 'manual'."""
+    return 'auto' if str(link or '').startswith(AUTO_LINK_PREFIXES) else 'manual'
+
+
+# Плечи, с которыми входит только бот (config: long/short 3x, скальп/фандинг/junk 10x).
+AUTO_LEVERAGES = (3.0, 10.0)
+
+
+def _entry_diag(sym, side):
+    try:
+        from .state_db import db
+        return db.get_kv(f'entry_diag:{sym}:{side}') or {}
+    except Exception:
+        return {}
+
+
+_judge_cache: dict = {}   # ts -> (время чтения, [(ts, символ), ...])
+
+
+def _judge_mentions():
+    """Упоминания судьи в events.log: приговоры хранятся только там."""
+    from .constants import EVENTS_LOG
+    key = 'all'
+    now = time.time()
+    cached = _judge_cache.get(key)
+    if cached and now - cached[0] < 600:
+        return cached[1]
+    out = []
+    try:
+        import re
+        pat_ts = re.compile(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]')
+        pat_sym = re.compile(r'\b([A-Z0-9]{2,15}USDT)\b')
+        with open(EVENTS_LOG, errors='replace') as f:
+            for line in f:
+                if 'JUDGE' not in line and 'судья' not in line.lower():
+                    continue
+                m = pat_ts.match(line)
+                s = pat_sym.search(line)
+                if m and s:
+                    out.append((time.mktime(time.strptime(m.group(1), '%Y-%m-%d %H:%M:%S')),
+                                s.group(1)))
+    except Exception as e:
+        log_event(f'⚠️ manual_positions: events.log для судьи не прочитан: {e}')
+    _judge_cache[key] = (now, out)
+    return out
+
+
+def judge_seen(sym, entry_ts, window=900):
+    if not entry_ts:
+        return False
+    t0 = float(entry_ts) - window
+    return any(s == sym and t0 <= ts <= float(entry_ts) + window for ts, s in _judge_mentions())
+
+
+def manual_signals(sym, side, entry_ts=None, leverage=None):
+    """Признаки ручного входа, которых у авто-ветки не бывает.
+
+    По одному сигналу — не приговор (бот иногда тоже молчит), но вместе с плечом
+    вне авто-набора дают уверенность без истории ордеров (Bybit помнит 7 дней).
+    """
+    reasons = []
+    diag = _entry_diag(sym, side)
+    if not any(diag.get(k) is not None for k in ('score', 'bb_pct', 'rsi', 'entry_reason')):
+        reasons.append('нет анализа на входе (entry_diag пуст)')
+    if not judge_seen(sym, entry_ts):
+        reasons.append('нет решения судьи рядом с входом')
+    if leverage and float(leverage) not in AUTO_LEVERAGES:
+        reasons.append(f'плечо {float(leverage):g}x вне авто-набора {AUTO_LEVERAGES}')
+    return reasons
+
+
+def decide_manual(sym, side, entry_ts=None, leverage=None, link=None):
+    """(ручная?, причины). Пустой link — факт приложения. Иначе нужен сигнал
+    И плечо вне авто-набора: только признаков «нет анализа» мало, у скальпа
+    diag тоже может не быть."""
+    reasons = manual_signals(sym, side, entry_ts, leverage)
+    if link == '':
+        return True, ['ордер из приложения (orderLinkId пуст)'] + reasons
+    lev_off = any('плечо' in r for r in reasons)
+    return (lev_off and len(reasons) >= 2), reasons
+
+
+def entry_origin(sym, since_ms=None):
+    """(origin, link) ордера, которым ОТКРЫТА позиция; (None, None) — не узнали.
+
+    Кеш 10 мин на символ: вызывается из цикла по каждой позиции.
+    """
+    now = time.time()
+    cached = _origin_cache.get(sym)
+    if cached and now - cached[0] < _ORIGIN_TTL:
+        return cached[1], cached[2]
+    origin, link = None, None
+    try:
+        from .api import fetch_order_history, fetch_positions
+        if not since_ms:
+            since_ms = int((fetch_positions().get(sym) or {}).get('openTime') or 0)
+        if since_ms:
+            orders = fetch_order_history(sym, since_ms - 120_000, end_ms=since_ms + 900_000)
+            side = str((fetch_positions().get(sym) or {}).get('side') or '')
+            cands = [o for o in orders if o.get('side') == side] or orders
+            if cands:
+                best = min(cands, key=lambda o: abs(int(o.get('createdTime', 0) or 0) - since_ms))
+                link = best.get('orderLinkId') or ''
+                origin = origin_by_link(link)
+    except Exception as e:
+        log_event(f'⚠️ manual_positions: атрибуция {sym} не получена: {e}')
+    _origin_cache[sym] = (now, origin, link)
+    return origin, link
+
+
 def is_auto_sltp(sym):
     """True если ручная позиция помечена auto_sltp — бот ставит SL/TP сам."""
     state = _load_state()

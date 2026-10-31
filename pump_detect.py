@@ -70,6 +70,9 @@ def _order_with_idx_fallback(body, sym, side, path='/v5/order/create', idx=None)
     if idx is None:
         idx = _position_idx(sym, side)
     body['positionIdx'] = idx
+    if path.endswith('/v5/order/create') and 'orderLinkId' not in body:
+        # префикс = метка «это бот»: по нему ручные входы отличаются от авто
+        body['orderLinkId'] = f'pd_{sym.lower()}_{int(time.time() * 1000)}'
     response = bybit('POST', path, body)
 
     if (response or {}).get('retCode') != 0 and 'position idx' in str((response or {}).get('retMsg', '')):

@@ -299,6 +299,23 @@ def fetch_positions():
     return positions
 
 
+def fetch_order_history(symbol, start_ms, end_ms=None, limit=50):
+    """История ордеров по символу (GET /v5/order/history).
+
+    Нужна для атрибуции: поле createType говорит, кто поставил ордер —
+    CreateByUser (человек в приложении), CreateByApi (наш код),
+    CreateByTakeOver_PassThrough (ликвидатор). Цена и PnL этого не знают.
+    """
+    path = (f'/v5/order/history?category=linear&symbol={symbol}'
+            f'&startTime={int(start_ms)}&limit={int(limit)}')
+    if end_ms:
+        path += f'&endTime={int(end_ms)}'
+    data = bybit('GET', path)
+    if not data or data.get('retCode') != 0:
+        return []
+    return data['result'].get('list', []) or []
+
+
 def fetch_orders():
     """Получить активные ордера с пагинацией (до 50 за запрос).
 

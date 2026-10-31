@@ -207,6 +207,8 @@ def execute_funding_entry(entry_info):
             'category': 'linear', 'symbol': sym, 'side': side,
             'orderType': 'Market', 'qty': str(entry_info['qty']),
             'positionIdx': idx, 'timeInForce': 'IOC',
+            # префикс = метка «это бот» для атрибуции ручных/авто сделок
+            'orderLinkId': f'fe_{sym.lower()}_{int(time.time())}',
         })
         if order.get('retCode') == 0:
             log_event(f'💰 FUNDING {sym} {entry_info["direction"]}: market x{FUNDING_LEVERAGE} '
