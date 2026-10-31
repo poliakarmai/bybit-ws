@@ -301,7 +301,7 @@ FROM trade_history WHERE strategy='auto' AND COALESCE(manual,0)=0 GROUP BY s;"
 |---|--------|--------|
 | 9 | Единый execution-контур (OrderIntent → RiskDecision → Executor → OrderRepository) — рефакторинг на недели, трогает live, только после P0 и прогона на paper | ⬜ |
 | 10 | CI: добавить lint/типы к текущим py_compile + smoke + modules + logic + regression | ⬜ |
-| 11 | Отчёт бэктестов: commit SHA, хеш конфига, версия данных, комиссии, equity curve | ✅ `backtest_runner --out` пишет артефакт: `git_commit`, `engine_version`, `params_hash`, `config_hash` (sha256 боевого config.yaml), `data_hash` свечей, `fees_model`/`funding_model`, метрики с `total_fees`/`total_funding`, `equity_curve` + `equity_hash`; два прогона → одинаковый `equity_hash` (`tests/test_backtest_artifact.py`). Базовый артефакт до фикса ATR: `experiments/runs/baseline_solusdt_180d.json` (17 сделок, PF 0.43, PnL −33.0%, fees $18.31, funding $0.05) |
+| 11 | Отчёт бэктестов: commit SHA, хеш конфига, версия данных, комиссии, equity curve | ✅ `backtest_runner --out` пишет артефакт: `git_commit`, `engine_version`, `params_hash`, `config_hash` (sha256 боевого config.yaml), `data_hash` свечей, `fees_model`/`funding_model`, метрики с `total_fees`/`total_funding`, `equity_curve` + `equity_hash`; два прогона → одинаковый `equity_hash` (`tests/test_backtest_artifact.py`). Базовый артефакт до фикса ATR: `~/.local/share/bybit-ws/experiments/runs/baseline_solusdt_180d.json` (17 сделок, PF 0.43, PnL −33.0%, fees $18.31, funding $0.05) |
 | 12 | Лицензия: репозиторий под **AGPL-3.0** (`LICENSE`, `pyproject.toml`). Смена лицензии не отменяет права по опубликованным версиям — вопрос юридический, решать до коммерческой упаковки | ⬜ |
 
 #### Снято с аудита (проверено, не берём)
