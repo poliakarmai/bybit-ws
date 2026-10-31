@@ -53,36 +53,29 @@ RISK_STATE_FILE = DATA_DIR / "risk_manager.json"
 
 
 def _get_wallet_balance() -> Optional[dict]:
-    """Получить баланс кошелька: сначала WS-кеш, затем REST API."""
-    # 1. WS-кеш (если BYBIT_WS_FULL_ENABLED=1)
-    try:
-        from .ws_client import get_wallet, is_full_enabled, is_private_connected
-        if is_full_enabled() and is_private_connected():
-            w = get_wallet()
-            if w:
-                return w
-    except Exception:
-        pass
-    
-    # 2. REST API fallback
+    """Баланс счёта (USD) для риск-проверок.
+
+    Берём уровень СЧЁТА, не монеты USDT: в UTA USDT-баланс отрицательный,
+    когда средства в других монетах (30.10.2026: coin USDT equity −2.94 при
+    account equity $500.86) → концентрация получала equity<=0 и fail-closed
+    резала все входы. WS-кеш кошелька тоже по-монетный — для account-итогов
+    не годится.
+    """
     try:
         from .api import bybit
-        data = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT')
+        data = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
         if data and isinstance(data, dict) and data.get('retCode') == 0:
-            # result.list — счета, монеты лежат внутри list[i]['coin'].
-            # Раньше искали coin=='USDT' на уровне счёта → всегда None → проверка
-            # концентрации молча разрешала всё (fail-open), теперь цена ошибки видна.
-            for acc in data['result'].get('list', []):
-                for c in acc.get('coin', []) or []:
-                    if c.get('coin') == 'USDT':
-                        return {
-                            'availableBalance': c.get('availableToWithdraw', '') or c.get('walletBalance', '0'),
-                            'equity': c.get('equity', '0'),
-                            'totalWalletBalance': c.get('walletBalance', '0'),
-                        }
+            acc = (data['result'].get('list') or [{}])[0]
+            equity = acc.get('totalEquity') or acc.get('totalWalletBalance')
+            if equity is not None:
+                return {
+                    'availableBalance': acc.get('totalAvailableBalance') or equity,
+                    'equity': equity,
+                    'totalWalletBalance': acc.get('totalWalletBalance') or equity,
+                }
     except Exception:
         pass
-    
+
     return None
 
 # ── Константы ─────────────────────────────────────────────────────────────

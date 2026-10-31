@@ -243,6 +243,24 @@ def bybit(method, path, body=None, retries=None):
 # Bybit v5 REST API docs: https://bybit-exchange.github.io/docs/v5/
 
 
+def account_wallet() -> dict | None:
+    """Итоги счёта (USD): {'balance','equity','available'} или None.
+
+    Единственный источник депозита/свободных средств: уровень СЧЁТА, не монеты
+    USDT. В UTA USDT-баланс уходит в минус, когда средства лежат в других
+    монетах (30.10.2026: USDT −5.58 при equity $500.86) — парсер по монете
+    давал отрицательный «депозит» и блокировал все входы.
+    """
+    r = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
+    if not r or r.get('retCode') != 0:
+        return None
+    acc = (r.get('result', {}).get('list') or [{}])[0]
+    balance = float(acc.get('totalWalletBalance') or 0)
+    equity = float(acc.get('totalEquity') or balance)
+    available = float(acc.get('totalAvailableBalance') or 0)
+    return {'balance': balance, 'equity': equity, 'available': available}
+
+
 def fetch_positions():
     """Получить все открытые позиции по USDT-линейным контрактам.
 

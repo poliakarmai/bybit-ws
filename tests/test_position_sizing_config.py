@@ -73,3 +73,25 @@ def test_p_reads_monkeypatched_config(monkeypatch):
     fake = FakeCfg(position_sizing={'max_positions': 7})
     monkeypatch.setattr(ps, 'get_config', lambda: fake)
     assert ps._p('max_positions', 999) == 7
+
+
+def test_deposit_uses_account_total_not_usdt_coin(monkeypatch):
+    """Депозит = счёт целиком, не монета USDT (регресс 30.10.2026).
+
+    USDT-баланс ушёл в минус (−5.58), средства лежали в других монетах:
+    по монете бот считал депозит отрицательным и блокировал ВСЕ входы.
+    """
+    acc = {'retCode': 0, 'result': {'list': [{
+        'totalEquity': '500.86',
+        'totalWalletBalance': '403.09',
+        'totalAvailableBalance': '126.93',
+        'coin': [{'coin': 'USDT', 'walletBalance': '-5.58', 'equity': '-2.94'}],
+    }]}}
+
+    monkeypatch.setattr(ps, 'bybit', lambda *a, **k: acc)
+    monkeypatch.setattr(ps, 'DEPOSIT_CACHE', {'value': None, 'ts': 0})
+
+    deposit = ps.get_deposit()
+    assert deposit == 403.09, f'депозит по монете USDT: {deposit}'
+    # и сайзинг снова живой: маржа > 0 при отрицательном USDT
+    assert ps.calculate_margin(6.5, risk_pct=0.20) > 0

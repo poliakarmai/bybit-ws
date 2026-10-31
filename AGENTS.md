@@ -28,6 +28,14 @@ RSS и прочие метрики — в `GET /metrics` (значение пл�
 
 ## Инварианты учёта (не протухают)
 
+> **Депозит и свободные средства — уровень СЧЁТА, не монеты USDT.**
+> В UTA per-coin USDT-баланс уходит в минус, когда средства лежат в других монетах
+> (30.10.2026: USDT −5.58 при equity $500.86) → бот 1.5 суток видел отрицательный
+> депозит и молча блокировал ВСЕ входы (`💸 Депозит $-5.6 < $30`). Источник один —
+> `api.account_wallet()` (`totalWalletBalance`/`totalEquity`/`totalAvailableBalance`);
+> по монете не считать. Тесты: `tests/test_position_sizing_config.py::test_deposit_uses_account_total_not_usdt_coin`,
+> `tests/test_audit2_fixes.py::test_wallet_balance_uses_account_totals`.
+
 > ⚠️ **`side` в `trade_history` — сторона ЗАКРЫВАЮЩЕГО ордера, а не позиции.**
 > `side='Buy'` закрывает SHORT, `side='Sell'` закрывает LONG. В таблице `positions`
 > (`/positions`) наоборот — сырой Bybit: `Buy`=LONG, `Sell`=SHORT. Фильтр шортов —

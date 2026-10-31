@@ -2,7 +2,7 @@
 import json, math, os, time
 from . import BYBIT_CLI, DATA_DIR, MAX_POSITION_VALUE
 from . import safe_run
-from .api import bybit, get_bb_data, set_leverage, verify_leverage
+from .api import bybit, account_wallet, get_bb_data, set_leverage, verify_leverage
 from .alerts import log_event, add_alert
 from .config import Config
 from .position_sizing import margin_for_strategy
@@ -716,17 +716,8 @@ def auto_entry_scan(positions):
 
             # ── Проверка свободных средств перед отправкой ордера ──
             try:
-                wallet = bybit('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
-                available_usdt = 0.0
-                if wallet and wallet.get('retCode') == 0:
-                    for acc in wallet['result'].get('list', []):
-                        for coin in acc.get('coin', []):
-                            if coin.get('coin') == 'USDT':
-                                # walletBalance - totalPositionIM = реально свободно
-                                balance = float(coin.get('walletBalance', 0))
-                                margin_used = float(coin.get('totalPositionIM', 0))
-                                available_usdt = balance - margin_used
-                                break
+                w = account_wallet()
+                available_usdt = w['available'] if w else 0.0
                 required = margin * 1.05  # +5% запас на комиссию
                 if available_usdt < required:
                     _cd_h = Config().strategy.long.get('cooldown_after_sl', 14400) / 3600

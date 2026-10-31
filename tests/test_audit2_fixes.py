@@ -42,16 +42,18 @@ def test_min_lot_allowed_even_below_pct_cap(monkeypatch):
     assert allowed2 is False
 
 
-def test_wallet_balance_parses_nested_coin_list(monkeypatch):
-    """Регресс: монеты лежат в result.list[i]['coin'], а не на уровне счёта.
+def test_wallet_balance_uses_account_totals(monkeypatch):
+    """Регресс: баланс берётся на уровне СЧЁТА, а не монеты USDT.
 
-    Пока парсер искал coin=='USDT' на уровне счёта, _get_wallet_balance() всегда
-    возвращал None → проверка концентрации была fail-open по факту.
+    30.10.2026: coin USDT = −5.58 при account equity $500.86. Парсер по монете
+    отдавал equity<=0 → концентрация fail-closed резала все входы 1.5 суток.
     """
     nested = {'retCode': 0, 'result': {'list': [
         {'accountType': 'UNIFIED',
-         'coin': [{'coin': 'USDT', 'equity': '62.83', 'walletBalance': '71.01',
-                   'availableToWithdraw': ''}]}]}}
+         'totalEquity': '500.86',
+         'totalWalletBalance': '403.09',
+         'totalAvailableBalance': '126.93',
+         'coin': [{'coin': 'USDT', 'equity': '-2.94', 'walletBalance': '-5.58'}]}]}}
 
     class _Api:
         @staticmethod
@@ -60,7 +62,9 @@ def test_wallet_balance_parses_nested_coin_list(monkeypatch):
 
     monkeypatch.setitem(sys.modules, 'bybit_ws.api', _Api())
     w = rm._get_wallet_balance()
-    assert w and w['equity'] == '62.83'
+    assert w and float(w['equity']) == pytest.approx(500.86)
+    assert float(w['totalWalletBalance']) == pytest.approx(403.09)
+    assert float(w['availableBalance']) == pytest.approx(126.93)
 
 
 def test_concentration_ok_with_balance(monkeypatch):

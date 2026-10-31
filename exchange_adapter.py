@@ -157,12 +157,15 @@ class BybitAdapter(ExchangeAdapter):
         r = b('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
         if not r or r.get('retCode') != 0:
             return {}
-        coins = r['result'].get('list', [{}])[0].get('coin', [])
-        usdt = next((c for c in coins if c['coin'] == 'USDT'), {})
+        # Уровень счёта, не монеты USDT: отрицательный USDT-баланс при живом
+        # счёте давал total<0 (30.10.2026). unPnl = equity − wallet.
+        acc = (r['result'].get('list') or [{}])[0]
+        total = float(acc.get('totalWalletBalance') or 0)
+        equity = float(acc.get('totalEquity') or total)
         return {
-            'total': float(usdt.get('walletBalance', 0)),
-            'available': float(usdt.get('availableToWithdraw', 0)),
-            'unrealized_pnl': float(usdt.get('unrealisedPnl', 0)),
+            'total': total,
+            'available': float(acc.get('totalAvailableBalance') or 0),
+            'unrealized_pnl': equity - total,
         }
 
     def get_bb(self, symbol: str, interval: str = "D", period: int = 20, std: float = 2.0) -> dict:

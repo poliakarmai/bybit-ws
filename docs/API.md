@@ -51,7 +51,7 @@
 | `/rpc/dash/all` · `/rpc/dash/risk` · `/rpc/dash/signals` | Данные для дашборда (all / risk / signals) |
 | `/positions` · `/rpc/positions` | Открытые позиции + uPnL (`side` сырой Bybit: **Buy=LONG, Sell=SHORT**) |
 | `/orders` · `/rpc/orders` | Активные ордера (SL/TP) |
-| `/balance` | Баланс: `walletBalance`, `available`, `equity` |
+| `/balance` | Баланс счёта (USD, уровень счёта — не монеты USDT): `balance` (`totalWalletBalance`), `available` (`totalAvailableBalance`), `equity` (`totalEquity`) |
 | `/risk` · `/rpc/risk` · `/rpc/risk_full` | Лимиты, дневной PnL, circuit breaker, корреляции |
 | `/rpc/circuit_breaker` | Статус CB (сброс — рестарт сервиса, отдельного POST нет) |
 | `/signals` · `/rpc/signals` | Последние BB-сигналы LONG/SHORT |

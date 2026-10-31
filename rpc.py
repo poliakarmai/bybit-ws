@@ -989,18 +989,21 @@ class RPCHandler(BaseHTTPRequestHandler):
         _json_response(self, result)
 
     def _handle_balance(self):
-        """GET /balance — USDT баланс для linear фьючерсов."""
+        """GET /balance — стоимость счёта (USD) для linear фьючерсов.
+
+        Уровень СЧЁТА, не монеты USDT: в UTA USDT-баланс отрицательный, когда
+        средства в других монетах (30.10.2026: coin −5.58 при equity $500).
+        """
         try:
             data = _bybit_api('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
             if data.get('retCode') != 0:
                 return _error(self, 'Balance API error', data.get('retMsg', ''), 502)
-            coins = data.get('result', {}).get('list', [{}])[0].get('coin', [])
-            usdt = next((c for c in coins if c.get('coin') == 'USDT'), {})
-            balance = float(usdt.get('walletBalance') or 0)
-            available = float(usdt.get('availableToWithdraw') or 0)
-            equity = float(usdt.get('equity') or balance)
+            acc = (data.get('result', {}).get('list') or [{}])[0]
+            balance = float(acc.get('totalWalletBalance') or 0)
+            available = float(acc.get('totalAvailableBalance') or 0)
+            equity = float(acc.get('totalEquity') or balance)
             _json_response(self, {
-                'asset': 'USDT',
+                'asset': 'USD',
                 'balance': round(balance, 2),
                 'available': round(available, 2),
                 'equity': round(equity, 2),
@@ -1722,12 +1725,11 @@ class RPCHandler(BaseHTTPRequestHandler):
         if leverage < 1 or leverage > 100:
             return _error(self, 'Invalid leverage', 'Must be 1-100', 400)
 
-        # ── Баланс ──
+        # ── Баланс (уровень счёта, не монеты USDT) ──
         try:
             bal_data = _bybit_api('GET', '/v5/account/wallet-balance?accountType=UNIFIED')
-            coins = bal_data.get('result', {}).get('list', [{}])[0].get('coin', [])
-            usdt = next((c for c in coins if c.get('coin') == 'USDT'), {})
-            balance = float(usdt.get('walletBalance', 0))
+            acc = (bal_data.get('result', {}).get('list') or [{}])[0]
+            balance = float(acc.get('totalWalletBalance') or acc.get('totalEquity') or 0)
         except Exception:
             balance = 0
 

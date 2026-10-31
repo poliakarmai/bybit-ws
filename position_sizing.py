@@ -42,22 +42,26 @@ def _p(key: str, default):
 
 
 def get_deposit() -> float:
-    """Текущий USDT баланс с Bybit (с кешем на 2 мин)."""
+    """Депозит = стоимость счёта целиком (USD), с кешем на 2 мин.
+
+    Не монета USDT: в UTA USDT-баланс уходит в минус, когда средства лежат
+    в других монетах (30.10.2026: USDT −5.58 при equity $500) — по монете
+    бот видел отрицательный депозит и молча блокировал все входы.
+    """
     now = time.time()
     if (DEPOSIT_CACHE["value"] is not None and
             now - DEPOSIT_CACHE["ts"] < DEPOSIT_CACHE_TTL):
         return DEPOSIT_CACHE["value"]
 
     try:
-        r = bybit("GET",
-            "/v5/account/wallet-balance?accountType=UNIFIED&coin=USDT")
+        r = bybit("GET", "/v5/account/wallet-balance?accountType=UNIFIED")
         if r and r.get("retCode") == 0:
-            for coin in r["result"]["list"][0].get("coin", []):
-                if coin["coin"] == "USDT":
-                    balance = float(coin.get("walletBalance", 0))
-                    DEPOSIT_CACHE["value"] = balance
-                    DEPOSIT_CACHE["ts"] = now
-                    return balance
+            acc = (r["result"].get("list") or [{}])[0]
+            balance = float(acc.get("totalWalletBalance")
+                            or acc.get("totalEquity") or 0)
+            DEPOSIT_CACHE["value"] = balance
+            DEPOSIT_CACHE["ts"] = now
+            return balance
     except Exception as e:
         log_event(f"get_deposit error: {e}")
 
