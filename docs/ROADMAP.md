@@ -330,6 +330,26 @@ python3 -m bybit_ws.experiments.backtest_runner --symbol SOLUSDT --days 180 \
 **запрошенное** плечо (раньше `suggest_qty` считался на хардкоде 10x при любом плече —
 позиция в 3.3 раза больше при leverage=3). Тесты: `tests/test_atr_sizing.py`.
 
+#### Агрегированная экспозиция (31.10) — ⚠️ планка есть, блок не включён
+
+Замер живой: 6 позиций, Σ|notional| **$3925** при equity **$453** → **8.7x**.
+`risk.max_total_margin` ($300) меряет только залог (positionIM), notional не видел
+никто: 75x LTC ($1974 = 436% equity) и 75x ARB при этом проходили как «в норме».
+
+Сделано:
+- `margin_alerts.get_gross_stats()` → `gross`, `equity`, `gross_leverage` в `/risk`-алертах;
+- алерт в `check_margin_utilization` (уже в Telegram через `main_async`):
+  🆘 при `gross ≥ risk.max_gross_leverage` (5.0x), ⚠️ при 80%; cooldown 4ч
+  (экспозиция держится часами, 15-минутный алерт = 96 сообщений/сутки);
+- `risk.max_gross_leverage` в `config.py` + `config.yaml`, тест `tests/test_exposure_alert.py`.
+
+Блок НЕ включён и почему: любая планка ниже 8.7x сейчас останавливает авто-входы
+целиком — это повторение инцидента 31.10 (молчаливая тишина). Разделить ручное и авто
+нельзя: `pumps.json` **пуст**, `is_manual_position('LTCUSDT'/'ARBUSDT') == False`,
+хотя 75x — ручные входы. Пока атрибуция не починена, честный шаг — видимость;
+блок на auto-часть — после того, как `mark_manual_position` будет вызываться всеми
+ручными путями (`/enter`, MCP `place_entry`, raw-входы).
+
 #### Порядок работ (обновлён после второго аудита)
 
 1. **11** — realized PnL из `trades.jsonl` (там `pnl` есть в каждой записи) или из `state.db`; убрать `pass`. Полчаса.

@@ -21,6 +21,7 @@ from .config import Config
 # ── Дедупликация предупреждений (не чаще раза в 15 мин на уровень) ──────────
 _MARGIN_ALERT_FILE = os.path.join(DATA_DIR, 'margin_alert_state.json')
 _MARGIN_ALERT_COOLDOWN = 900  # 15 минут между одинаковыми уровнями
+_GROSS_ALERT_COOLDOWN = 4 * 3600  # экспозиция меняется медленно: алерт раз в 4ч
 
 
 def _log_event(msg: str):
@@ -51,18 +52,81 @@ def _save_alert_state(state: dict):
         pass
 
 
-def _should_alert(level_key: str) -> bool:
-    """Проверить, можно ли отправлять алерт уровня level_key."""
+def _should_alert(level_key: str, cooldown: float = None) -> bool:
+    """Проверить, можно ли отправлять алерт уровня level_key.
+
+    cooldown — свой интервал для «медленных» уровней (экспозиция держится часами,
+    алерт раз в 15 минут был бы спамом: 96 сообщений в сутки).
+    """
     state = _load_alert_state()
     now = time.time()
+    cd = cooldown or _MARGIN_ALERT_COOLDOWN
     # Очистка старых записей
-    state = {k: v for k, v in state.items() if now - v < _MARGIN_ALERT_COOLDOWN * 2}
+    state = {k: v for k, v in state.items() if now - v < max(cd, _MARGIN_ALERT_COOLDOWN) * 2}
     if level_key in state:
-        if now - state[level_key] < _MARGIN_ALERT_COOLDOWN:
+        if now - state[level_key] < cd:
             return False
     state[level_key] = now
     _save_alert_state(state)
     return True
+
+
+_EQUITY_CACHE = {'ts': 0.0, 'value': 0.0}
+_EQUITY_TTL = 120.0
+
+
+def _account_equity() -> float:
+    """Equity счёта ($) с кешем 2 мин — знаменатель gross leverage.
+
+    Берём totalEquity (баланс + нереализованный PnL), не USDT-монету и не
+    walletBalance: 31.10 при балансе $400 equity было $453.
+    """
+    now = time.time()
+    if _EQUITY_CACHE['value'] > 0 and now - _EQUITY_CACHE['ts'] < _EQUITY_TTL:
+        return _EQUITY_CACHE['value']
+    try:
+        from .api import account_wallet
+        w = account_wallet() or {}
+        eq = float(w.get('equity') or w.get('totalEquity') or 0)
+        if eq > 0:
+            _EQUITY_CACHE.update({'ts': now, 'value': eq})
+            return eq
+    except Exception:
+        pass
+    try:
+        from .position_sizing import get_deposit
+        return float(get_deposit() or 0)
+    except Exception:
+        return 0.0
+
+
+def get_gross_stats(positions: dict) -> dict:
+    """Экспозиция портфеля: суммарный notional и плечо всего счёта.
+
+    gross_leverage = Σ|size × mark| / equity. Именно он был 8.7x при лимите
+    margin $300: маржа мерила только залог, а риск — в notional.
+    Лимит `risk.max_gross_leverage` (0 = выключен) — алерт, не блок входа:
+    ручные входы Алексея не режем (75x LTC — его сделка), но видеть их обязаны.
+    """
+    cfg = Config()
+    cap = float(cfg.risk.get('max_gross_leverage', 0) or 0)
+    equity = _account_equity()
+
+    gross = 0.0
+    by_symbol = {}
+    for sym, p in (positions or {}).items():
+        n = abs(float(p.get('size') or 0)) * float(p.get('mark') or p.get('entry') or 0)
+        if n > 0:
+            gross += n
+            by_symbol[sym] = round(n, 2)
+
+    return {
+        'gross': round(gross, 2),
+        'equity': round(equity, 2),
+        'gross_leverage': round(gross / equity, 2) if equity > 0 else 0.0,
+        'max_gross_leverage': cap,
+        'by_symbol': by_symbol,
+    }
 
 
 def get_margin_stats(positions: dict) -> dict:
@@ -109,6 +173,7 @@ def get_margin_stats(positions: dict) -> dict:
         'utilization_pct': utilization_pct,
         'position_count': len(positions) if positions else 0,
         'by_symbol': by_symbol,
+        **get_gross_stats(positions),
     }
 
 
@@ -133,6 +198,23 @@ def check_margin_utilization(positions: dict) -> list[str]:
     count = stats['position_count']
 
     alerts = []
+
+    # ── Экспозиция: gross leverage всего счёта (ручные + авто) ──
+    cap = stats['max_gross_leverage']
+    lev = stats['gross_leverage']
+    if cap > 0 and lev > 0:
+        top = sorted(stats['by_symbol'].items(), key=lambda kv: -kv[1])[:2]
+        where = ', '.join(f'{s} ${n:.0f}' for s, n in top)
+        if lev >= cap and _should_alert('gross_over', _GROSS_ALERT_COOLDOWN):
+            alerts.append(
+                f'🆘 ЭКСПОЗИЦИЯ {lev:.1f}x equity (лимит {cap:.1f}x): '
+                f'${stats["gross"]:.0f} / ${stats["equity"]:.0f} — {where}'
+            )
+        elif lev >= cap * 0.8 and _should_alert('gross_80', _GROSS_ALERT_COOLDOWN):
+            alerts.append(
+                f'⚠️ Экспозиция {lev:.1f}x equity — {lev / cap * 100:.0f}% лимита {cap:.1f}x '
+                f'(${stats["gross"]:.0f} / ${stats["equity"]:.0f}, {count} позиций)'
+            )
 
     if util > 100:
         key = 'over_100'

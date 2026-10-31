@@ -146,6 +146,7 @@ _DEFAULT_RISK = {
     'max_drawdown_pct': 15,       # global stop: -15% of deposit → close all
     'max_total_margin': 300,      # max $300 total in positions (fallback, если dynamic_margin_pct=0)
     'dynamic_margin_pct': 30,     # % от available balance для авто-расчёта max_total_margin (0=выкл)
+    'max_gross_leverage': 5.0,   # потолок Σ|notional|/equity (0=выкл) — алерт, не блок
     'max_position_size': 100,     # max $100 in single position (10% of deposit)
     'max_daily_loss': 50,         # stop for the day at -$50
     'max_long_positions': 12,      # limit LONG entries
