@@ -225,11 +225,29 @@ def _calc_breakeven(p: dict, is_long: bool, mark: float, entry: float):
     return None, ''
 
 
+def _sl_params() -> tuple[float, float, float]:
+    """(множитель ATR, min%, max%) из конфига секции `sl`, дефолты 1.5 / 3% / 10%.
+
+    Крутилки для калибровки: бэктест 8 символов × 180д показал, что множитель
+    важнее потолка (1.5×ATR: +$50 против −$774 у фикс-10%; подъём потолка до 15%
+    не дал выигрыша). Меняются без правки кода.
+    """
+    try:
+        from .config import get_config
+        cfg = get_config().get('sl', {}) or {}
+    except Exception:
+        cfg = {}
+    return (float(cfg.get('atr_multiplier', 1.5)),
+            float(cfg.get('min_pct', 0.03)),
+            float(cfg.get('max_pct', 0.10)))
+
+
 def _calc_default_sl(sym: str, p: dict, is_long: bool, mark: float, entry: float, leverage: float):
     """Default SL: ATR-адаптивный (1.5×ATR(14), clamp 3–10%), fallback −10%.
 
     04.10.2026: динамический шаг по волатильности вместо фикс −10%.
-    Волатильная монета (SAND +65%/нед) → шире SL (до 10%), спокойная (BTC) → уже (3–5%).
+    Волатильная монета (SAND +65%/нед) → шире SL (до потолка), спокойная (BTC) → уже.
+    Множитель и границы — из конфига (`sl.atr_multiplier` / `sl.min_pct` / `sl.max_pct`).
     """
     current_sl = p.get('stopLoss')
     if current_sl is not None:
@@ -243,8 +261,9 @@ def _calc_default_sl(sym: str, p: dict, is_long: bool, mark: float, entry: float
     except Exception:
         atr = 0.0
 
+    mult, lo, hi = _sl_params()
     if atr > 0 and entry > 0:
-        dist = max(0.03, min(0.10, 1.5 * atr / entry))
+        dist = max(lo, min(hi, mult * atr / entry))
         if is_long:
             target = round(entry * (1 - dist), 4)
         else:

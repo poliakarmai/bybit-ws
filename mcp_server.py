@@ -22,6 +22,8 @@ from mcp.server import Server, NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
+from bybit_ws.alerts import log_event
+
 # ── RPC helpers ──────────────────────────────────────────────────────────────
 
 RPC_PORT = 8766
@@ -403,35 +405,37 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             except Exception:
                 leverage = None
         
-        # ATR-сайзинг: если qty не указан — рассчитать автоматически
+        # ATR-сайзинг: если qty не указан — рассчитать автоматически.
+        # Цена нужна ДО расчёта маржи: с price+leverage сайзинг риск-постоянный
+        # (margin = риск / (стоп% × плечо)), иначе позиция гуляет по риску в 3+ раза.
         if qty <= 0:
             try:
                 from bybit_ws.position_sizing import atr_margin, suggest_qty
-                sizing = atr_margin(symbol, score=5.5, side=side)
-                if sizing.get('margin', 0) > 0:
-                    # Получаем текущую цену
-                    ticker = _rpc("rpc/all")
-                    mark_price = price
-                    if not mark_price and ticker and 'positions' not in ticker:
-                        mark_price = None
-                    if not mark_price:
-                        # fetch from API
-                        from bybit_ws.api import bybit as _api
-                        t = _api('GET', f'/v5/market/tickers?category=linear&symbol={symbol}')
-                        if t and t.get('retCode') == 0:
-                            items = t['result'].get('list', [])
-                            if items:
-                                mark_price = float(items[0].get('lastPrice', 0))
-                    
-                    if mark_price and mark_price > 0:
-                        qty = suggest_qty(sizing['margin'], mark_price)
-                        log_msg = (f'ATR-сайзинг {symbol}: ATR=${sizing["atr"]:.4f}, '
-                                   f'стоп-дист=${sizing["stop_distance"]:.4f}, '
-                                   f'маржа=${sizing["margin"]:.1f} → qty={qty}')
-                        _rpc("rpc/all")  # placeholder, log to events
-                    else:
-                        qty = 0
+                ticker = _rpc("rpc/all")
+                mark_price = price
+                if not mark_price and ticker and 'positions' not in ticker:
+                    mark_price = None
+                if not mark_price:
+                    from bybit_ws.api import bybit as _api
+                    t = _api('GET', f'/v5/market/tickers?category=linear&symbol={symbol}')
+                    if t and t.get('retCode') == 0:
+                        items = t['result'].get('list', [])
+                        if items:
+                            mark_price = float(items[0].get('lastPrice', 0))
+
+                lev = int(leverage) if leverage else 10
+                sizing = atr_margin(symbol, score=5.5, side=side,
+                                    price=mark_price, leverage=lev)
+                if sizing.get('margin', 0) > 0 and mark_price and mark_price > 0:
+                    qty = suggest_qty(sizing['margin'], mark_price, leverage=lev)
+                    log_event(f'ATR-сайзинг {symbol}: ATR=${sizing["atr"]:.4f}, '
+                              f'стоп={sizing.get("stop_pct", 0)*100:.1f}% '
+                              f'(дист ${sizing["stop_distance"]:.4f}), '
+                              f'маржа=${sizing["margin"]:.1f} @ {lev}x → qty={qty}')
+                else:
+                    qty = 0
             except Exception as e:
+                log_event(f'⚠️ ATR-сайзинг {symbol}: {e}')
                 qty = 0
 
         # Fail-closed: qty=0 после автосайзинга (позиция меньше шага лота,

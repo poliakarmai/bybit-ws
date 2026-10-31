@@ -41,6 +41,18 @@ def _p(key: str, default):
     return _ps_cfg().get(key, default)
 
 
+def _sl_cfg(key: str, default):
+    """Параметр ATR-стопа из секции `sl` — тот же источник, что у `unified_sl`.
+
+    Один ключ на сайзинг и на стоп: иначе сайзинг считает риск по 2.0×ATR,
+    а стоп ставится на 1.5×ATR, и «постоянный риск» врёт на треть.
+    """
+    try:
+        return (get_config().get('sl', {}) or {}).get(key, default)
+    except Exception:
+        return default
+
+
 def get_deposit() -> float:
     """Депозит = стоимость счёта целиком (USD), с кешем на 2 мин.
 
@@ -206,21 +218,31 @@ def get_atr(symbol: str, interval: str = 'D', period: int = 14) -> float | None:
 
 def atr_margin(symbol: str, score: float = 5.5,
                side: str = 'Buy', interval: str = 'D',
-               atr_mult: float = None, risk_per_trade: float = None) -> dict:
+               atr_mult: float = None, risk_per_trade: float = None,
+               price: float = None, leverage: float = None,
+               sl_clamp: tuple = None) -> dict:
     """ATR-осведомлённый расчёт маржи.
 
-    Фактически: margin = risk_per_trade (маржа и есть риск при кросс-марже),
-    но не ниже min_margin. ATR используется для qty/стоп-дистанции, НЕ для
-    деления бюджета — формулы risk_budget/(ATR*mult) в коде нет (аудит #16).
-    - risk_per_trade: $ на риск в одной сделке (default $5)
-    - multiplier: сколько ATR держим как стоп (default 2.0), влияет на qty
+    Без `price`: margin = risk_per_trade (старое поведение, риск НЕ постоянный —
+    риск сделки = notional × стоп%, то есть зависит от ATR).
+
+    С `price` (и `leverage`) — риск-постоянный сайзинг (аудит #16):
+        стоп% = clamp(atr×atr_mult/price, min, max)
+        margin = risk_budget / (стоп% × leverage)
+    Тогда риск сделки == risk_budget при любом ATR: спокойная монета (стоп 3%)
+    получает позицию больше, волатильная (стоп 10%) — меньше, риск в $ один.
+
+    Args:
+        price, leverage: цена входа и плечо (нужны для риск-постоянного режима)
+        sl_clamp: (min, max) стоп-дистанции, default — `position_sizing.atr_sl_min_pct/max_pct`
+            (те же дефолты 3%/10%, что в `unified_sl._calc_default_sl`)
 
     Returns:
-        dict с ключами: margin, usdt_qty, qty, atr, risk_budget, method
+        dict: margin, atr, stop_distance, stop_pct (если есть price), …
         или {'margin': 0, 'error': '...'}
     """
     if atr_mult is None:
-        atr_mult = _p('atr_multiplier', 2.0)
+        atr_mult = _sl_cfg('atr_multiplier', 1.5)
     if risk_per_trade is None:
         risk_per_trade = _p('atr_risk_per_trade', 5.0)
 
@@ -228,26 +250,30 @@ def atr_margin(symbol: str, score: float = 5.5,
     if not atr or atr <= 0:
         return {'margin': 0, 'error': f'ATR недоступен для {symbol}'}
 
-    # Риск-бюджет распределяем через ATR
-    # Если ATR = $0.01, multiplier = 2.0 → стоп-дистанция = $0.02
-    # margin = risk_budget * leverage / (ATR * multiplier)
-    # Но проще: margin = risk_budget (маржа и есть наш риск при кросс-марже)
-
+    stop_distance = atr * atr_mult
     margin = round(risk_per_trade, 1)
-    margin = max(margin, _p('min_margin', _FB_MIN_MARGIN))
-
-    # Рассчитываем qty: usdt_qty = margin * leverage, qty = usdt_qty / price
-    # Но цена неизвестна на этом этапе — возвращаем margin и atr,
-    # вызывающий код сам посчитает qty при известной цене
-
-    return {
+    out = {
         'margin': margin,
         'atr': atr,
         'atr_multiplier': atr_mult,
         'risk_per_trade': risk_per_trade,
-        'stop_distance': round(atr * atr_mult, 8),
+        'stop_distance': round(stop_distance, 8),
         'method': 'atr',
     }
+
+    if price and price > 0:
+        lo, hi = sl_clamp or (_sl_cfg('min_pct', 0.03), _sl_cfg('max_pct', 0.10))
+        stop_pct = max(lo, min(hi, stop_distance / price))
+        out['stop_pct'] = round(stop_pct, 5)
+        out['clamped'] = stop_pct != stop_distance / price
+        lev = float(leverage) if leverage else 0.0
+        if lev > 0:
+            # margin = риск / (стоп% × плечо); min_margin — только нижняя граница
+            margin = max(round(risk_per_trade / (stop_pct * lev), 1),
+                         _p('min_margin', _FB_MIN_MARGIN))
+            out['margin'] = margin
+            out['method'] = 'atr_risk'
+    return out
 
 
 def suggest_qty(margin: float, price: float, leverage: float = 10,
