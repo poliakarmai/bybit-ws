@@ -124,7 +124,7 @@ def check_mean_revert(positions):
             continue
 
         price = lower if direction == 'LONG' else upper
-        mean_margin = margin_for_strategy('mean_revert', score=5.5)
+        mean_margin = margin_for_strategy('mean_revert', score=5.5, symbol=sym)
         if mean_margin <= 0:
             continue
         qty = math.ceil(mean_margin * MEAN_LEVERAGE / max(price, 0.0001) * 100) / 100

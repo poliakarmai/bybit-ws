@@ -547,7 +547,7 @@ def check_auto_short(positions):
             log_event(f'🚫 VOL-FILTER {sym}: {reason}')
             continue
         normalized_short = min(10, max(5, short_score / 5))  # 25→5, 50→10
-        short_margin = margin_for_strategy('short', score=normalized_short) * volatility_scale(sym)
+        short_margin = margin_for_strategy('short', score=normalized_short, symbol=sym) * volatility_scale(sym)
         # ── Фаза 4.3.6: MTF-конфлюенс → бонус к позиции ──
         if isinstance(mtf_conf, dict):
             mtf_c = mtf_conf.get('confluence', 0)

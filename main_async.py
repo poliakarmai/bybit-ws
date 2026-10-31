@@ -60,6 +60,7 @@ from .auto_entry import auto_entry_scan, record_sl_hit
 from .auto_short import check_auto_short, check_junk_dca, check_short_time_sl, should_disable_short
 from .sl_reentry import notify_sl_hit, check_sl_reentry
 from .margin_alerts import check_margin_utilization
+from . import protections
 from .funding_entry import check_funding_signals, execute_funding_entry
 from .bb_scalp import check_scalp_signals, execute_scalp
 from .mean_revert import check_mean_revert, execute_mean_revert
@@ -926,6 +927,10 @@ async def async_main_loop():
                     log_event(f'⚠️ time_exit error: {e}')
 
                 # Маржа
+                # Замки: серия стопов / пауза пары. Пересчёт каждый цикл —
+                # иначе замок живёт до рестарта и после истечения не снимается.
+                await run_in_thread(protections.evaluate)
+
                 margin_msgs, _ = await run_in_thread(check_margin_utilization, new_positions)
                 if isinstance(margin_msgs, list):
                     for msg in margin_msgs:

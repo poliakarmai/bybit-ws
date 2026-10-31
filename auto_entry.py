@@ -621,7 +621,7 @@ def auto_entry_scan(positions):
                 log_event(f'🚫 VOL-FILTER {sym}: {reason}')
                 continue
             normalized_score = min(10, s['score'] / 5)  # 25→5, 50→10
-            margin = margin_for_strategy('long', score=normalized_score) * aggression * volatility_scale(sym)
+            margin = margin_for_strategy('long', score=normalized_score, symbol=sym) * aggression * volatility_scale(sym)
             if margin <= 0:
                 continue
 

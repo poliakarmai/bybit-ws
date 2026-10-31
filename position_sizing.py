@@ -141,6 +141,22 @@ def margin_for_strategy(strategy: str, score: float = 5.5,
     symbol:   тикер для ATR-сайзинга (опционально)
     use_atr:  True → ATR-based расчёт вместо процентного (Фаза 4)
     """
+    # Замки: серия стопов / остывание пары / пара без эджа. До расчёта маржи —
+    # заблокированный вход не должен даже считаться. 0 = вход не открывать.
+    try:
+        from .protections import lock_reason
+        _lock = lock_reason(symbol)
+    except Exception:
+        _lock = None  # замки не должны ломать сайзинг
+    if _lock:
+        # Лог отдельно: сломанный логгер не должен отменять замок (fail-closed).
+        try:
+            from .protections import announce_lock
+            announce_lock(symbol, _lock)
+        except Exception:
+            pass
+        return 0
+
     # ATR-режим
     if use_atr and symbol:
         result = atr_margin(symbol, score)

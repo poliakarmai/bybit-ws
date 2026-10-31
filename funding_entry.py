@@ -162,7 +162,7 @@ def check_funding_signals(positions):
         else:
             continue
 
-        funding_margin = margin_for_strategy('funding', score=5.5)
+        funding_margin = margin_for_strategy('funding', score=5.5, symbol=sym)
         if funding_margin <= 0:
             continue
         qty = math.ceil(funding_margin * FUNDING_LEVERAGE / entry_price * 100) / 100

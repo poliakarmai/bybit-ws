@@ -153,7 +153,7 @@ def check_scalp_signals(positions, balance_usdt):
             continue
 
         # Проверка free margin
-        scalp_margin = margin_for_strategy('scalp', score=5.5)
+        scalp_margin = margin_for_strategy('scalp', score=5.5, symbol=sym)
         if scalp_margin <= 0 or free_margin < scalp_margin * 1.5:
             continue
 

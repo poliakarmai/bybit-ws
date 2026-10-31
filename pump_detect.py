@@ -191,7 +191,7 @@ def _place_pump_short(sym, price, level_label, state, peak_price):
         log_event(f'🔕 Pump-SHORT {sym}: one-way, нельзя шортить')
         return False
 
-    pump_margin = margin_for_strategy('pump', score=5.5)
+    pump_margin = margin_for_strategy('pump', score=5.5, symbol=sym)
     if pump_margin <= 0:
         return False
     usdt_qty = pump_margin * PUMP_SHORT_LEV
@@ -458,7 +458,7 @@ def check_weekly_pumps(positions=None):
         )
 
         # JUNK short: БЕЗ SL, БЕЗ TP, только вход + DCA сетап
-        pump_margin = margin_for_strategy('pump', score=5.5)
+        pump_margin = margin_for_strategy('pump', score=5.5, symbol=sym)
         if pump_margin <= 0:
             continue
         usdt_qty = pump_margin * PUMP_SHORT_LEV

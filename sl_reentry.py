@@ -206,7 +206,7 @@ def check_sl_reentry(positions, correlation_stop=False):
                 price = bb['upper'] if bb and bb.get('upper', 0) > 0 else current * 1.05
             price = round(price, 4)
             price = _round_to_tick(price, sym)
-            margin = margin_for_strategy('reentry', score=6.5)
+            margin = margin_for_strategy('reentry', score=6.5, symbol=sym)
             price_ok = (price < current) if reentry_side == 'Buy' else (price > current)
             if margin > 0 and price_ok:
                 usdt_qty = margin * rc['leverage']
@@ -240,7 +240,7 @@ def check_sl_reentry(positions, correlation_stop=False):
                 if price < 0.0001:
                     continue
                 price = _round_to_tick(price, sym)
-                margin = margin_for_strategy('reentry', score=6.5)
+                margin = margin_for_strategy('reentry', score=6.5, symbol=sym)
                 if margin <= 0:
                     continue
                 usdt_qty = margin * rc['leverage']
