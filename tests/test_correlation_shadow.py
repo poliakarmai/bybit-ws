@@ -144,3 +144,17 @@ def test_check_correlation_shadow_always_returns_true():
             assert result is True
     finally:
         os.unlink(temp_path)
+
+
+def test_margin_for_strategy_wires_shadow(monkeypatch):
+    """Обвязка: shadow обязан вызываться из единой точки сайзинга.
+
+    Без неё функция — мёртвый код: логируется ноль, «shadow-режим» существует
+    только на бумаге (поймано на приёмке 31.10).
+    """
+    calls = []
+    monkeypatch.setattr(ps, 'check_correlation_shadow', lambda s, m: calls.append((s, m)))
+    monkeypatch.setattr(ps, 'lock_reason', lambda *a, **k: None, raising=False)
+    margin = ps.margin_for_strategy('long', score=5.5, symbol='ADAUSDT')
+    assert margin > 0
+    assert calls and calls[0][0] == 'ADAUSDT' and calls[0][1] == margin
