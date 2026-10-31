@@ -38,11 +38,18 @@ def _save_state(state):
     os.replace(tmp, PUMP_STATE_FILE)
 
 
-def is_manual_position(sym):
-    """Проверить, помечена ли позиция как ручная."""
+def is_manual_position(sym, include_closed=False):
+    """Помечена ли позиция как ручная.
+
+    include_closed=True — вопрос про ЗАКРЫТУЮ сделку (импорт closed-pnl): метка
+    снимается с торговли, но 48ч ещё помнит, что выход был ручным. Живые модули
+    (auto_sl/auto_tp/reporting) спрашивают без флага и закрытую метку не видят.
+    """
     state = _load_state()
     entry = state.get(sym, {})
-    return entry.get('manual', False)
+    if not entry.get('manual', False):
+        return False
+    return bool(include_closed) or not entry.get('closed_at')
 
 
 def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, auto_sltp=False,
@@ -60,6 +67,7 @@ def mark_manual_position(sym, entry=None, side='Buy', note='', leverage=None, au
     """
     state = _load_state()
     entry_data = state.get(sym, {})
+    entry_data.pop('closed_at', None)  # новый ручной вход — прошлое закрытие не в счёт
     entry_data['manual'] = True
     entry_data['manual_ts'] = time.time()
     entry_data['auto_sltp'] = bool(auto_sltp)

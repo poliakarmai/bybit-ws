@@ -99,12 +99,30 @@ def _clean_pump_state(data_dir, positions, db=None):
     pump_file = data_dir / 'pumps.json'
     if pump_file.exists():
         pumps = _json.loads(pump_file.read_text())
-        stale = [s for s in pumps if s not in (positions or {})]
-        if stale:
-            for s in stale:
-                del pumps[s]
+        stale, changed, now = [], False, time.time()
+        for s in list(pumps):
+            e = pumps.get(s) or {}
+            if s in (positions or {}):
+                if e.pop('closed_at', None):
+                    changed = True  # пара снова в игре (авто-вход) — старая метка не нужна
+                continue
+            if e.get('manual'):
+                # Ручную метку не выбрасываем сразу: импорт закрытия идёт ПОСЛЕ
+                # очистки в том же цикле и спрашивает is_manual_position(include_closed).
+                # ponytail: держим 48ч на символ; если ручные сделки на одном тикере
+                # пойдут чаще, нужна привязка метки к orderId.
+                if not e.get('closed_at'):
+                    e['closed_at'] = now
+                    changed = True
+                elif now - float(e['closed_at']) > 48 * 3600:
+                    stale.append(s)
+            else:
+                stale.append(s)
+        for s in stale:
+            del pumps[s]
+        if stale or changed:
             pump_file.write_text(_json.dumps(pumps, indent=2))
-            log_event(f'🧹 pumps.json clean: {len(stale)} orphaned entries removed')
+            log_event(f'🧹 pumps.json clean: удалено {len(stale)}, метки закрытия обновлены {changed}')
 
 
 SLTP_MATCH_TOL = 0.003  # 0.3%: цена выхода считается «на уровне» нашего SL/TP
@@ -213,7 +231,7 @@ def _import_bybit_trades(data_dir):
                         diag = sync_db.get_entry_diagnostic_for_close(sym, closing_side) or {}
                         try:
                             from .manual_positions import is_manual_position
-                            _manual = 1 if is_manual_position(sym) else 0
+                            _manual = 1 if is_manual_position(sym, include_closed=True) else 0
                         except Exception:
                             _manual = 0
                         sync_db.add_trade(
