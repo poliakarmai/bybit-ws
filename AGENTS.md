@@ -143,6 +143,13 @@ bybit-ws/
   (sandbox — `sandbox.db`). Боевой `state.db` НЕ трогается.
 - **Воспроизводимость:** фиксированное окно (`--end-date`) + кэш свечей по ключу
   `(symbol, interval, start_ms, end_ms)` → байт-в-байт одинаковые метрики.
+- **Артефакт run (с 31.10):** `--out путь.json` пишет самодостаточный отчёт: манифест
+  (`git_commit`, `engine_version`, `params`+`params_hash`, `config_hash` боевого
+  `~/.config/bybit-ws/config.yaml`, `data_hash` свечей, `fees_model`, `funding_model`),
+  метрики (`total_fees`, `total_funding`, …), `equity_curve` и `equity_hash`.
+  Два прогона с одинаковыми входами → одинаковый `equity_hash` (тест
+  `tests/test_backtest_artifact.py`). Без `--out` артефакт пишется в `runs/run_<id>.json`
+  при записи в БД.
 
 ```bash
 python3 -m bybit_ws.experiments.backtest_runner --symbol SOLUSDT --days 180 --no-db
@@ -192,6 +199,26 @@ python3 test_smoke.py                      # тесты: 52 проверки (PA
 > 25.10 закрыты 4 красных теста Фазы 11: `test_pump_state_clean` (бил в прод `state.db` — теперь
 > БД инжектится) и `test_risk_journal` (фикстура без `size` игнорировала D1-правило «заглушка ≠ позиция»).
 > Быстрый набор (то, что гоняют verify.sh и deploy.sh): `python3 test_smoke.py` → 52/52.
+
+## Watchdog входов (с 31.10.2026)
+
+Инцидент 31.10: бот 1.5 суток повторял `💸 Депозит $-5.6 < $30 — входы заблокированы`,
+входов не было, узнали случайно. Теперь это ловит сторож:
+
+```bash
+python3 -m bybit_ws.watchdog                 # окно 6ч, порог 20 блокировок
+python3 -m bybit_ws.watchdog --hours 1 --dry-run --json
+```
+
+- Входы — по SSOT `trade_history.entry_at`, блокировки — по `events.log`
+  (`вход(ы) заблокирован|⛔|🛑|💸|STOP: … маржи`). Строки `… пропускаю`
+  (dry-spell throttle, BB% < порога) — рабочая фильтрация кандидатов, НЕ блокировка:
+  их тысячи в час, по ним алерт звонил бы всегда.
+- Алерт: 0 входов за окно и ≥20 блокировок → `alerts.send_telegram_alert(level="STOP")`.
+- Крон: Hermes `a954882a4f59`, ежечасно, `no_agent`, `deliver=local`
+  (сообщение уходит своим каналом, дубля в чат нет). Скрипт-обёртка:
+  `~/.hermes/scripts/bybit_watchdog.sh`.
+- Тест: `tests/test_watchdog.py` (сценарий инцидента 31.10 + что фильтрация не блокировка).
 
 ## Проверка работоспособности (обязательно для AI-агентов)
 

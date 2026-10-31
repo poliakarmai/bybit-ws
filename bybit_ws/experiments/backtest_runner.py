@@ -67,8 +67,14 @@ def run_one(symbol: str, days: int, interval: str, end_date: str | None,
         commit=engine.git_commit(),
         kline_hash=engine.data_hash(klines),
         timestamp_iso=datetime.now(timezone.utc).isoformat(),
+        cfg_hash=engine.config_hash(),
     )
-    return {"manifest": manifest, "metrics": metrics}
+    return {
+        "manifest": manifest,
+        "metrics": metrics,
+        "equity_curve": [round(float(x), 4) for x in equity_curve],
+        "equity_hash": engine.equity_hash(equity_curve),
+    }
 
 
 def print_metrics(symbol: str, manifest: dict, metrics: dict, elapsed: float):
@@ -80,6 +86,8 @@ def print_metrics(symbol: str, manifest: dict, metrics: dict, elapsed: float):
     print(f"{'='*64}")
     print(f"  git_commit:   {manifest['git_commit'] or 'n/a'}")
     print(f"  data_hash:    {manifest['data_hash'][:16]}… (свечей: {dr['n_candles']})")
+    print(f"  params_hash:  {manifest['params_hash'][:16]}…")
+    print(f"  config_hash:  {(manifest.get('config_hash') or 'нет снимка конфига')[:16]}…")
     print(f"  {'─'*60}")
     print(f"  Сделок:       {metrics['n_trades']} ({metrics['wins']}W / {metrics['losses']}L)")
     print(f"  Win Rate:     {metrics['win_rate']:.2f}%")
@@ -107,6 +115,8 @@ def main(argv=None) -> int:
     p.add_argument("--parent", type=int, default=None, help="parent_id узла experiment")
     p.add_argument("--db", default=None, help="Путь к experiments.db (по умолчанию дефолтная)")
     p.add_argument("--no-db", action="store_true", help="Не писать в БД (только вывод)")
+    p.add_argument("--out", default=None,
+                   help="Путь артефакта JSON (по умолчанию — runs/run_<id>.json при записи в БД)")
     p.add_argument("--json", action="store_true", help="JSON-вывод результата")
     args = p.parse_args(argv)
 
@@ -121,9 +131,18 @@ def main(argv=None) -> int:
     manifest, metrics = result["manifest"], result["metrics"]
 
     run_id = None
-    record = None
     exp_id = None
-    manifest_path = None
+    artifact_path = None
+    # Артефакт самодостаточен: манифест + метрики + equity-кривая с отпечатком.
+    record = {
+        "experiment": exp_name,
+        "kind": "backtest",
+        "inputs_manifest": manifest,
+        "metrics": metrics,
+        "equity_hash": result["equity_hash"],
+        "equity_curve": result["equity_curve"],
+        "verdict": None,
+    }
     if not args.no_db:
         store = ExperimentStore(args.db)
         exp_id = store.create_experiment(
@@ -132,27 +151,27 @@ def main(argv=None) -> int:
         )
         run_id = store.add_run(exp_id, kind="backtest",
                                inputs_manifest=manifest, metrics=metrics)
-        record = {
-            "run_id": run_id,
-            "experiment_id": exp_id,
-            "experiment": exp_name,
-            "kind": "backtest",
-            "inputs_manifest": manifest,
-            "metrics": metrics,
-            "verdict": None,
-        }
-        manifest_path = engine.write_run_file(run_id, record)
         store.close()
+        record = {"run_id": run_id, "experiment_id": exp_id, **record}
+
+    if args.out:
+        artifact_path = Path(args.out).expanduser()
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(json.dumps(record, indent=2, ensure_ascii=False))
+    elif run_id is not None:
+        artifact_path = engine.write_run_file(run_id, record)
 
     if args.json:
         print(json.dumps({"experiment": exp_name, "run_id": run_id,
-                          "manifest": manifest, "metrics": metrics},
+                          "artifact": str(artifact_path) if artifact_path else None,
+                          "manifest": manifest, "metrics": metrics,
+                          "equity_hash": result["equity_hash"]},
                          indent=2, ensure_ascii=False))
     else:
         print_metrics(args.symbol, manifest, metrics, elapsed)
-        if record is not None:
-            print(f"\n  💾 run #{run_id} записан → {manifest_path}")
-            print(f"     (эксперимент: {exp_name}, id={exp_id})")
+        if artifact_path is not None:
+            print(f"\n  💾 артефакт run #{run_id or '—'} → {artifact_path}")
+            print(f"     (эксперимент: {exp_name}, id={exp_id or '—'})")
     return 0
 
 

@@ -67,6 +67,34 @@ def git_commit() -> Optional[str]:
         return None
 
 
+CONFIG_PATH = Path.home() / ".config" / "bybit-ws" / "config.yaml"
+
+
+def config_hash(path: Optional[Path] = None) -> Optional[str]:
+    """SHA-256 боевого config.yaml — на каком конфиге жил бот в момент прогона.
+
+    None, если файла нет (CI/чистый клон): прогон всё равно валиден, но в
+    манифесте видно, что снимок конфига отсутствует.
+    """
+    p = Path(path or CONFIG_PATH)
+    try:
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def params_hash(params: dict) -> str:
+    """SHA-256 канонизированных параметров прогона (порядок ключей не важен)."""
+    blob = json.dumps(params, sort_keys=True, ensure_ascii=False).encode()
+    return hashlib.sha256(blob).hexdigest()
+
+
+def equity_hash(curve: list[float]) -> str:
+    """SHA-256 equity-кривой (округление 4 знака) — отпечаток результата прогона."""
+    blob = json.dumps([round(float(x), 4) for x in curve]).encode()
+    return hashlib.sha256(blob).hexdigest()
+
+
 def resolve_end_ms(end_date: Optional[str] = None) -> int:
     """Детерминированный end_ms окна данных (миллисекунды UTC).
 
@@ -390,15 +418,18 @@ def compute_metrics(trades: list[dict], equity_curve: list[float],
 # ── манифест ───────────────────────────────────────────────────
 
 def build_manifest(params: dict, data_range: dict, commit: Optional[str],
-                   kline_hash: str, timestamp_iso: str) -> dict:
-    """Run-манифест: (params, data_range, git_commit, timestamp) + data_hash."""
+                   kline_hash: str, timestamp_iso: str,
+                   cfg_hash: Optional[str] = None) -> dict:
+    """Run-манифест: params, data_range, git_commit, data_hash + params_hash, config_hash."""
     return {
         "engine_version": ENGINE_VERSION,
         "params": params,
+        "params_hash": params_hash(params),
         "data_range": data_range,
         "git_commit": commit,
         "timestamp": timestamp_iso,
         "data_hash": kline_hash,
+        "config_hash": cfg_hash,
         "fees_model": "maker_entry_taker_exit",
         "funding_model": "funding_log_sqlite",
     }
