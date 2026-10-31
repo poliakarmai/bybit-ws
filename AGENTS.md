@@ -313,7 +313,7 @@ systemctl --user restart bybit-ws-async
 
 ## MCP-инструменты
 
-`scan_market` → `get_positions` → `get_metrics` → `vpn_status` → `get_risk_status` → `get_journal` → `place_entry` — всего **7** инструментов, объявлены вручную в `@app.list_tools()` (`mcp_server.py`), не через `@mcp.tool`
+`scan_market` → `get_positions` → `get_metrics` → `vpn_status` → `get_risk_status` → `get_journal` → `place_entry` → `backtest_run` → `experiment_list` → `validation_report` — всего **10** инструментов, объявлены вручную в `@app.list_tools()` (`mcp_server.py`), не через `@mcp.tool`
 
 | Инструмент | Назначение |
 |-----------|-----------|
@@ -324,6 +324,9 @@ systemctl --user restart bybit-ws-async
 | `place_entry(symbol, side, qty, sl?, tp?, order_type?, price?, leverage?)` | Вход. **Плечо:** параметр `leverage` (1–100), если не задан — берётся из конфига стратегии (`strategy.long/short.leverage`, `config.py:44,56`). После входа плечо читается обратно из ответа `/enter` (fallback — `/rpc/positions`) и печатается `Leverage: Nx (requested Mx)`; при расхождении — `⚠️ LEVERAGE MISMATCH`. Авто-ветка (`auto_entry`/`auto_short`) выставляет плечо сама через `api.set_leverage()` перед ордером. Ручной `/enter` плечо навязывает только если оно передано явно |
 | `get_journal()` | Журнал (FIFO, bias) |
 | `vpn_status()` | VPN health + трафик |
+| `backtest_run(symbol, days, interval, params)` | Исследовательский прогон `backtest_runner` (пишет только в `experiments.db`, lock, 180s timeout) |
+| `experiment_list(limit)` | Последние эксперименты из `experiments.db` (read-only) |
+| `validation_report(run_id)` | DSR/PBO/permutation из артефакта прогона (read-only) |
 
 ## LSTM World Model (v8.1)
 

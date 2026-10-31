@@ -27,6 +27,118 @@ _FB_MIN_DEPOSIT = 30.0     # мин депозит для торговли
 DEPOSIT_CACHE = {"value": None, "ts": 0}
 DEPOSIT_CACHE_TTL = 120    # кеш на 2 минуты
 
+CORRELATION_FILE = os.path.expanduser('~/.local/share/bybit-ws/correlation.json')
+CORRELATION_STALENESS = 900  # 15 минут
+CORRELATION_LIMIT_PCT = 40   # дефолт 40%
+
+
+def check_correlation_shadow(symbol: str, margin: float) -> bool:
+    """Проверить корреляционный лимит в shadow-режиме.
+    
+    Читает correlation.json (пишется живым циклом), находит flagged пары,
+    строит кластеры коррелированных символов, суммирует маржу через RPC.
+    Если маржа кластера > лимита (дефолт 40%) — логирует "заблокировал бы",
+    но НЕ блокирует.
+    
+    Args:
+        symbol: символ для проверки (BTCUSDT, ETHUSDT, ...)
+        margin: маржа новой позиции в USDT
+        
+    Returns:
+        True всегда (shadow-режим не блокирует)
+    """
+    # Fail-open: файл не существует или не читается
+    if not os.path.exists(CORRELATION_FILE):
+        return True
+    
+    try:
+        mtime = os.path.getmtime(CORRELATION_FILE)
+        age = time.time() - mtime
+        if age > CORRELATION_STALENESS:
+            log_event(f'⚠️ корреляция: данные протухли ({age:.0f}с > {CORRELATION_STALENESS}с), shadow пропущен')
+            return True
+        
+        with open(CORRELATION_FILE) as f:
+            corr_data = json.load(f)
+        
+        # Формат: {"flagged": [["BTCUSDT", "ETHUSDT", 0.85], ...], "timestamp": "..."}
+        flagged = corr_data.get('flagged', [])
+        if not flagged:
+            return True
+        
+        # Построить кластеры из flagged пар
+        clusters: dict[str, set[str]] = {}
+        for sym1, sym2, corr in flagged:
+            # Найти существующий кластер для sym1 или sym2
+            cluster_key = None
+            for key, members in clusters.items():
+                if sym1 in members or sym2 in members:
+                    cluster_key = key
+                    break
+            
+            if cluster_key is None:
+                # Новый кластер
+                cluster_key = sym1
+                clusters[cluster_key] = {sym1, sym2}
+            else:
+                # Добавить в существующий
+                clusters[cluster_key].add(sym1)
+                clusters[cluster_key].add(sym2)
+        
+        # Найти кластер символа
+        symbol_cluster = None
+        cluster_symbols: set[str] = set()
+        for key, members in clusters.items():
+            if symbol in members:
+                symbol_cluster = key
+                cluster_symbols = members
+                break
+        
+        if symbol_cluster is None:
+            # Символ не в кластере — пропускаем
+            return True
+        
+        # Получить маржу всех позиций через RPC
+        try:
+            from .api import fetch_positions
+        except ImportError:      # импорт корневым модулем (тесты/скрипты)
+            from api import fetch_positions
+        positions = fetch_positions()
+        if not positions:
+            return True
+        
+        # Суммировать маржу кластера
+        cluster_margin = margin  # новая позиция
+        total_margin = margin
+        for pos in positions:
+            sym = pos.get('symbol')
+            pos_margin = float(pos.get('margin', 0) or 0)
+            total_margin += pos_margin
+            if sym in cluster_symbols:
+                cluster_margin += pos_margin
+        
+        if total_margin <= 0:
+            return True
+        
+        # Получить лимит из конфига
+        limit_pct = _p('correlation_limit_pct', CORRELATION_LIMIT_PCT)
+        threshold = total_margin * (limit_pct / 100)
+        
+        # Проверить превышение
+        if cluster_margin > threshold:
+            cluster_pct = (cluster_margin / total_margin) * 100
+            log_event(
+                f'🔍 КОРРЕЛЯЦИЯ (shadow): {symbol} превысил бы кластер {symbol_cluster} '
+                f'{cluster_pct:.1f}% > {limit_pct}% — вход РАЗРЕШЁН (shadow)'
+            )
+        
+        return True
+        
+    except Exception as e:
+        # Fail-open на любой ошибке
+        log_event(f'⚠️ корреляция: ошибка чтения {CORRELATION_FILE}: {e}, shadow пропущен')
+        return True
+
 
 def _ps_cfg():
     """Загрузить секцию position_sizing из конфига (ленивый синглтон)."""
@@ -161,7 +273,7 @@ def margin_for_strategy(strategy: str, score: float = 5.5,
     if use_atr and symbol:
         result = atr_margin(symbol, score)
         if result.get('margin', 0) > 0:
-            return result['margin']
+            return _shadow_corr(symbol, result['margin'])
         # fallback к процентному если ATR не сработал
 
     strategy_risk = {
@@ -176,7 +288,18 @@ def margin_for_strategy(strategy: str, score: float = 5.5,
     }
 
     risk_pct = strategy_risk.get(strategy, _p('long_risk_pct', _FB_LONG_RISK))
-    return calculate_margin(score, risk_pct=risk_pct)
+    return _shadow_corr(symbol, calculate_margin(score, risk_pct=risk_pct))
+
+
+def _shadow_corr(symbol, margin):
+    """Корреляция: только лог (shadow). Решение о входе НЕ меняется — Пётр запретил
+    блокировать до 1-2 недель данных. Сломанный shadow не должен ломать сайзинг."""
+    if symbol:
+        try:
+            check_correlation_shadow(symbol, margin)
+        except Exception:
+            pass
+    return margin
 
 
 # ── ATR-based sizing (Фаза 4) ──────────────────────────────────

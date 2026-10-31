@@ -9,13 +9,20 @@ Tools:
   - get_metrics() → дневные метрики
   - vpn_status() → VPN health + трафик
   - get_candidates(mode, min_score) → топ-кандидаты для входа
+  - backtest_run(symbol, days, interval, params) → исследовательский прогон backtest_runner
+  - experiment_list(limit) → последние эксперименты из experiments.db
+  - validation_report(run_id) → DSR/PBO/permutation из артефакта прогона
 """
 
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
 
 from mcp.server import Server, NotificationOptions
@@ -23,6 +30,13 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from bybit_ws.alerts import log_event
+
+EXPERIMENTS_DIR = Path.home() / '.local' / 'share' / 'bybit-ws' / 'experiments'
+EXPERIMENTS_DB = EXPERIMENTS_DIR / 'experiments.db'
+
+# ponytail: два одновременных бэктеста конкурируют за SQLite и кэш свечей —
+# single-flight лок ограничивает потолок одним прогоном в момент времени
+_BACKTEST_LOCK = threading.Lock()
 
 # ── RPC helpers ──────────────────────────────────────────────────────────────
 
@@ -246,6 +260,62 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="backtest_run",
+            description="Run reproducible backtest via bybit_ws.experiments.backtest_runner. Пишет только в experiments.db (боевой state.db не трогает), 180s timeout, single-flight. Returns metrics: trades, win_rate, pnl, total_fees, equity_hash, git_commit",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Trading pair, e.g. SOLUSDT",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "History depth (days)",
+                        "default": 30,
+                    },
+                    "interval": {
+                        "type": "string",
+                        "description": "Candle interval (D, 240, 60, ...)",
+                        "default": "240",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Optional param overrides (JSON object)",
+                    },
+                },
+                "required": ["symbol"],
+            },
+        ),
+        Tool(
+            name="experiment_list",
+            description="List recent experiments from experiments.db (read-only). Returns experiment id, name, last run metrics",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max experiments to return",
+                        "default": 10,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="validation_report",
+            description="Get DSR/PBO/permutation validation from a saved run artifact or DB. Returns honest 'no data' if missing",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "integer",
+                        "description": "Run ID from experiment_list or backtest_run output",
+                    },
+                },
+                "required": ["run_id"],
+            },
+        ),
+        Tool(
             name="place_entry",
             description="Place a market or limit order to enter a LONG or SHORT position with SL/TP",
             inputSchema={
@@ -386,6 +456,154 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
         else:
             text = f"Journal unavailable: {data.get('error', 'no data')}"
+
+    elif name == "backtest_run":
+        if not _BACKTEST_LOCK.acquire(blocking=False):
+            text = "⏳ Бэктест уже запущен, подожди завершения"
+        else:
+            try:
+                symbol = arguments.get("symbol", "").upper()
+                days = int(arguments.get("days", 30))
+                interval = str(arguments.get("interval", "240"))
+                params_arg = arguments.get("params")
+                out_fd, out_path = tempfile.mkstemp(suffix='.json', prefix='bt_')
+                os.close(out_fd)
+                cmd = [
+                    sys.executable, "-m", "bybit_ws.experiments.backtest_runner",
+                    "--symbol", symbol, "--days", str(days), "--interval", interval,
+                    "--out", out_path, "--json"   # пишет только в experiments.db
+                ]
+                params_path = None
+                if params_arg:
+                    pf, params_path = tempfile.mkstemp(suffix='.json', prefix='params_')
+                    with os.fdopen(pf, 'w') as pfile:
+                        json.dump(params_arg, pfile)
+                    cmd.extend(["--params", params_path])
+                try:
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                    if r.returncode != 0:
+                        text = f"❌ Backtest error:\n{r.stderr or r.stdout or 'unknown error'}"
+                    elif not os.path.exists(out_path):
+                        text = "❌ Backtest completed but no artifact found"
+                    else:
+                        with open(out_path) as af:
+                            artifact = json.load(af)
+                        metrics = artifact.get("metrics", {})
+                        manifest = artifact.get("inputs_manifest", {})
+                        text = (
+                            f"✅ Backtest {symbol} {days}d {interval}:\n"
+                            f"  Trades: {metrics.get('n_trades', 0)} "
+                            f"({metrics.get('wins', 0)}W/{metrics.get('losses', 0)}L)\n"
+                            f"  Win Rate: {metrics.get('win_rate', 0):.2f}%\n"
+                            f"  PnL: ${metrics.get('total_pnl', 0):+.2f} "
+                            f"({metrics.get('total_pnl_pct', 0):+.2f}%)\n"
+                            f"  Total Fees: ${metrics.get('total_fees', 0):.2f}\n"
+                            f"  Equity Hash: {artifact.get('equity_hash', 'n/a')[:16]}…\n"
+                            f"  Git Commit: {manifest.get('git_commit', 'n/a') or 'n/a'}"
+                        )
+                except subprocess.TimeoutExpired:
+                    text = f"⏱️ Backtest timeout (>180s) for {symbol}"
+                except Exception as e:
+                    text = f"❌ Backtest exception: {e}"
+                finally:
+                    for p in (out_path, params_path):
+                        if p and os.path.exists(p):
+                            os.unlink(p)
+            finally:
+                _BACKTEST_LOCK.release()
+
+    elif name == "experiment_list":
+        limit = int(arguments.get("limit", 10))
+        if not EXPERIMENTS_DB.exists():
+            text = (f"📋 БД экспериментов отсутствует: {EXPERIMENTS_DB}\n"
+                    f"   Запусти backtest_run чтобы создать первый эксперимент.")
+        else:
+            try:
+                conn = sqlite3.connect(
+                    f"file:{EXPERIMENTS_DB}?mode=ro", uri=True, timeout=5)
+                try:
+                    rows = conn.execute("""
+                        SELECT e.id, e.name, e.hypothesis,
+                               r.id as run_id, r.metrics_json, r.created_at
+                        FROM experiment e
+                        LEFT JOIN run r ON r.experiment_id = e.id
+                        ORDER BY e.id DESC, r.id DESC
+                        LIMIT ?
+                    """, (limit,)).fetchall()
+                finally:
+                    conn.close()
+                if not rows:
+                    text = "📋 Экспериментов пока нет"
+                else:
+                    lines = [f"📋 Последние {len(rows)} эксперимент(ов):"]
+                    for row in rows:
+                        exp_id, name, hyp, run_id, metrics_json, created = row
+                        metrics = json.loads(metrics_json) if metrics_json else {}
+                        pnl = metrics.get('total_pnl', 0)
+                        wr = metrics.get('win_rate', 0)
+                        n_trades = metrics.get('n_trades', 0)
+                        lines.append(
+                            f"  [{exp_id}] {name} — run {run_id or '—'}: "
+                            f"{n_trades} trades, WR {wr:.1f}%, PnL ${pnl:+.2f}"
+                        )
+                    text = "\n".join(lines)
+            except sqlite3.OperationalError as e:
+                text = f"⚠️ Ошибка чтения БД (возможно заблокирована): {e}"
+            except Exception as e:
+                text = f"❌ Ошибка: {e}"
+
+    elif name == "validation_report":
+        run_id = int(arguments.get("run_id", 0))
+        runs_dir = EXPERIMENTS_DIR / "runs"
+        artifact_path = runs_dir / f"run_{run_id}.json"
+        artifact = None
+        if artifact_path.exists():
+            try:
+                with open(artifact_path) as f:
+                    artifact = json.load(f)
+            except Exception:
+                pass
+        if artifact is None and EXPERIMENTS_DB.exists():
+            try:
+                conn = sqlite3.connect(
+                    f"file:{EXPERIMENTS_DB}?mode=ro", uri=True, timeout=5)
+                try:
+                    row = conn.execute(
+                        "SELECT inputs_manifest, metrics_json, verdict "
+                        "FROM run WHERE id=?", (run_id,)
+                    ).fetchone()
+                finally:
+                    conn.close()
+                if row:
+                    manifest, metrics_json, verdict = row
+                    artifact = {
+                        "inputs_manifest": json.loads(manifest) if manifest else {},
+                        "metrics": json.loads(metrics_json) if metrics_json else {},
+                        "verdict": verdict,
+                    }
+            except Exception:
+                pass
+        if artifact is None:
+            text = (f"❓ Нет данных для run_id={run_id}\n"
+                    f"   Проверь experiment_list для списка доступных прогонов.")
+        else:
+            metrics = artifact.get("metrics", {})
+            manifest = artifact.get("inputs_manifest", {})
+            verdict = artifact.get("verdict", "—")
+            text = (
+                f"🔬 Validation Report (run {run_id}):\n"
+                f"  Trades: {metrics.get('n_trades', 0)} "
+                f"({metrics.get('wins', 0)}W/{metrics.get('losses', 0)}L)\n"
+                f"  Win Rate: {metrics.get('win_rate', 0):.2f}%\n"
+                f"  Profit Factor: {metrics.get('profit_factor', 0) or 'n/a'}\n"
+                f"  PnL: ${metrics.get('total_pnl', 0):+.2f} "
+                f"({metrics.get('total_pnl_pct', 0):+.2f}%)\n"
+                f"  Max DD: {metrics.get('max_drawdown_pct', 0):.2f}%\n"
+                f"  Sharpe: {metrics.get('sharpe_ratio', 0):.2f}\n"
+                f"  Git Commit: {manifest.get('git_commit', 'n/a') or 'n/a'}\n"
+                f"  Verdict: {verdict or '—'}\n"
+                f"  (полный DSR/PBO/permutation: python3 -m bybit_ws.experiments.validation)"
+            )
 
     elif name == "place_entry":
         symbol = arguments.get("symbol", "").upper()

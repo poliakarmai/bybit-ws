@@ -24,7 +24,7 @@
 | Time-exit SHORT по opened_at (не createdTime) | ✅ prod |
 | Paper Trading (исторический бэктест) | ✅ prod |
 | Веб-дашборд (SVG + HTML/Chart.js) | ✅ prod |
-| MCP-инструменты (6 шт.) | ✅ prod |
+| MCP-инструменты (10 шт.) | ✅ prod |
 | RPC REST API (~44 маршрута GET+POST, см. `docs/API.md`) | ✅ prod |
 | One-click trading через Hermes-чат | ✅ prod |
 | Алерты (ntfy + Telegram) | ✅ prod |
@@ -276,6 +276,9 @@ FROM trade_history WHERE strategy='auto' AND COALESCE(manual,0)=0 GROUP BY s;"
 1. **Лимит агрегированной экспозиции (ручные + авто).** Факт 31.10: 6 ручных позиций = ноционал $3967 при equity $501 (7.9x), авто-входы разблокированы и складываются сверху. Кластерный риск (#8) без этого считается не от полной картины. Проверка в риск-пути + тест на сценарий «7.9x» — делать.
 2. **Watchdog «0 входов при живом сигнале».** Инцидент 31.10 — 1.5 суток молчаливой блокировки. Крон `no_agent`: если за N циклов есть сигнал и 0 входов — алерт с причиной. ~1 час работы — делать.
 3. ~~Стоп-край / отключение авто-SHORT~~ — **отклонено фактами**: 30 дней SHORT +$1.06 на 280 сделках, минус дают 5 LONG-символов. Решение 19.10 (блэклист символов + тайм-SL) остаётся.
+4. **MCP research tools (П.1).** ✅ 31.10: `backtest_run`, `experiment_list`, `validation_report` — read-only, subprocess с lock и 180s timeout, SQLite `file:...?mode=ro`. Тесты `tests/test_mcp_experiments.py`.
+5. **Correlation shadow (П.2).** ✅ 31.10: `check_correlation_shadow` в `position_sizing.py` — логирует «заблокировал бы», но возвращает `True` (shadow-only, не блокирует вход). Fail-open на ошибках. Тесты `tests/test_correlation_shadow.py`.
+6. **Parity script (П.3).** ✅ 31.10: `scripts_parity.py` — диагностический скрипт, сравнивает live vs backtest входы (допуск ±15 мин), отчёт в `~/.local/share/bybit-ws/parity_reports/`. Тесты `tests/test_parity_diff.py`.
 
 #### Порядок на 2 недели
 
