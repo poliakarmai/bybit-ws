@@ -14,7 +14,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) · [EN](ARCHITECTURE.en.md) | Как устроено: цикл, модули, data flow, флаги | ✅ 01.11, сверено с кодом |
 | [API.md](API.md) · [EN](API.en.md) | Реальные REST-маршруты из `rpc.py`, auth, WS-порт | ✅ переписан 25.10, сверен 01.11 (31 GET пробиты живьём) |
 | [CAPABILITIES.md](CAPABILITIES.md) · [EN](CAPABILITIES.en.md) | Функциональность: вход, SL/TP, JUNK, BlackSwan, флаги | ✅ 25.10 |
-| [ROADMAP.md](ROADMAP.md) | План и статус фаз | ✅ 25.10 |
+| [ROADMAP.md](ROADMAP.md) · [EN](ROADMAP.en.md) | План и статус фаз | ✅ 25.10 |
 | [SECURITY.md](SECURITY.md) · [EN](SECURITY.en.md) | Секреты, модель угроз, аудит | ⚠️ 14.10, проверить перед изменением security-контура |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 60+ причин поломок | ⚠️ 02.08, часть путей устарела — сверять с AGENTS.md |
 | [SELF_LEARN.md](SELF_LEARN.md) · [EN](SELF_LEARN.en.md) | Самообучение v10 | ⚠️ 04.08, механики те же, числа/триггеры сверять с AGENTS.md |
@@ -27,7 +27,7 @@
 | [TZ-audit-bes-2026-10-23.md](TZ-audit-bes-2026-10-23.md) | ТЗ внешнего аудита (Фаза 11) | 📜 вход в Фазу 11 |
 | [../REVIEW.md](../REVIEW.md) | Правила ревью (что считается поломкой) | ✅ 20.10 |
 | [../CHANGELOG.md](../CHANGELOG.md) | История версий | ✅ 25.10 |
-| [../ONBOARDING.md](../ONBOARDING.md) | Пошагово с нуля | ⚠️ 04.08 |
+| [../ONBOARDING.md](../ONBOARDING.md) · [EN](../ONBOARDING.en.md) | Пошагово с нуля | ⚠️ 04.08 |
 
 ## Архив (не инструкция)
 

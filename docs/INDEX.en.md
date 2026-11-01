@@ -14,7 +14,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.en.md) · [RU](ARCHITECTURE.md) | How it works: loop, modules, data flow, flags | ✅ 01.11, verified against code |
 | [API.md](API.en.md) · [RU](API.md) | Actual REST routes from `rpc.py`, auth, WS port | ✅ rewritten 25.10, verified 01.11 (31 GET probed live) |
 | [CAPABILITIES.md](CAPABILITIES.en.md) · [RU](CAPABILITIES.md) | Functionality: entry, SL/TP, JUNK, BlackSwan, flags | ✅ 25.10 |
-| [ROADMAP.md](ROADMAP.md) | Phase plan and status | ✅ 25.10 |
+| [ROADMAP.md](ROADMAP.en.md) · [RU](ROADMAP.md) | Phase plan and status | ✅ 25.10 |
 | [SECURITY.md](SECURITY.en.md) · [RU](SECURITY.md) | Secrets, threat model, audit | ⚠️ 14.10, review before changing the security perimeter |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 60+ failure causes | ⚠️ 02.08, some paths outdated — cross-check with AGENTS.md |
 | [SELF_LEARN.md](SELF_LEARN.en.md) · [RU](SELF_LEARN.md) | Self-learning v10 | ⚠️ 04.08, mechanics unchanged; verify numbers/triggers against AGENTS.md |
@@ -27,7 +27,7 @@
 | [TZ-audit-bes-2026-10-23.md](TZ-audit-bes-2026-10-23.md) | External audit spec (Phase 11) | 📜 input to Phase 11 |
 | [../REVIEW.md](../REVIEW.md) | Review rules (what counts as broken) | ✅ 20.10 |
 | [../CHANGELOG.md](../CHANGELOG.md) | Version history | ✅ 25.10 |
-| [../ONBOARDING.md](../ONBOARDING.md) | Step by step from scratch | ⚠️ 04.08 |
+| [../ONBOARDING.md](../ONBOARDING.en.md) · [RU](../ONBOARDING.md) | Step by step from scratch | ⚠️ 04.08 |
 
 ## Archive (not instructions)
 

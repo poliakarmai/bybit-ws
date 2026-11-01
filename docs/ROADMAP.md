@@ -1,5 +1,7 @@
 # ROADMAP — bybit-ws
 
+**Русский** · [English](ROADMAP.en.md)
+
 > План развития. Версия: 11.5.x. Обновлено: 2026-10-31 (Фаза 11.2 закрыта по P0; 31.10 — два инцидента на живых данных, см. §31.10; документация сверена с кодом — `docs/INDEX.md`).
 > Актуальный roadmap также в Obsidian: `bybit-ws/short-analysis-2026-10-19.md` и `bybit-ws/docs-audit-lena-2026-10-19.md` (`hermes/bybit-ws-roadmap.md` отсутствует).
 
@@ -28,7 +30,7 @@
 | RPC REST API (~44 маршрута GET+POST, см. `docs/API.md`) | ✅ prod |
 | One-click trading через Hermes-чат | ✅ prod |
 | Алерты (ntfy + Telegram) | ✅ prod |
-| Тесты (52 проверки в `test_smoke.py`; `pytest` — 419 тестов, 31.10: 419 passed) | ✅ prod |
+| Тесты (52 проверки в `test_smoke.py`; `pytest` — число тестов из вывода прогона: `python3 -m pytest -q`) | ✅ prod |
 
 ## Дорожная карта
 
