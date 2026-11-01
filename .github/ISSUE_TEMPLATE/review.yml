@@ -1,0 +1,53 @@
+name: Architecture review
+description: Указать на дырку в дизайне, гонку, или предложить механику
+title: "[review] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что смотришь на код, а не на описание. Ниже — минимум, после которого
+        предложение можно проверить, а не обсуждать вкусы.
+
+  - type: textarea
+    id: claim
+    attributes:
+      label: Что не так
+      description: Одно утверждение, проверяемое по коду. «Кажется, плохо» — не подходит.
+      placeholder: "Например: при рестарте между preview и execute Idempotency-Key теряется, второй вызов откроет вторую позицию."
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Где именно
+      description: Файл и строка (или функция), к которой претензия.
+      placeholder: "rpc.py:1042 _handle_enter / state_db.add_trade"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Как это увидеть
+      description: Сценарий, тест или команда. Если это чистое рассуждение — так и напиши, пометь.
+      placeholder: "1. POST /enter confirm:false 2. restart 3. POST /enter с тем же ключом → две позиции"
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Как бы починил
+      description: Ленивое решение лучше красивого. Если не знаешь — оставь пустым, вопрос всё равно полезен.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Насколько срочно
+      options:
+        - "money path — теряются/дублируются деньги"
+        - "надёжность — падает или молчит"
+        - "наблюдаемость — не видно, что происходит"
+        - "вкус — переименовать/упростить"
+    validations:
+      required: true

@@ -9,6 +9,8 @@
 
 ---
 
+> **English readers — start here.** The design is written up in English: [bybit-ws: a trading tool, an analyst, and an assistant](https://dev.to/alexey_polyakov_cfe2095e3/bybit-ws-a-trading-tool-an-analyst-and-an-assistant-12al). Code comments and the rest of the docs are in Russian; the file-by-file map is in [AGENTS.md](./AGENTS.md). If you think a part of this design is wrong, say so in [issues](../../issues) — the pinned issue lists five things I'm not sure about, and a one-line "you'll regret this, because X" is more useful than a star.
+
 ## Что это
 
 Автономный трейдинг-движок, который:
