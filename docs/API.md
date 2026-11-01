@@ -16,7 +16,7 @@
 
 **Дашборд:** страницу `GET /dashboard` сервер отдаёт тоже только с Bearer. Параметр `?token=<UUID>` нужен не серверу, а самой странице: она кладёт его в `localStorage` и дальше шлёт в `/rpc/dash/*`.
 
-**Аварийные** (`/kill_switch`, `/emergency_close`) требуют **два** заголовка: `Authorization: Bearer …` **и** `X-Emergency-Auth: $EMERGENCY_TOKEN` (из env-файла сервиса).
+**Аварийные** (`/kill_switch`, `/emergency_close`) требуют **два** заголовка — `Authorization: Bearer <token>` **и** `X-Emergency-Auth: <EMERGENCY_TOKEN>` — **только если** в env сервиса задан `EMERGENCY_TOKEN`. Если переменной нет, проверка второго заголовка пропускается (`rpc.py:540`, `if emergency and not compare_digest(...)`), и хватает Bearer. На 01.11.2026 в `~/.config/bybit-ws/env` переменной нет: проверять `grep -c EMERGENCY_TOKEN ~/.config/bybit-ws/env`.
 
 ⚠️ Production: только через nginx/Cloudflare (TLS снаружи), сам сервер слушает `127.0.0.1:8766`.
 

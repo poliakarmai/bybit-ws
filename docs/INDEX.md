@@ -13,11 +13,11 @@
 | [../README.md](../README.md) | Продуктовое описание для людей | ✅ 25.10 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) · [EN](ARCHITECTURE.en.md) | Как устроено: цикл, модули, data flow, флаги | ✅ 01.11, сверено с кодом |
 | [API.md](API.md) · [EN](API.en.md) | Реальные REST-маршруты из `rpc.py`, auth, WS-порт | ✅ переписан 25.10, сверен 01.11 (31 GET пробиты живьём) |
-| [CAPABILITIES.md](CAPABILITIES.md) | Функциональность: вход, SL/TP, JUNK, BlackSwan, флаги | ✅ 25.10 |
+| [CAPABILITIES.md](CAPABILITIES.md) · [EN](CAPABILITIES.en.md) | Функциональность: вход, SL/TP, JUNK, BlackSwan, флаги | ✅ 25.10 |
 | [ROADMAP.md](ROADMAP.md) | План и статус фаз | ✅ 25.10 |
-| [SECURITY.md](SECURITY.md) | Секреты, модель угроз, аудит | ⚠️ 14.10, проверить перед изменением security-контура |
+| [SECURITY.md](SECURITY.md) · [EN](SECURITY.en.md) | Секреты, модель угроз, аудит | ⚠️ 14.10, проверить перед изменением security-контура |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 60+ причин поломок | ⚠️ 02.08, часть путей устарела — сверять с AGENTS.md |
-| [SELF_LEARN.md](SELF_LEARN.md) | Самообучение v10 | ⚠️ 04.08, механики те же, числа/триггеры сверять с AGENTS.md |
+| [SELF_LEARN.md](SELF_LEARN.md) · [EN](SELF_LEARN.en.md) | Самообучение v10 | ⚠️ 04.08, механики те же, числа/триггеры сверять с AGENTS.md |
 | [history.md](history.md) | История фаз 1–8 | 📜 историческое |
 | [PRD-one-click.md](PRD-one-click.md) | One-click торговля | 📜 ТЗ, не отчёт о реализации |
 | [experiment-tree-design.md](experiment-tree-design.md), [experiment-tree-TZ.md](experiment-tree-TZ.md) | Experiment Tree: дизайн и ТЗ | ✅ соответствует `bybit_ws/experiments/` |

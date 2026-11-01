@@ -1,5 +1,7 @@
 # bybit-ws — Bollinger Grid трейдинг-монитор v11.5.x
 
+**Русский** · [English](CAPABILITIES.en.md)
+
 > ✅ Сверено с кодом 2026-10-25 (`entry_judge.py`, `config.py`, env сервиса, `rpc.py`).
 > Что именно изменилось — `CHANGELOG.md` §11.5.0. Карта документации — [INDEX.md](INDEX.md).
 
@@ -205,4 +207,4 @@ run-манифест) и `paper_trade.py`. **Готовых «результат
 python3 -m bybit_ws.experiments.backtest_runner --symbol SOLUSDT --days 180 --no-db
 python3 -m bybit_ws.paper_trade SOLUSDT --days 90
 ```
-Анти-overfit гейт: `experiments/validation.py` (DSR + PBO + permutation test).
+Анти-overfit гейт: `bybit_ws/experiments/validation.py` (DSR + PBO + permutation test).

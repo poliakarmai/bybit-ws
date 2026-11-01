@@ -1,7 +1,11 @@
 # Self-Learning Module — bybit-ws v10
 
+**Русский** · [English](SELF_LEARN.en.md)
+
 > Автономное самообучение торговой стратегии. Без участия человека.
-> Обновлено: 2026-08-04. Верифицировано на реальных данных: 246 trades, WR=57%, DD=$284.
+> Обновлено: 2026-08-04. Числа качества (сделки, WR, просадка) в доке не хранятся — они протухают
+> за сутки; брать командой:
+> `sqlite3 ~/.local/share/bybit-ws/state.db "SELECT count(*), round(100.0*sum(pnl>0)/count(*),1) FROM trade_history WHERE strategy='auto' AND manual=0"`.
 
 ## Как это работает
 
@@ -80,12 +84,12 @@ main_async.py (event-driven: ≥10 сделок / 6ч или 24ч fallback)
 
 | Файл | Назначение |
 |------|-----------|
-| `journal/self_learn.py` | Ядро v10: Dynamic Bandit, Pareto MC, Drift, Ensemble, Causal |
-| `journal/analyzer.py` | Профиль + 4 bias-диагностики |
-| `journal/adapter.py` | SQLite → нормализованные сделки |
+| `bybit_ws/journal/self_learn.py` | Ядро v10: Dynamic Bandit, Pareto MC, Drift, Ensemble, Causal |
+| `bybit_ws/journal/analyzer.py` | Профиль + 4 bias-диагностики |
+| `bybit_ws/journal/adapter.py` | SQLite → нормализованные сделки |
 | `canary_state.json` | Состояние canary-эксперимента |
 | `self_learn.jsonl` | Лог всех корректировок (98 записей) |
-| `symbol_profiles.json` | Per-symbol статистика |
+| `symbol_profiles.json` | Per-symbol статистика (в data-каталоге; создаётся при первом обучении) |
 | `exit_stats.jsonl` | Причины закрытия (86 записей) |
 | `parameter_ensemble.json` | Состояние 6 bandits |
 | `params_history/v*.json` | Git-like версии параметров |

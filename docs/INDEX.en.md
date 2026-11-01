@@ -13,11 +13,11 @@
 | [../README.md](../README.md) | Product description for humans | ✅ 25.10 |
 | [ARCHITECTURE.md](ARCHITECTURE.en.md) · [RU](ARCHITECTURE.md) | How it works: loop, modules, data flow, flags | ✅ 01.11, verified against code |
 | [API.md](API.en.md) · [RU](API.md) | Actual REST routes from `rpc.py`, auth, WS port | ✅ rewritten 25.10, verified 01.11 (31 GET probed live) |
-| [CAPABILITIES.md](CAPABILITIES.md) | Functionality: entry, SL/TP, JUNK, BlackSwan, flags | ✅ 25.10 |
+| [CAPABILITIES.md](CAPABILITIES.en.md) · [RU](CAPABILITIES.md) | Functionality: entry, SL/TP, JUNK, BlackSwan, flags | ✅ 25.10 |
 | [ROADMAP.md](ROADMAP.md) | Phase plan and status | ✅ 25.10 |
-| [SECURITY.md](SECURITY.md) | Secrets, threat model, audit | ⚠️ 14.10, review before changing the security perimeter |
+| [SECURITY.md](SECURITY.en.md) · [RU](SECURITY.md) | Secrets, threat model, audit | ⚠️ 14.10, review before changing the security perimeter |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 60+ failure causes | ⚠️ 02.08, some paths outdated — cross-check with AGENTS.md |
-| [SELF_LEARN.md](SELF_LEARN.md) | Self-learning v10 | ⚠️ 04.08, mechanics unchanged; verify numbers/triggers against AGENTS.md |
+| [SELF_LEARN.md](SELF_LEARN.en.md) · [RU](SELF_LEARN.md) | Self-learning v10 | ⚠️ 04.08, mechanics unchanged; verify numbers/triggers against AGENTS.md |
 | [history.md](history.md) | History of phases 1–8 | 📜 historical |
 | [PRD-one-click.md](PRD-one-click.md) | One-click trading | 📜 spec, not an implementation report |
 | [experiment-tree-design.md](experiment-tree-design.md), [experiment-tree-TZ.md](experiment-tree-TZ.md) | Experiment Tree: design and spec | ✅ matches `bybit_ws/experiments/` |
