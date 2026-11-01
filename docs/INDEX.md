@@ -1,5 +1,7 @@
 # Карта документации bybit-ws
 
+**Русский** · [English](INDEX.en.md)
+
 > Обновлено 2026-10-27. Версия продукта — **11.5.0** (`pyproject.toml`, `CHANGELOG.md` §11.5.0).
 > Правило: **если файл противоречит коду — прав код.** Живые числа: `state.db`, RPC `/metrics`/`/positions`, `verify.sh`.
 

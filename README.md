@@ -1,5 +1,7 @@
 # bybit-ws — AI-Native Trading Engine
 
+**Русский** · [English](README.en.md)
+
 **24/7 автотрейдинг на фьючерсах Bybit. Bollinger Grid + AI-фильтры. Подключил — зарабатывает.**
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
