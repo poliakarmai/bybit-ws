@@ -889,6 +889,8 @@ def auto_entry_scan(positions):
                         score=s.get('score'),
                         min_score=s.get('max_score'),
                         regime=regime_name,
+                        funding=s.get('funding'),
+                        confluence=(s.get('mtf') or {}).get('confluence'),
                         leverage=lev,
                         margin=margin,
                     )

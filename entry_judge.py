@@ -34,6 +34,27 @@ _llm_disabled_until = 0.0
 LLM_FAILURE_THRESHOLD = 3
 LLM_COOLDOWN = 3600  # 1 час
 
+# ── Телеметрия судьи (01.11.2026) ─────────────────────────────────────────
+# Счётчики живут в памяти процесса: rpc-сервер крутится в отдельном потоке
+# того же процесса, поэтому /metrics читает их напрямую. Рестарт обнуляет —
+# это счётчики «с запуска», а не историческая статистика (её даёт events.log).
+_stats = {
+    "calls": 0,          # сколько раз судью реально спросили (после всех skip-ов)
+    "pass": 0,
+    "revise": 0,
+    "errors": 0,         # скрипт упал / вернул мусор
+    "timeouts": 0,
+    "breaker_hits": 0,   # сработал открытый брейкер
+    "fallback_open": 0,  # длинный аутедж → детерминированный путь
+    "cache_hits": 0,
+    "last_latency_ms": 0.0,
+}
+
+
+def judge_stats() -> dict:
+    """Снимок счётчиков судьи для /metrics. Не бросает."""
+    return dict(_stats)
+
 
 def judge_entry(
     symbol: str,
@@ -59,6 +80,8 @@ def judge_entry(
         return {"verdict": "pass", "blocking_issues": [], "confidence": 1.0, "notes": "judge disabled"}
 
     global _llm_failures, _llm_disabled_until
+
+    _stats["calls"] += 1
 
     if symbol in JUDGE_BLACKLIST:
         return {"verdict": "pass", "blocking_issues": [], "confidence": 1.0, "notes": "blacklisted"}
@@ -101,8 +124,10 @@ Check:
         now = time.time()
         if now < _llm_disabled_until:
             remaining = int(_llm_disabled_until - now)
+            _stats["breaker_hits"] += 1
             # Fallback: если Judge отключен >1ч, переключаемся в fail-open с повышенным min_score
             if remaining > 3600:
+                _stats["fallback_open"] += 1
                 return {
                     "verdict": "pass",
                     "blocking_issues": [f"Judge fallback: LLM disabled >{remaining}s, fail-open mode"],
@@ -125,8 +150,10 @@ Check:
         if cache_key in _judge_verdict_cache:
             ts, cached = _judge_verdict_cache[cache_key]
             if now - ts < _JUDGE_VERDICT_CACHE_TTL:
+                _stats["cache_hits"] += 1
                 return cached
 
+        _t0 = time.monotonic()
         proc = subprocess.run(
             ["python3", JUDGE_SCRIPT, "--mode", "signal", "--json", "-"],
             input=signal_context,
@@ -138,9 +165,15 @@ Check:
             result = json.loads(proc.stdout)
             _judge_verdict_cache[cache_key] = (now, result)
             _llm_failures = 0  # успех → сброс счётчика
+            _stats["last_latency_ms"] = round((time.monotonic() - _t0) * 1000, 1)
+            if result.get("verdict") == "pass":
+                _stats["pass"] += 1
+            else:
+                _stats["revise"] += 1
             return result
         else:
             # Судья не ответил или ошибка — БЛОКИРУЕМ вход (fail-closed)
+            _stats["errors"] += 1
             _llm_failures += 1
             if _llm_failures >= LLM_FAILURE_THRESHOLD:
                 _llm_disabled_until = time.time() + LLM_COOLDOWN
@@ -151,6 +184,7 @@ Check:
                 "notes": f"judge error ({_llm_failures}/{LLM_FAILURE_THRESHOLD}): {proc.stderr[:100] if proc.stderr else 'no output'}",
             }
     except subprocess.TimeoutExpired:
+        _stats["timeouts"] += 1
         _llm_failures += 1
         if _llm_failures >= LLM_FAILURE_THRESHOLD:
             _llm_disabled_until = time.time() + LLM_COOLDOWN
@@ -161,6 +195,7 @@ Check:
             "notes": f"judge timeout ({_llm_failures}/{LLM_FAILURE_THRESHOLD})",
         }
     except Exception as e:
+        _stats["errors"] += 1
         _llm_failures += 1
         if _llm_failures >= LLM_FAILURE_THRESHOLD:
             _llm_disabled_until = time.time() + LLM_COOLDOWN

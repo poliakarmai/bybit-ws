@@ -188,6 +188,12 @@ class StateDB:
             self.conn.execute("ALTER TABLE trade_history ADD COLUMN leverage INTEGER")
         if 'external_id' not in cols:
             self.conn.execute("ALTER TABLE trade_history ADD COLUMN external_id TEXT")
+        # Снимок входа (01.11.2026): что было в момент входа, а не при закрытии.
+        # Заполняется из entry_diag при закрытии позиции (см. add_trade в _import_bybit_trades).
+        for _col, _typ in (('score', 'REAL'), ('regime', 'TEXT'),
+                           ('funding', 'REAL'), ('confluence', 'INTEGER')):
+            if _col not in cols:
+                self.conn.execute(f"ALTER TABLE trade_history ADD COLUMN {_col} {_typ}")
         # Аудит #20: external_id должен быть уникальным, но ALTER TABLE не умеет
         # ADD CONSTRAINT — только частичный UNIQUE-индекс (NULL = старые записи,
         # их не блокируем). Сначала чистим дубли, иначе CREATE INDEX упадёт.
@@ -233,18 +239,19 @@ class StateDB:
                   size, pnl, fees=0.0, entry_at=None, closed_at=_NOW,
                   bb_pct=None, rsi=None, entry_reason=None,
                   dca_count=0, partial_tp_count=0, exit_reason=None, hold_hours=None,
-                  manual=0, leverage=None, external_id=None):
+                  manual=0, leverage=None, external_id=None,
+                  score=None, regime=None, funding=None, confluence=None):
         with self._lock:
             self.conn.execute("""INSERT INTO trade_history
                 (symbol, side, strategy, entry_price, exit_price, size, pnl, fees, entry_at, closed_at,
                  bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours, manual,
-                 leverage, external_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 leverage, external_id, score, regime, funding, confluence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (symbol, side, strategy, entry_price, exit_price, size, pnl,
                  fees, entry_at or int(time.time()),
                  int(time.time()) if closed_at is _NOW else closed_at,
                  bb_pct, rsi, entry_reason, dca_count, partial_tp_count, exit_reason, hold_hours,
-                 int(manual), leverage, external_id))
+                 int(manual), leverage, external_id, score, regime, funding, confluence))
             self.conn.commit()
             return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 

@@ -273,6 +273,10 @@ def _import_bybit_trades(data_dir):
                             exit_reason=exit_reason, hold_hours=hold_h,
                             bb_pct=diag.get('bb_pct'), rsi=diag.get('rsi'),
                             entry_reason=diag.get('entry_reason'),
+                            # Снимок входа (01.11.2026): состояние рынка в момент входа,
+                            # а не в момент закрытия — иначе анализ «почему минус» врёт.
+                            score=diag.get('score'), regime=diag.get('regime'),
+                            funding=diag.get('funding'), confluence=diag.get('confluence'),
                             manual=_manual,
                             fees=fees, leverage=lev, external_id=ext_id,
                         )

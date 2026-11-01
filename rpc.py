@@ -1122,6 +1122,42 @@ class RPCHandler(BaseHTTPRequestHandler):
         lines.append(f'# TYPE bybit_ws_cycle_count counter')
         lines.append(f'bybit_ws_cycle_count {rpc_state["cycle_count"]}')
 
+        # ── Entry Judge (LLM-вето): счётчики «с запуска» ──
+        try:
+            try:
+                from .entry_judge import judge_stats
+            except ImportError:
+                from entry_judge import judge_stats
+            js = judge_stats()
+        except Exception:
+            js = {}
+        if js:
+            lines.append('# HELP bybit_ws_judge_calls Entry judge invocations (post-skip)')
+            lines.append('# TYPE bybit_ws_judge_calls counter')
+            lines.append(f'bybit_ws_judge_calls {js.get("calls", 0)}')
+            lines.append('# HELP bybit_ws_judge_verdicts_total Judge verdicts by verdict')
+            lines.append('# TYPE bybit_ws_judge_verdicts_total counter')
+            lines.append(f'bybit_ws_judge_verdicts_total{{verdict="pass"}} {js.get("pass", 0)}')
+            lines.append(f'bybit_ws_judge_verdicts_total{{verdict="revise"}} {js.get("revise", 0)}')
+            lines.append('# HELP bybit_ws_judge_errors_total Judge script errors and junk output')
+            lines.append('# TYPE bybit_ws_judge_errors_total counter')
+            lines.append(f'bybit_ws_judge_errors_total {js.get("errors", 0)}')
+            lines.append('# HELP bybit_ws_judge_timeouts_total Judge timeouts')
+            lines.append('# TYPE bybit_ws_judge_timeouts_total counter')
+            lines.append(f'bybit_ws_judge_timeouts_total {js.get("timeouts", 0)}')
+            lines.append('# HELP bybit_ws_judge_breaker_hits_total Times circuit breaker was open')
+            lines.append('# TYPE bybit_ws_judge_breaker_hits_total counter')
+            lines.append(f'bybit_ws_judge_breaker_hits_total {js.get("breaker_hits", 0)}')
+            lines.append('# HELP bybit_ws_judge_fallback_open_total Degraded-mode entries (fail-open)')
+            lines.append('# TYPE bybit_ws_judge_fallback_open_total counter')
+            lines.append(f'bybit_ws_judge_fallback_open_total {js.get("fallback_open", 0)}')
+            lines.append('# HELP bybit_ws_judge_cache_hits_total Verdict cache hits')
+            lines.append('# TYPE bybit_ws_judge_cache_hits_total counter')
+            lines.append(f'bybit_ws_judge_cache_hits_total {js.get("cache_hits", 0)}')
+            lines.append('# HELP bybit_ws_judge_last_latency_ms Last judge call latency')
+            lines.append('# TYPE bybit_ws_judge_last_latency_ms gauge')
+            lines.append(f'bybit_ws_judge_last_latency_ms {js.get("last_latency_ms", 0.0)}')
+
         # Daily PnL
         metrics = _load_json(DATA_DIR / "metrics.json")
         today_key = None

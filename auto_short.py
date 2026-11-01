@@ -710,6 +710,9 @@ def check_auto_short(positions):
                     bb_pct=round(bb_pct, 1),
                     rsi=_calc_rsi_tel(sym),
                     entry_reason=('junk' if is_junk else 'tier_ab'),
+                    score=short_score,
+                    funding=(short_sc or {}).get('funding'),
+                    confluence=mtf_conf.get('confluence') if isinstance(mtf_conf, dict) else None,
                 )
             except Exception as e:
                 log_event(f'⚠️ auto_short non-critical: {e}')
