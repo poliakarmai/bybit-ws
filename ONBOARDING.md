@@ -111,7 +111,7 @@ print(r['result']['list'][0]['totalEquity'] if r['retCode']==0 else r)
 ```bash
 # Установка как systemd-сервис
 mkdir -p ~/.config/systemd/user
-cp bybit-ws-async.service ~/.config/systemd/user/
+cp deploy/bybit-ws-async.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now bybit-ws-async
 
@@ -126,14 +126,18 @@ curl http://localhost:8766/health         # {"status":"alive"}
 ## Шаг 6: Мониторинг (1 минута)
 
 ```bash
+# Все маршруты, кроме /health, требуют Bearer-токен (иначе 401)
+TOKEN=$(sqlite3 ~/.local/share/bybit-ws/state.db \
+  "SELECT value FROM kv_store WHERE key='rpc_auth_token'")
+
 # Позиции
-curl http://localhost:8766/positions
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8766/positions
 
 # Баланс
-curl http://localhost:8766/balance
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8766/balance
 
 # Метрики
-curl http://localhost:8766/metrics
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8766/metrics
 ```
 
 ### Telegram-алерты
