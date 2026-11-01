@@ -11,7 +11,7 @@
 |------|-------|--------|
 | [../AGENTS.md](../AGENTS.md) | Navigation for AI agents: structure, metrics snapshot, RPC, tests, pitfalls | ✅ verified 25.10 |
 | [../README.md](../README.md) | Product description for humans | ✅ 25.10 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | How it works: loop, modules, data flow, flags | ✅ 25.10 |
+| [ARCHITECTURE.md](ARCHITECTURE.en.md) · [RU](ARCHITECTURE.md) | How it works: loop, modules, data flow, flags | ✅ 01.11, verified against code |
 | [API.md](API.md) | Actual REST routes from `rpc.py`, auth, WS port | ✅ rewritten 25.10 |
 | [CAPABILITIES.md](CAPABILITIES.md) | Functionality: entry, SL/TP, JUNK, BlackSwan, flags | ✅ 25.10 |
 | [ROADMAP.md](ROADMAP.md) | Phase plan and status | ✅ 25.10 |

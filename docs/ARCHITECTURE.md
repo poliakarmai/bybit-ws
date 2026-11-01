@@ -1,9 +1,13 @@
 # ARCHITECTURE.md — bybit-ws v11.5
 
+**Русский** · [English](ARCHITECTURE.en.md)
+
 > **Назначение:** КАК устроен бот (внутренняя архитектура).
 > Для функциональности: [CAPABILITIES.md](CAPABILITIES.md). Для API: [API.md](API.md).
 
 > **Версия:** 11.5 | **Дата:** 2026-10-25 | **Python 3.11+** | **asyncio** | **SQLite SSOT**
+> **Сверено с кодом и живой системой:** 2026-11-01. Проверять факты — командами из раздела
+> «Параметры» и «Prometheus Metrics», а не по памяти: таблицы ниже уже один раз разошлись с реальностью.
 
 ## SSOT (Single Source of Truth)
 
@@ -30,7 +34,7 @@
  │   │   ├─ MTF Confluence (D+W+M)
  │   │   ├─ Orderbook Imbalance
  │   │   ├─ Volume Confirmation
- │   │   ├─ Entry Judge (LLM: DeepSeek → Qwen, fail-closed)
+ │   │   ├─ Entry Judge (LLM DeepSeek, fail-closed)
  │   │   ├─ Correlation sizing (r>0.85→блок, r>0.70→×0.5)
  │   │   ├─ Post-trade cluster check (<40% WR→блок)
  │   │   └─ Risk Manager (CB, margin, max pos, banned)
@@ -50,50 +54,60 @@
 
 ## Параметры (prod)
 
-| Параметр | v11.4 |
-|----------|------|
-| Max позиций | 12 (session: NY=5, Asia=10, Weekend=3) |
-| Max маржа | $300 |
-| Max дневной убыток | -$50 |
-| RAM (среднее) | ~45-55 MB (замер 19.10: 45 436 KB) |
-| RAM (peak) | см. `systemd-cgtop`; историческое «~104 MB» не перезамерялось |
-| Cycle time | 30s |
-| Heavy cycle | 300s (10 циклов) |
-| Healthcheck | `GET /health` — timestamp последнего цикла |
+| Параметр | Значение | Откуда |
+|----------|----------|--------|
+| Max позиций | 5 | `position_sizing.max_positions` (дефолты: LONG 12, JUNK 2 — `config.py:199`, `config.py:103`) |
+| Max суммарная маржа | $300 | `risk.max_total_margin`, дефолт `risk_manager.py:935` |
+| Max дневной убыток | $200 | `risk.max_daily_loss` |
+| Max gross leverage | 5.0 | `risk.max_gross_leverage` |
+| Cycle time | 30s | `bybit_ws/main_async.py` |
+| Heavy cycle | 300s (10 циклов) | `bybit_ws/main_async.py` |
+| Healthcheck | `GET /health` — timestamp последнего цикла | `rpc.py` |
+| RAM | плавает; не хранить числом | `systemctl --user show bybit-ws-async -p MemoryCurrent` |
 
-## Структура проекта
+Проверка значений (не по памяти):
+
+```bash
+python3 - <<'EOF'
+import yaml, os
+c = yaml.safe_load(open(os.path.expanduser('~/.config/bybit-ws/config.yaml')))
+print('risk:', c.get('risk'))
+print('position_sizing:', c.get('position_sizing'))
+EOF
+```
+
+Сессионные поправки (`session_params.py`) меняют `max_positions` и множители SL/TP для
+NY open / Asia night / Weekend — их значения живут в коде, а не в этой таблице.
+
+## Где живёт код
+
+Модули — в пакете `bybit_ws/`. Часть корневых файлов это симлинки на те же исходники
+(`bybit_ws/rpc.py -> ../rpc.py`), часть существует только в пакете (`bybit_ws/post_trade.py`).
+Искать модуль надо в `bybit_ws/`, а не в корне: `ls -l bybit_ws/*.py | grep '^l'` показывает,
+что дублируется, а что нет. Полный список — `ls bybit_ws/*.py`.
 
 ```
-bybit-ws/
-├── main_async.py         ← Главный цикл (asyncio)
-├── api.py                ← Bybit v5 REST API + HMAC
-├── ws_client.py          ← WebSocket (kline, BB-кеш)
-├── rpc.py                ← REST API (:8766) + /metrics
-├── state_db.py           ← SQLite SSOT (WAL)
-├── auto_entry.py         ← Авто-вход LONG + 7 фильтров
-├── auto_short.py         ← Авто-SHORT + JUNK + DCA
-├── auto_sl.py            ← ATR-adaptive SL, capped ±50%
-├── auto_tp.py            ← ATR-based TP: 3 уровня
-├── trailing_sl.py        ← Трейлинг-SL
-├── orderbook_filter.py   ← Orderbook imbalance
-├── volume_filter.py      ← Volume confirmation
-├── time_exit.py          ← Time-based exit (6h/48h)
-├── entry_judge.py        ← Cross-model LLM judge
-├── correlation.py        ← Корреляции
-├── position_sizing.py    ← Kelly sizing
-├── risk_manager.py       ← Risk + black swan + CB
-├── session_params.py     ← NY/Asia/Weekend адаптация
-├── bb_prefetch.py        ← BB batch-префетчер
-├── post_trade.py         ← Кластерный анализ win rate
-├── push_notifier.py      ← Push (ntfy + Telegram)
-├── bybit_ws/journal/     ← самообучение (в корне папки journal/ НЕТ)
-│   ├── analyzer.py       ← FIFO-анализ, bias
-│   └── self_learn.py     ← Self-learning (event-driven)
-├── docs/                 ← Документация
-├── scripts/              ← DSPy, walkforward
-├── deploy.sh             ← Атомарный деплой
-└── test_smoke.py         ← 52 проверки (замер 25.10: PASS=52/FAIL=0)
+bybit_ws/
+├── main_async.py         ← главный цикл (async, 30с) + тяжёлый цикл каждые 10
+├── api.py / exchange_adapter.py  ← Bybit v5 REST + HMAC + retry
+├── ws_client.py          ← WebSocket: kline, тикеры, BB-кеш
+├── rpc.py                ← HTTP-RPC :8766, /metrics, one-click (Bearer)
+├── state_db.py           ← SQLite SSOT (WAL, busy_timeout 5с), миграции _migrate()
+├── auto_entry.py         ← LONG: MTF, ордербук, объём, судья, корреляции
+├── auto_short.py         ← SHORT + JUNK + DCA
+├── unified_sl.py         ← единый SL (tight>simple>hard>BE>auto>default)
+├── auto_tp.py / partial_tp.py / trailing_sl.py / time_exit.py
+├── risk_manager.py       ← лимиты, Risk CB, BlackSwan (alert-only), emergency_close
+├── entry_judge.py        ← LLM-судья входа (fail-closed) + счётчики для /metrics
+├── lstm_regime.py / lstm_world_model.py / ml_scorer.py / dspy_optimizer.py
+├── session_params.py     ← NY / Asia / Weekend поправки
+├── watchdog.py           ← сторож входов (окно 6ч, порог 20 блокировок)
+├── journal/              ← самообучение: adapter → analyzer → self_learn
+└── experiments/          ← офлайн-стенд: engine, validation, triple_barrier, bandit, meta_label
 ```
+
+В корне репозитория: `deploy.sh`, `verify.sh`, `backup_db.sh`, `test_smoke.py`, `reconcile.py`,
+`paper_trade.py`, `tests/`, `docs/`.
 
 ## Auto-SL — ATR-adaptive
 
@@ -190,20 +204,25 @@ PERM_SKIP с time-decay 24ч. Флаг: `BYBIT_ATR_TP_ENABLED=1`.
 ## Backup & Recovery
 
 ```
-# Автоматически: cron каждые 6 часов
-sqlite3 ~/.local/share/bybit-ws/state.db ".backup '/backup/state_$(date +%Y%m%d_%H%M).db'"
-
+# Автоматически: systemd-таймер bybit-backup.timer, OnCalendar=daily (00:00)
+#   → /bin/bash ~/bybit-ws/backup_db.sh
+# Проверить, когда был последний: systemctl --user list-timers bybit-backup.timer
+# Ручной снимок перед деплоем: cp state.db state.db.bak
 # При старте: PRAGMA integrity_check
 # WAL recovery: автоматический (SQLite)
-# Retention: 7 дней
-# Ручной: cp state.db state.db.bak перед деплоем
 ```
 
-## Health Check (Watchdog)
+## Health Check и сторож входов
 
-`GET /health` — возвращает timestamp последнего успешного цикла.
-Внешний cron-watchdog опрашивает каждые 90 секунд.
-Если /health не отвечает >2 минут — алерт.
+- `GET /health` возвращает timestamp последнего успешного цикла; `verify.sh` (проверка №3)
+  берёт `cycle_count` дважды и требует роста — это ловит зависший цикл.
+- Внешнего крона «каждые 90 секунд» нет. Сторож — `bybit_ws/watchdog.py`, запускается
+  Hermes-кроном ежечасно: окно 6ч, входов 0 **и** ≥20 блокировок → алерт.
+  Строки «… пропускаю» — рабочая фильтрация кандидатов, не блокировка.
+
+```bash
+python3 -m bybit_ws.watchdog --hours 6 --dry-run --json
+```
 
 ## Data Flow
 
@@ -273,16 +292,32 @@ PRAGMA busy_timeout=5000;
 
 ## Prometheus Metrics
 
-| Метрика | Тип | Описание |
-|---------|-----|---------|
-| `bybit_ws_cycle_duration_seconds` | histogram | Длительность цикла |
-| `bybit_ws_positions_total` | gauge | Открытых позиций |
-| `bybit_ws_pnl_total` | gauge | Нереализованный PnL |
-| `bybit_ws_trades_total` | counter | Закрытых сделок |
-| `bybit_ws_errors_total` | counter | Ошибок (labels: module, error_type) |
-| `bybit_ws_api_latency_seconds` | histogram | Latency Bybit API |
-| `bybit_ws_circuit_breaker_state` | gauge | Статус CB |
-| `bybit_ws_entry_judge_latency_seconds` | histogram | Latency Judge |
+`/metrics` требует Bearer-токен (как `/positions`). Токен: `SELECT value FROM kv_store WHERE key='rpc_auth_token'`.
+
+| Серия | Тип | Что показывает |
+|-------|-----|----------------|
+| `bybit_ws_active_positions{side}` | gauge | открытых позиций по сторонам |
+| `bybit_ws_unrealized_pnl` | gauge | нереализованный PnL |
+| `bybit_ws_uptime_seconds` | gauge | аптайм процесса |
+| `bybit_ws_cycle_duration_seconds` | gauge | длительность последнего цикла |
+| `bybit_ws_cycle_count` | counter | номер цикла (растёт — процесс жив) |
+| `bybit_ws_daily_pnl` | gauge | реализованный PnL за сегодня |
+| `bybit_ws_judge_calls` | counter | вызовов судьи (после всех skip-ов) |
+| `bybit_ws_judge_verdicts_total{verdict}` | counter | вердикты `pass` / `revise` |
+| `bybit_ws_judge_errors_total` | counter | скрипт судьи упал или вернул мусор |
+| `bybit_ws_judge_timeouts_total` | counter | таймауты судьи |
+| `bybit_ws_judge_breaker_hits_total` | counter | срабатываний открытого брейкера |
+| `bybit_ws_judge_fallback_open_total` | counter | входов в деградированном режиме (fail-open) |
+| `bybit_ws_judge_cache_hits_total` | counter | попаданий в кэш вердиктов |
+| `bybit_ws_judge_last_latency_ms` | gauge | задержка последнего вызова |
+
+> Серии судьи считаются в памяти процесса «с запуска» и обнуляются рестартом
+> (история — `events.log`). В коде с 01.11.2026, появляются после рестарта сервиса.
+
+```bash
+TOKEN=$(sqlite3 ~/.local/share/bybit-ws/state.db "SELECT value FROM kv_store WHERE key='rpc_auth_token'")
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/metrics | grep '^bybit_ws'
+```
 
 ## Alerting Rules
 
@@ -320,8 +355,8 @@ PRAGMA busy_timeout=5000;
 | Параметр | Значение |
 |----------|---------|
 | RTO | <15 минут |
-| RPO | <1 час (бэкап каждый час) |
-| Бэкап | cron ежечасно + event-driven |
+| RPO | <24 часа (бэкап ежедневно 00:00, `bybit-backup.timer`) |
+| Бэкап | systemd-таймер ежедневно + ручной снимок перед деплоем |
 | Recovery | restore state.db + systemctl restart |
 | DR drill | ежеквартально |
 

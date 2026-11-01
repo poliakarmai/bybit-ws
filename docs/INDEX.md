@@ -11,7 +11,7 @@
 |------|-------|--------|
 | [../AGENTS.md](../AGENTS.md) | Навигация для AI-агентов: структура, снимок метрик, RPC, тесты, ловушки | ✅ сверено 25.10 |
 | [../README.md](../README.md) | Продуктовое описание для людей | ✅ 25.10 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Как устроено: цикл, модули, data flow, флаги | ✅ 25.10 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) · [EN](ARCHITECTURE.en.md) | Как устроено: цикл, модули, data flow, флаги | ✅ 01.11, сверено с кодом |
 | [API.md](API.md) | Реальные REST-маршруты из `rpc.py`, auth, WS-порт | ✅ переписан 25.10 |
 | [CAPABILITIES.md](CAPABILITIES.md) | Функциональность: вход, SL/TP, JUNK, BlackSwan, флаги | ✅ 25.10 |
 | [ROADMAP.md](ROADMAP.md) | План и статус фаз | ✅ 25.10 |
