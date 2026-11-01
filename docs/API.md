@@ -1,16 +1,20 @@
 # bybit-ws API Reference
 
+**Русский** · [English](API.en.md)
+
 > HTTP REST API трейдинг-монитора (сервер `rpc.py`, **`http.server`**, не JSON-RPC).
-> Проверено по коду 2026-10-25, версия продукта 11.5.0, `api_version: "v1"` в каждом ответе.
+> Проверено по коду 2026-11-01 (31 GET и 17 POST в `rpc.py`; все GET дополнительно
+> прошли живой пробинг с токеном — 200), версия продукта 11.5.0, `api_version: "v1"` в каждом ответе.
 > Источник истины — таблица маршрутов в `rpc.py` (`do_GET` / `do_POST`); всё, чего там нет, не существует.
 
 ## Аутентификация
 
-`Authorization: Bearer <token>`; токен — `kv_store['rpc_auth_token']` в `state.db`, либо JWT (Android).
+`Authorization: Bearer <token>` (токен — `kv_store['rpc_auth_token']` в `state.db`, либо JWT для Android).
 Ротация: `POST /reset-token`.
 
-**Без токена (публичные):** только `/health`. `/rpc/paths`, `/dashboard`, `/rpc/dash/*` требуют Bearer.
-Дашборд открывать как `/dash/dashboard?token=<UUID>` (токен запоминается в localStorage).
+**Без токена (публичные):** только `/health`. Всё остальное — включая `/metrics`, `/rpc/paths`, `/dashboard` и `/rpc/dash/*` — требует Bearer (проверено живьём 01.11.2026: `401`).
+
+**Дашборд:** страницу `GET /dashboard` сервер отдаёт тоже только с Bearer. Параметр `?token=<UUID>` нужен не серверу, а самой странице: она кладёт его в `localStorage` и дальше шлёт в `/rpc/dash/*`.
 
 **Аварийные** (`/kill_switch`, `/emergency_close`) требуют **два** заголовка: `Authorization: Bearer …` **и** `X-Emergency-Auth: $EMERGENCY_TOKEN` (из env-файла сервиса).
 
@@ -46,8 +50,10 @@
 
 | Путь | Назначение |
 |------|-----------|
+| `/rpc` · `/` | Индекс: имя сервиса, `api_version`, список всех эндпоинтов (для внешних агентов) |
+| `/rpc/health` | То же, что `/health`, но с Bearer (алиас для клиентов, которые всегда шлют токен) |
 | `/rpc/paths` | Пути установки (state.db, events.log, конфиг, порт, имя systemd-юнита) для внешних агентов |
-| `/dashboard` · `/dash/dashboard` | HTML-дашборд (`?token=<UUID>`, токен кладётся в localStorage) |
+| `/dashboard` | HTML-дашборд (сервер требует Bearer; `?token=` — для его собственных запросов к `/rpc/dash/*`) |
 | `/rpc/dash/all` · `/rpc/dash/risk` · `/rpc/dash/signals` | Данные для дашборда (all / risk / signals) |
 | `/positions` · `/rpc/positions` | Открытые позиции + uPnL (`side` сырой Bybit: **Buy=LONG, Sell=SHORT**) |
 | `/orders` · `/rpc/orders` | Активные ордера (SL/TP) |
@@ -115,7 +121,20 @@ Push: снапшот состояния при подключении (`position
 
 ## Чего в API НЕТ
 
-Не изобретать: `/alerts`, `/trades`, `/summary`, `/cancel_order`, `/order`, `/webhook`, `/openapi.json`, `/set_leverage`, `POST /circuit_breaker`. Сброс CB — рестарт сервиса. `/rpc/all` существует, но как JSON-агрегат.
+Не изобретать: `/alerts`, `/trades`, `/summary`, `/cancel_order`, `/order`, `/webhook`, `/openapi.json`, `/set_leverage`, `/dash/dashboard`, `POST /circuit_breaker`. Сброс CB — рестарт сервиса. `/rpc/all` существует, но как JSON-агрегат.
+
+Проверка «а есть ли маршрут» — не по этой таблице, а по коду:
+
+```bash
+python3 - <<'EOF'
+import re
+code = open('rpc.py', encoding='utf-8').read()
+for m in ('GET', 'POST'):
+    body = code[code.index(f'def do_{m}'):]
+    body = body[:body.find('\n    def ', 10)] if '\n    def ' in body[10:] else body
+    print(m, sorted(set(re.findall(r'path == "(/[^"]+)"', body))))
+EOF
+```
 
 ## MCP-инструменты (через Hermes)
 
