@@ -53,6 +53,7 @@ _streak_lock = threading.Lock()
 # Рабочий канал самоизменения — per-regime bandit (Thompson). Удаление мёртвого
 # canary-кода — отдельный рефакторинг, здесь только выключено применение.
 CANARY_ENABLED = False
+CANARY_LOG_ONLY = True  # логировать «промоутил бы», не применять
 CANARY_ENTRY_PCT = 0.0
 CANARY_WINDOW_HOURS = 6
 CANARY_WR_DROP_THRESHOLD = 0.10
@@ -609,6 +610,28 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     avg_hold_hours = profile.get("avg_hold_hours", 24)
     total_pnl = profile.get("total_pnl", 0)
 
+    # ── N_eff: effective sample size for learning decisions ──
+    # N_eff = (Σw)² / Σw² — when weights are equal, N_eff = N
+    # Below threshold → log decision but don't change params
+    N_EFF_MIN = 100
+    n_eff = 0.0
+    try:
+        # Estimate N_eff from per-symbol trade counts (weights ~ trade count)
+        per_symbol = journal.get("per_symbol", {})
+        if per_symbol:
+            weights = [max(1, s.get("total_trades", 0)) for s in per_symbol.values()]
+            sum_w = sum(weights)
+            sum_w2 = sum(w * w for w in weights)
+            n_eff = (sum_w ** 2) / sum_w2 if sum_w2 > 0 else 0
+    except Exception:
+        n_eff = 0.0
+
+    applied["n_eff"] = round(n_eff, 1)
+    if n_eff < N_EFF_MIN:
+        applied["n_eff_gate"] = {"blocked": True, "reason": f"N_eff={n_eff:.0f} < {N_EFF_MIN} — learning skipped"}
+        _log_adjustment({"event": "self_learn_skip", "n_eff": round(n_eff, 1), "reason": "insufficient sample"})
+        return applied
+
     canary_state = _load_canary_state()
     if is_canary_active():
         logger.info("Canary already active, skipping")
@@ -791,8 +814,8 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     if new_params:
         save_params_snapshot(new_params, win_rate, "self_learn")
 
-    # ── LAUNCH CANARY ──
-    combined = CANARY_ENABLED and bool(new_params or symbol_params or session_params)
+    # ── LAUNCH CANARY (log-only when CANARY_ENABLED=False) ──
+    combined = bool(new_params or symbol_params or session_params)
     if combined:
         # V6: проверяем walk-forward
         if wf_result and not wf_result.get("approved", True):
@@ -806,21 +829,32 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
             if isinstance(adj, dict) and "from" in adj:
                 baseline_vals[k] = adj["from"]
 
-        canary_state = {
-            "active": True,
-            "params": new_params,
-            "baseline": baseline_vals,
-            "started_at": datetime.now().isoformat(),
-            "canary_trades": 0, "canary_wins": 0,
-            "baseline_wr": win_rate,
-            "promoted": False, "rolled_back": False,
-            "history": [{"ts": datetime.now().isoformat(), "action": "start",
-                         "params": new_params, "baseline_wr": win_rate}],
-            "symbol_params": symbol_params,
-            "session_params": session_params,
-        }
-        _save_canary_state(canary_state)
-        logger.info(f"🧪 Canary v4: {len(new_params)} global + {len(symbol_params)} symbol + {len(session_params)} session params")
+        if CANARY_ENABLED:
+            canary_state = {
+                "active": True,
+                "params": new_params,
+                "baseline": baseline_vals,
+                "started_at": datetime.now().isoformat(),
+                "canary_trades": 0, "canary_wins": 0,
+                "baseline_wr": win_rate,
+                "promoted": False, "rolled_back": False,
+                "history": [{"ts": datetime.now().isoformat(), "action": "start",
+                             "params": new_params, "baseline_wr": win_rate}],
+                "symbol_params": symbol_params,
+                "session_params": session_params,
+            }
+            _save_canary_state(canary_state)
+            logger.info(f"🧪 Canary v4: {len(new_params)} global + {len(symbol_params)} symbol + {len(session_params)} session params")
+        elif CANARY_LOG_ONLY:
+            _log_adjustment({
+                "event": "canary_would_launch",
+                "params": new_params,
+                "symbol_params": symbol_params,
+                "session_params": session_params,
+                "baseline_wr": round(win_rate, 3),
+                "detail": "CANARY_ENABLED=False — параметры не применены, только лог"
+            })
+            logger.info(f"🧪 Canary (log-only): {len(new_params)} global + {len(symbol_params)} symbol + {len(session_params)} session params — not applied")
 
     log_base = {"event": "self_learn", "win_rate": round(win_rate, 3),
                 "total_trades": total_trades, "avg_hold_hours": round(avg_hold_hours, 1),

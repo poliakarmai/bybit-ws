@@ -15,12 +15,30 @@ TIME_EXIT_MIN_PNL = 0.0  # минимальный PnL для «живой» по
 TIME_EXIT_ENABLED = True
 
 
+def normalize_open_ts(ts) -> float:
+    """Normalize Bybit openTime to Unix seconds.
+
+    Bybit returns openTime in **milliseconds** (e.g. 1793346684737).
+    Internal timestamps (opened_at, entry_ts) are in seconds.
+    Threshold 1e11 = year 5138 in seconds — anything above is ms.
+
+    Returns 0.0 on invalid input so callers can skip gracefully.
+    """
+    try:
+        ts = float(ts)
+    except (ValueError, TypeError):
+        return 0.0
+    if ts > 1e11:
+        ts = ts / 1000.0
+    return ts
+
+
 def _position_age_hours(entry_ts: float) -> float:
     """Возраст позиции в часах."""
-    return (time.time() - entry_ts) / 3600
+    return (time.time() - normalize_open_ts(entry_ts)) / 3600
 
 
-def check_time_exit(positions: dict, open_orders: dict = None) -> list:
+def check_time_exit(positions: dict, open_orders: dict | None = None) -> list:
     """Проверить позиции на «застой» — закрыть если висят без движения.
 
     Триггеры:
@@ -51,7 +69,7 @@ def check_time_exit(positions: dict, open_orders: dict = None) -> list:
         except (ValueError, TypeError):
             continue
 
-        age_hours = (now - opened_ts) / 3600
+        age_hours = (now - normalize_open_ts(opened_ts)) / 3600
 
         if age_hours < TIME_EXIT_HOURS:
             continue

@@ -650,15 +650,16 @@ def check_auto_short(positions):
                 log_event(f'⚠️ CONC CHECK FAILED SHORT {sym}: {e} — вход заблокирован')
                 continue
 
-            # ── Корреляция для SHORT: пока shadow (только лог), решение о блокировке — за Алексеем ──
+            # ── Корреляция для SHORT (enforce): блокировка при r>0.85 ──
             if positions:
                 try:
                     from .correlation import max_corr_with_open
                     _mc, _csym = max_corr_with_open(sym, positions)
                     if _mc > 0.85:
-                        log_event(f'🔗 CORR SHORT (shadow) {sym}: r={_mc:+.2f} с {_csym} > 0.85 — блокировал бы вход')
+                        log_event(f'🔗 CORR SHORT {sym}: r={_mc:+.2f} с {_csym} > 0.85 — вход заблокирован')
+                        continue
                 except Exception as e:
-                    log_event(f'⚠️ CORR SHORT (shadow) {sym}: {e}')
+                    log_event(f'⚠️ CORR SHORT {sym}: {e}')
 
             # Лимитный SHORT: Sell выше рынка на +entry_offset% — ждём отскока для входа
             limit_price = _round_to_tick(price * (1 + ENTRY_OFFSET), sym)
@@ -910,7 +911,8 @@ def check_junk_dca(positions):
         # ── Time-based SL (Фаза 9): позиция в убытке > TIME_SL_HOURS → закрыть ──
         entry_ts = entry.get('last_short_ts', entry.get('entered_ts', 0))
         if entry_ts > 0 and unrealised_pnl < 0:
-            held_hours = (now - entry_ts) / 3600
+            from .time_exit import normalize_open_ts
+            held_hours = (now - normalize_open_ts(entry_ts)) / 3600
             if held_hours > TIME_SL_HOURS:
                 try:
                     _close_junk_position(sym, pos)
@@ -927,7 +929,8 @@ def check_junk_dca(positions):
 
         # ── Max hold hours check ──
         if entry_ts > 0 and unrealised_pnl <= 0:
-            held_hours = (now - entry_ts) / 3600
+            from .time_exit import normalize_open_ts
+            held_hours = (now - normalize_open_ts(entry_ts)) / 3600
             if held_hours > MAX_HOLD_HOURS and unrealised_pnl <= 0:
                 try:
                     _close_junk_position(sym, pos)
@@ -983,7 +986,8 @@ def check_short_time_sl(positions: dict) -> list[str]:
         except (ValueError, TypeError):
             continue
 
-        held_hours = (now - entry_ts) / 3600
+        from .time_exit import normalize_open_ts
+        held_hours = (now - normalize_open_ts(entry_ts)) / 3600
 
         if held_hours > SHORT_TIME_SL_HOURS:
             try:
