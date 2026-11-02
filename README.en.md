@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![Tests](https://img.shields.io/badge/pytest-passing-brightgreen)](./AGENTS.md) [![Smoke](https://img.shields.io/badge/smoke-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-[![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
+[![Phase 11.5](https://img.shields.io/badge/phase-11.5-blue)](./CHANGELOG.md)
 
 ---
 
@@ -124,7 +124,7 @@ Done. The engine is running. Positions open automatically on signals.
 - **Stress Testing**: 4 historical backtest scenarios + 1000 Pareto Monte Carlo simulations
 - **Composite Score**: WR+PF+Sharpe+MaxDD+AvgHold with adaptive per-regime weights and exponential decay
 - **Micro-updates**: learn after every trade with outlier protection (>3σ)
-- **Canary mode**: Bayesian A/B test, adaptive 5-20%, auto-rollback
+- **Canary mode**: Bayesian A/B test, adaptive 5-20%, auto-rollback. ⚠️ Disabled in production (`CANARY_ENABLED=False`) — code is live but not applied to live entries.
 - **Entry Judge**: one model (DeepSeek, fail-closed); Qwen removed 17.10, no Nemotron in the call path
 - **LSTM Market Regime**: 5 classes, auto-adapts LONG/SHORT (82.3% — claimed, not re-measured)
 - **LSTM World Model**: multi-task OHLCV prediction for entry scoring
@@ -159,9 +159,9 @@ Done. The engine is running. Positions open automatically on signals.
 │  • correlation.py  — correlation matrix          │
 │  • dca.py          — DCA buys                    │
 │                                                  │
-│  Every 24 hours (self-learn):                    │
+│  Self-learn (event-driven: ≥10 trades AND ≥6h, else 24h):│
 │  • self_learn.py   — Dynamic Bandit, Drift, Ensemble│
-│  • canary mode     — Bayesian A/B test of params │
+│  • canary mode     — Bayesian A/B (disabled in prod)│
 └──────────────────────────────────────────────────┘
 ```
 

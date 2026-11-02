@@ -3,7 +3,7 @@
 **English** · [Русский](SECURITY.md)
 
 > Complete security documentation for the bybit-ws trading monitor.
-> **Version:** 1.1 | **Date:** 2026-06-29 | **Applicable to:** bybit-ws Phase 7
+> **Version:** 1.2 | **Date:** 2026-11-02 | **Applicable to:** bybit-ws 11.5.x
 
 ---
 
@@ -80,7 +80,7 @@ print(token[0]) if token else print('No token')
 | `~/.config/bybit-cli/config` | Bybit API keys | 🔴 Critical |
 | `~/.local/share/bybit-ws/state.db` | RPC token, trade history, positions, PnL | 🟠 High |
 | `.env` | Telegram token | 🟡 Medium |
-| `journalctl -u bybit-ws` | Logs (may contain prices, symbols, PnL) | 🟢 Low |
+| `journalctl -u bybit-ws-async` | Logs (may contain prices, symbols, PnL) | 🟢 Low |
 
 **Protection:**
 - Bybit API keys have **trading permissions only** (without Wallet/Withdrawal) — funds cannot be withdrawn.
@@ -191,7 +191,7 @@ git log --all --full-history -p | grep -E '(BYBIT_API_KEY|BYBIT_API_SECRET)'
 5. Delete the **old** API key in the Bybit UI.
 6. Restart the monitor:
    ```bash
-   systemctl --user restart bybit-ws
+   systemctl --user restart bybit-ws-async
    ```
 7. Check that the monitor is working:
    ```bash
@@ -261,7 +261,7 @@ age -d -i ~/.config/age/key.txt \
 
 2. **Stop the monitor:**
    ```bash
-   systemctl --user stop bybit-ws
+   systemctl --user stop bybit-ws-async
    ```
 
 3. **Create new keys:**
@@ -284,12 +284,12 @@ age -d -i ~/.config/age/key.txt \
 
 6. **Start the monitor:**
    ```bash
-   systemctl --user start bybit-ws
+   systemctl --user start bybit-ws-async
    ```
 
 7. **Check the journal for anomalies:**
    ```bash
-   journalctl --user -u bybit-ws --since "1 hour ago" | grep -E '(ERROR|WARN|alert)'
+   journalctl --user -u bybit-ws-async --since "1 hour ago" | grep -E '(ERROR|WARN|alert)'
    ```
 
 ### 4.2 If the RPC Token Is Compromised
@@ -309,14 +309,14 @@ age -d -i ~/.config/age/key.txt \
 
 3. **Check the RPC logs for unauthorized calls:**
    ```bash
-   journalctl --user -u bybit-ws --since "24 hours ago" | grep "rpc"
+   journalctl --user -u bybit-ws-async --since "24 hours ago" | grep "rpc"
    ```
 
 ### 4.3 Restoring `state.db` from a Backup
 
 ```bash
 # 1. Stop the monitor
-systemctl --user stop bybit-ws
+systemctl --user stop bybit-ws-async
 
 # 2. Make a copy of the current (compromised) database
 cp ~/.local/share/bybit-ws/state.db ~/backups/state.db.compromised.$(date +%Y%m%d_%H%M%S)
@@ -330,7 +330,7 @@ cp /tmp/home/*/.local/share/bybit-ws/state.db ~/.local/share/bybit-ws/state.db
 chmod 600 ~/.local/share/bybit-ws/state.db
 
 # 4. Start the monitor
-systemctl --user start bybit-ws
+systemctl --user start bybit-ws-async
 ```
 
 ### 4.4 Complete Server Compromise
@@ -369,13 +369,13 @@ git log --all --full-history -- '*.env' 'config.yaml' '*.key' '*.pem'
 
 ```bash
 # Search for keys in systemd logs
-journalctl --user -u bybit-ws --no-pager | grep -iE '(api_key|api_secret|token|secret|key=|Bearer)'
+journalctl --user -u bybit-ws-async --no-pager | grep -iE '(api_key|api_secret|token|secret|key=|Bearer)'
 
 # Search for errors that could have disclosed sensitive data
-journalctl --user -u bybit-ws --no-pager | grep -iE '(traceback|error|exception)' | grep -viE '(timeout|retry|connection)'
+journalctl --user -u bybit-ws-async --no-pager | grep -iE '(traceback|error|exception)' | grep -viE '(timeout|retry|connection)'
 
 # Search for accidental secret output in logs
-journalctl --user -u bybit-ws --no-pager | grep -E '[0-9a-f]{64}'  # HMAC-SHA256 signatures
+journalctl --user -u bybit-ws-async --no-pager | grep -E '[0-9a-f]{64}'  # HMAC-SHA256 signatures
 ```
 
 ### 5.3 Check Files for Secrets
@@ -398,7 +398,7 @@ find ~/.config/bybit-cli ~/.config/bybit-ws ~/.local/share/bybit-ws \
 | Frequency | Check | Command |
 |---------|----------|---------|
 | **Monthly** | Search for keys in Git history | `git log --all --full-history -p \| grep -iE 'api_key\|api_secret'` |
-| **Monthly** | Search for secrets in logs | `journalctl --user -u bybit-ws --since "1 month ago" \| grep -iE '(key\|secret\|token)'` |
+| **Monthly** | Search for secrets in logs | `journalctl --user -u bybit-ws-async --since "1 month ago" \| grep -iE '(key\|secret\|token)'` |
 | **Weekly** | Check permissions | `find ~/.config -name 'config*' -exec stat -c '%a %n' {} \;` |
 | **Before every commit** | Check the staging area | `git diff --cached \| grep -iE '(key\|secret\|token)'` |
 

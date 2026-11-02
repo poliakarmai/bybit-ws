@@ -3,7 +3,7 @@
 **Русский** · [English](SECURITY.en.md)
 
 > Полная документация по безопасности трейдинг-монитора bybit-ws.
-> **Версия:** 1.1 | **Дата:** 2026-06-29 | **Актуально для:** bybit-ws Фаза 7
+> **Версия:** 1.2 | **Дата:** 2026-11-02 | **Актуально для:** bybit-ws 11.5.x
 
 ---
 
@@ -80,7 +80,7 @@ print(token[0]) if token else print('No token')
 | `~/.config/bybit-cli/config` | API-ключи Bybit | 🔴 Критическая |
 | `~/.local/share/bybit-ws/state.db` | RPC-токен, история сделок, позиции, PnL | 🟠 Высокая |
 | `.env` | Telegram-токен | 🟡 Средняя |
-| `journalctl -u bybit-ws` | Логи (могут содержать цены, символы, PnL) | 🟢 Низкая |
+| `journalctl -u bybit-ws-async` | Логи (могут содержать цены, символы, PnL) | 🟢 Низкая |
 
 **Защита:**
 - API-ключи Bybit имеют **только торговые права** (без Wallet/Withdrawal) — нельзя вывести средства.
@@ -191,7 +191,7 @@ git log --all --full-history -p | grep -E '(BYBIT_API_KEY|BYBIT_API_SECRET)'
 5. Удалить **старый** API-ключ в Bybit UI.
 6. Перезапустить монитор:
    ```bash
-   systemctl --user restart bybit-ws
+   systemctl --user restart bybit-ws-async
    ```
 7. Проверить, что монитор работает:
    ```bash
@@ -261,7 +261,7 @@ age -d -i ~/.config/age/key.txt \
 
 2. **Остановить монитор:**
    ```bash
-   systemctl --user stop bybit-ws
+   systemctl --user stop bybit-ws-async
    ```
 
 3. **Создать новые ключи:**
@@ -284,12 +284,12 @@ age -d -i ~/.config/age/key.txt \
 
 6. **Запустить монитор:**
    ```bash
-   systemctl --user start bybit-ws
+   systemctl --user start bybit-ws-async
    ```
 
 7. **Проверить журнал на предмет аномалий:**
    ```bash
-   journalctl --user -u bybit-ws --since "1 hour ago" | grep -E '(ERROR|WARN|alert)'
+   journalctl --user -u bybit-ws-async --since "1 hour ago" | grep -E '(ERROR|WARN|alert)'
    ```
 
 ### 4.2 При компрометации RPC-токена
@@ -309,14 +309,14 @@ age -d -i ~/.config/age/key.txt \
 
 3. **Проверить логи RPC на предмет несанкционированных вызовов:**
    ```bash
-   journalctl --user -u bybit-ws --since "24 hours ago" | grep "rpc"
+   journalctl --user -u bybit-ws-async --since "24 hours ago" | grep "rpc"
    ```
 
 ### 4.3 Восстановление state.db из бэкапа
 
 ```bash
 # 1. Остановить монитор
-systemctl --user stop bybit-ws
+systemctl --user stop bybit-ws-async
 
 # 2. Сделать копию текущей (скомпрометированной) базы
 cp ~/.local/share/bybit-ws/state.db ~/backups/state.db.compromised.$(date +%Y%m%d_%H%M%S)
@@ -330,7 +330,7 @@ cp /tmp/home/*/.local/share/bybit-ws/state.db ~/.local/share/bybit-ws/state.db
 chmod 600 ~/.local/share/bybit-ws/state.db
 
 # 4. Запустить монитор
-systemctl --user start bybit-ws
+systemctl --user start bybit-ws-async
 ```
 
 ### 4.4 Полная компрометация сервера
@@ -369,13 +369,13 @@ git log --all --full-history -- '*.env' 'config.yaml' '*.key' '*.pem'
 
 ```bash
 # Поиск ключей в логах systemd
-journalctl --user -u bybit-ws --no-pager | grep -iE '(api_key|api_secret|token|secret|key=|Bearer)'
+journalctl --user -u bybit-ws-async --no-pager | grep -iE '(api_key|api_secret|token|secret|key=|Bearer)'
 
 # Поиск ошибок, которые могли раскрыть чувствительные данные
-journalctl --user -u bybit-ws --no-pager | grep -iE '(traceback|error|exception)' | grep -viE '(timeout|retry|connection)'
+journalctl --user -u bybit-ws-async --no-pager | grep -iE '(traceback|error|exception)' | grep -viE '(timeout|retry|connection)'
 
 # Поиск случайного вывода секретов в логи
-journalctl --user -u bybit-ws --no-pager | grep -E '[0-9a-f]{64}'  # HMAC-SHA256 подписи
+journalctl --user -u bybit-ws-async --no-pager | grep -E '[0-9a-f]{64}'  # HMAC-SHA256 подписи
 ```
 
 ### 5.3 Проверка файлов на наличие секретов
@@ -398,7 +398,7 @@ find ~/.config/bybit-cli ~/.config/bybit-ws ~/.local/share/bybit-ws \
 | Частота | Проверка | Команда |
 |---------|----------|---------|
 | **Ежемесячно** | Поиск ключей в Git-истории | `git log --all --full-history -p \| grep -iE 'api_key\|api_secret'` |
-| **Ежемесячно** | Поиск секретов в логах | `journalctl --user -u bybit-ws --since "1 month ago" \| grep -iE '(key\|secret\|token)'` |
+| **Ежемесячно** | Поиск секретов в логах | `journalctl --user -u bybit-ws-async --since "1 month ago" \| grep -iE '(key\|secret\|token)'` |
 | **Еженедельно** | Проверка permissions | `find ~/.config -name 'config*' -exec stat -c '%a %n' {} \;` |
 | **Перед каждым коммитом** | Проверка staging area | `git diff --cached \| grep -iE '(key\|secret\|token)'` |
 

@@ -2,9 +2,9 @@
 
 **English** · [Русский](API.md)
 
-> HTTP REST API for the trading monitor (server `rpc.py`, **`http.server`**, not JSON-RPC).
-> Verified against the code on 2026-11-01 (31 GET and 17 POST in `rpc.py`; all GET requests additionally
-> passed live probing with a token — 200), product version 11.5.0, `api_version: "v1"` in every response.
+> HTTP REST API of the trading monitor (`rpc.py`, **`http.server`**, not JSON-RPC).
+> Verified against code 2026-11-02 (32 GET and 17 POST in `rpc.py`; all GET additionally
+> passed live probing with token — 200), product version 11.5.0, `api_version: "v1"` in every response.
 > The route table in `rpc.py` (`do_GET` / `do_POST`) is the source of truth; anything not listed there does not exist.
 
 ## Authentication

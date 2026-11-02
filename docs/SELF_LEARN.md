@@ -9,7 +9,7 @@
 
 ## Как это работает
 
-Бот торгует 24/7. После каждой сделки — микро-обучение. Раз в 6 часов (или ≥10 сделок) — полный анализ с генерацией корректировок. Модуль прошёл путь от простого анализа (v4) до production-grade adaptive системы с 20+ механиками (v10).
+Бот торгует 24/7. После каждой сделки — микро-обучение. Полный анализ запускается когда **≥10 сделок И ≥6ч** с прошлого прогона; если сделок мало — fallback через **24ч** (`should_run_self_learn_v6`, `main_async.py`). Модуль прошёл путь от простого анализа (v4) до production-grade adaptive системы с 20+ механиками (v10).
 
 ### Микро-обучение (после каждой сделки)
 
@@ -52,11 +52,12 @@
 **5. Стресс-тесты** — 4 исторических + 1000 Pareto MC (α=2.5, heavy-tail). Порог: prob_ruin < 5%.
 
 **6. Canary** — 10% входов (адаптивный 5-20%). Bayesian A/B тест. Idle timeout 3ч.
+> ⚠️ **В проде ВЫКЛЮЧЕН:** `CANARY_ENABLED = False`, `CANARY_ENTRY_PCT = 0.0` (`self_learn.py:55-57`). Код живой и покрыт тестами, но к live-входам не применяется.
 
 ## Архитектура
 
 ```
-main_async.py (event-driven: ≥10 сделок / 6ч или 24ч fallback)
+main_async.py (event-driven: ≥10 сделок И ≥6ч, иначе fallback 24ч)
   └─ should_run_self_learn_v6()
        └─ load_from_sqlite() → analyze()
             └─ apply_journal_insights()
@@ -78,6 +79,7 @@ main_async.py (event-driven: ≥10 сделок / 6ч или 24ч fallback)
                       select_arm_with_uncertainty()    ← explore/exploit (v10)
                       walk_forward_validation()        ← out-of-sample (v6)
                       bayesian_ab_test()               ← Beta posterior (v6)
+                      canary_*                        ← ⚠️ CANARY_ENABLED=False в проде
 ```
 
 ## Файлы

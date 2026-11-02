@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![Tests](https://img.shields.io/badge/pytest-passing-brightgreen)](./AGENTS.md) [![Smoke](https://img.shields.io/badge/smoke-52%2F52-brightgreen)](./test_smoke.py)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-[![Phase 11](https://img.shields.io/badge/phase-11-blue)](./CHANGELOG.md)
+[![Phase 11.5](https://img.shields.io/badge/phase-11.5-blue)](./CHANGELOG.md)
 
 ---
 
@@ -125,7 +125,7 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 - **Stress Testing**: 4 исторических backtest-сценария + 1000 Pareto Monte Carlo симуляций
 - **Composite Score**: WR+PF+Sharpe+MaxDD+AvgHold с adaptive per-regime весами и exponential decay
 - **Micro-updates**: обучение после каждой сделки с outlier-защитой (>3σ)
-- **Canary mode**: Bayesian A/B тест, адаптивный 5-20%, авто-rollback
+- **Canary mode**: Bayesian A/B тест, адаптивный 5-20%, авто-rollback. ⚠️ В проде выключен (`CANARY_ENABLED=False`) — код жив, но к live-входам не применяется.
 - **Entry Judge**: одна модель (DeepSeek, fail-closed); Qwen убран 17.10, Nemotron в коде вызова нет
 - **LSTM Market Regime**: 5 классов, авто-адаптация LONG/SHORT (82.3% — заявлено, не перезамерялось)
 - **LSTM World Model**: multi-task OHLCV prediction для скоринга входов
@@ -160,9 +160,9 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 │  • correlation.py    — корреляционная матрица      │
 │  • dca.py            — DCA-докупки                 │
 │                                                     │
-│  Раз в 24 часа (self-learn):                        │
+│  Self-learn (event-driven: ≥10 сделок И ≥6ч, иначе 24ч):│
 │  • self_learn.py     — Dynamic Bandit, Drift, Ensemble│
-│  • canary mode       — Bayesian A/B-тест параметров │
+│  • canary mode       — Bayesian A/B (выключен в проде)│
 └─────────────────────────────────────────────────────┘
 ```
 

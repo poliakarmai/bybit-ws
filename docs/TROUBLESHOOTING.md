@@ -26,8 +26,8 @@
 ## 1. Сервис не запускается
 
 ### Симптомы
-- `systemctl --user status bybit-ws` показывает `failed` или `inactive`
-- `journalctl --user -u bybit-ws` содержит traceback
+- `systemctl --user status bybit-ws-async` показывает `failed` или `inactive`
+- `journalctl --user -u bybit-ws-async` содержит traceback
 - Запуск `python -m bybit-ws` падает с ошибкой
 
 ### Причина 1: Нет API-ключей
@@ -140,9 +140,9 @@ pip install pyyaml requests
 
 **Решение:**
 ```bash
-systemctl --user status bybit-ws
+systemctl --user status bybit-ws-async
 # Если inactive:
-systemctl --user start bybit-ws
+systemctl --user start bybit-ws-async
 # Ждать 30 секунд — RPC стартует после первого цикла
 sleep 30
 curl http://127.0.0.1:8766/health
@@ -177,7 +177,7 @@ rpc:
   bind: "0.0.0.0"   # слушать на всех интерфейсах
 ```
 ```bash
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 ```
 
 ### Причина 4: Ошибка авторизации (401)
@@ -212,7 +212,7 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/positions
 # Подождать 60 секунд
 # Или увеличить лимит в конфиге:
 # rpc.rate_limit_per_min: 120
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 ```
 
 ### Причина 6: Health = `stale`
@@ -228,10 +228,10 @@ cat ~/.local/share/bybit-ws/health.txt
 date +%s  # сравнить разницу
 
 # Рестарт
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 
 # Проверить причину зависания:
-journalctl --user -u bybit-ws --since "5 min ago" | tail -30
+journalctl --user -u bybit-ws-async --since "5 min ago" | tail -30
 ```
 
 ---
@@ -495,7 +495,7 @@ ls -lh ~/.local/share/bybit-ws/events.log
 
 # Ротация вручную:
 mv ~/.local/share/bybit-ws/events.log ~/.local/share/bybit-ws/events.log.old
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 
 # Или настроить авто-ротацию:
 # logging.max_size_mb: 20  (вместо 50)
@@ -520,8 +520,8 @@ systemctl --user restart bybit-ws
 
 ### Симптомы
 - `🚨 Watchdog: главный цикл завис (190с) — аварийный выход`
-- systemd перезапускает сервис (`systemctl --user status bybit-ws` показывает частые рестарты)
-- `journalctl --user -u bybit-ws` показывает циклы перезапусков
+- systemd перезапускает сервис (`systemctl --user status bybit-ws-async` показывает частые рестарты)
+- `journalctl --user -u bybit-ws-async` показывает циклы перезапусков
 
 ### Причина 1: 404-флуд от Bybit API
 
@@ -548,7 +548,7 @@ grep -r "position/info" ~/bybit-ws/ ~/.local/lib/bybit_ws/
 # Проверить сеть:
 ping -c 3 api.bytick.com
 # Настроить авто-восстановление (systemd):
-systemctl --user cat bybit-ws
+systemctl --user cat bybit-ws-async
 # Restart=always уже должен быть в unit-файле
 ```
 
@@ -761,7 +761,7 @@ cp -r risk/ ~/.local/lib/bybit_ws/
 cp -r web/ ~/.local/lib/bybit_ws/
 
 # Перезапустить сервис:
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 
 # Проверить версию:
 curl http://127.0.0.1:8766/rpc/paths | python3 -c "import json,sys; print(json.load(sys.stdin)['sync_command'])"
@@ -790,9 +790,9 @@ ls -la ~/.local/lib/bybit_ws/
 
 **Решение:**
 ```bash
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 # Проверить что перезапустился:
-systemctl --user status bybit-ws
+systemctl --user status bybit-ws-async
 ```
 
 ---
@@ -814,9 +814,9 @@ ls -lh ~/.local/share/bybit-ws/state.db*
 sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA wal_checkpoint(TRUNCATE);"
 
 # Если WAL-файл огромный (>100 MB):
-systemctl --user stop bybit-ws
+systemctl --user stop bybit-ws-async
 sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA wal_checkpoint(TRUNCATE);"
-systemctl --user start bybit-ws
+systemctl --user start bybit-ws-async
 ```
 
 ### Причина 2: Database is locked
@@ -852,7 +852,7 @@ sqlite3 ~/.local/share/bybit-ws/state.db ".recover" | sqlite3 ~/.local/share/byb
 # Если не помогло — восстановить из бэкапа:
 ls -lt ~/.local/share/bybit-ws/backups/
 cp ~/.local/share/bybit-ws/backups/state_<latest>.db ~/.local/share/bybit-ws/state.db
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 ```
 
 ### Причина 4: VACUUM для сжатия
@@ -908,7 +908,7 @@ alerts:
   telegram_enabled: true
 ```
 ```bash
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 ```
 
 ### Причина 3: Telegram API rate limit / timeout
@@ -936,7 +936,7 @@ curl -s --connect-timeout 5 https://api.telegram.org
 rm ~/.local/share/bybit-ws/last_alerts.json
 # SQLite-уровень:
 sqlite3 ~/.local/share/bybit-ws/state.db "DELETE FROM alert_dedup;"
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 ```
 
 ---
@@ -959,7 +959,7 @@ systemctl --user restart bybit-ws
 # Проверить RPC
 curl http://127.0.0.1:8766/health
 # Если Connection refused:
-systemctl --user start bybit-ws
+systemctl --user start bybit-ws-async
 ```
 
 ### Причина 2: RPC-токен не совпадает
@@ -1034,7 +1034,7 @@ python3 ~/.local/bin/gridsignal_scanner.py --mode long --tf D --limit 3
 
 **Симптом:** Постепенный рост памяти (несколько KB в день).
 
-**Причина:** Словарь `_SL_DEDUP` в `main.py` хранит ключи symbol→timestamp для SL-алертов. Очистка происходит только когда словарь >1000 записей или записи старше 24ч.
+**Причина:** Словарь `_SL_DEDUP` в `main_async.py` хранит ключи symbol→timestamp для SL-алертов. Очистка происходит только когда словарь >1000 записей или записи старше 24ч.
 
 **Решение:** Уже реализована авто-очистка в `main_loop()`:
 ```python
@@ -1054,7 +1054,7 @@ _SL_DEDUP.clear() if len(_SL_DEDUP) > 1000 else [
 **Решение:**
 ```bash
 # Очистка требует рестарта:
-systemctl --user restart bybit-ws
+systemctl --user restart bybit-ws-async
 # Для постоянного решения — добавить TTL-очистку в rpc.py
 ```
 
@@ -1087,7 +1087,7 @@ wc -l ~/.local/share/bybit-ws/alerts.log
 **Решение:**
 ```bash
 # Проверить память процесса:
-ps -o pid,rss,comm -p $(systemctl --user show -p MainPID bybit-ws | cut -d= -f2)
+ps -o pid,rss,comm -p $(systemctl --user show -p MainPID bybit-ws-async | cut -d= -f2)
 
 # Профилировать:
 python3 -c "
@@ -1126,7 +1126,7 @@ mv ~/.local/share/bybit-ws/events.log ~/.local/share/bybit-ws/events.log.old
 
 ```bash
 # ═══ Статус сервиса ═══
-systemctl --user status bybit-ws
+systemctl --user status bybit-ws-async
 
 # ═══ RPC health ═══
 curl -s http://127.0.0.1:8766/health | python3 -m json.tool
@@ -1151,7 +1151,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/risk | python3 -
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/positions | python3 -m json.tool
 
 # ═══ Память процесса ═══
-ps -o pid,rss,vsz,comm -p $(systemctl --user show -p MainPID bybit-ws 2>/dev/null | grep -oP '\d+')
+ps -o pid,rss,vsz,comm -p $(systemctl --user show -p MainPID bybit-ws-async 2>/dev/null | grep -oP '\\d+')
 
 # ═══ Размер файлов данных ═══
 du -sh ~/.local/share/bybit-ws/*

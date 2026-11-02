@@ -25,6 +25,7 @@
 | [WEBHOOKS.md](WEBHOOKS.md) | Payload-структура alert-событий (ENTRY/SL/TP/…) для внешних потребителей | ✅ 26.10 |
 | [research/](research/) | A/B-эксперименты с датой и вердиктом | 📜 отчёты, не инструкции |
 | [TZ-audit-bes-2026-10-23.md](TZ-audit-bes-2026-10-23.md) | ТЗ внешнего аудита (Фаза 11) | 📜 вход в Фазу 11 |
+| [REPORT-10x.md](REPORT-10x.md) | Отчёт по x10-стратегиям (выборки нет, 8 сделок) | 📜 31.10 |
 | [../REVIEW.md](../REVIEW.md) | Правила ревью (что считается поломкой) | ✅ 20.10 |
 | [../CHANGELOG.md](../CHANGELOG.md) | История версий | ✅ 25.10 |
 | [../ONBOARDING.md](../ONBOARDING.md) · [EN](../ONBOARDING.en.md) | Пошагово с нуля | ⚠️ 04.08 |

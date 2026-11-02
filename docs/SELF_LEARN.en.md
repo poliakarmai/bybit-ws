@@ -9,7 +9,7 @@
 
 ## How It Works
 
-The bot trades 24/7. After each trade, it performs micro-learning. Every 6 hours (or ≥10 trades), it performs a full analysis and generates adjustments. The module evolved from simple analysis (v4) to a production-grade adaptive system with 20+ mechanisms (v10).
+The bot trades 24/7. After each trade — micro-learning. Full analysis runs when **≥10 trades AND ≥6h** since the last run; if few trades — fallback after **24h** (`should_run_self_learn_v6`, `main_async.py`). The module evolved from simple analysis (v4) to a production-grade adaptive system with 20+ mechanics (v10).
 
 ### Micro-Learning (After Each Trade)
 
@@ -52,11 +52,12 @@ The bot trades 24/7. After each trade, it performs micro-learning. Every 6 hours
 **5. Stress Tests** — 4 historical scenarios + 1000 Pareto MC (α=2.5, heavy-tail). Threshold: prob_ruin < 5%.
 
 **6. Canary** — 10% of entries (adaptive 5-20%). Bayesian A/B test. Idle timeout 3h.
+> ⚠️ **Disabled in production:** `CANARY_ENABLED = False`, `CANARY_ENTRY_PCT = 0.0` (`self_learn.py:55-57`). The code is live and covered by tests, but is not applied to live entries.
 
 ## Architecture
 
 ```
-main_async.py (event-driven: ≥10 trades / 6h or 24h fallback)
+main_async.py (event-driven: ≥10 trades AND ≥6h, else 24h fallback)
   └─ should_run_self_learn_v6()
        └─ load_from_sqlite() → analyze()
             └─ apply_journal_insights()
@@ -78,6 +79,7 @@ main_async.py (event-driven: ≥10 trades / 6h or 24h fallback)
                       select_arm_with_uncertainty()    ← explore/exploit (v10)
                       walk_forward_validation()        ← out-of-sample (v6)
                       bayesian_ab_test()               ← Beta posterior (v6)
+                      canary_*                        ← ⚠️ CANARY_ENABLED=False in prod
 ```
 
 ## Files
