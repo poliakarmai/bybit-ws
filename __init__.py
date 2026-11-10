@@ -111,20 +111,43 @@ def safe_op(fn, *args, default=None, desc='', **kwargs):
 
 # ── Position mode detection ──
 
-POSITION_IDX = {'Buy': 0, 'Sell': 0}
+# Режим позиций задаётся ПО СИМВОЛУ: 10.11.2026 на живом счёте одновременно
+# GRAMUSDT positionIdx=0 (one-way) и LTCUSDT positionIdx=1 (hedge). Глобальный
+# флаг отправлял Sell с idx=1 (сторона Buy) → биржа отклоняла шорт.
+_HEDGE_SYMS: set = set()
+
 
 def _detect_position_mode():
-    """Определить режим позиций (hedge vs one-way)."""
-    global POSITION_IDX
+    """Заполнить кэш hedge-символов по открытым позициям."""
     try:
         from .api import bybit
         resp = bybit('GET', '/v5/position/list?category=linear&settleCoin=USDT')
         if resp.get('retCode') == 0:
             for p in resp['result']['list']:
-                if float(p.get('size', 0)) > 0 and int(p.get('positionIdx', 0)) == 1:
-                    POSITION_IDX = {'Buy': 0, 'Sell': 1}
-                    break
+                if float(p.get('size', 0)) > 0 and int(p.get('positionIdx', 0)) in (1, 2):
+                    _HEDGE_SYMS.add(p['symbol'])
     except Exception:
         pass
+
+
+def position_idx(sym: str, side: str) -> int:
+    """positionIdx для ордера: hedge → Buy=1 / Sell=2, one-way → 0.
+
+    ponytail: символ без открытой позиции считается one-way, пока первый принятый
+    ордер не покажет обратное (learn_position_idx). Эндпоинта «режим символа»
+    в Bybit v5 нет — при отказе 10001/130025 нужен повтор с idx=1/2.
+    """
+    if sym in _HEDGE_SYMS:
+        return 1 if side == 'Buy' else 2
+    return 0
+
+
+def learn_position_idx(sym: str, idx: int) -> None:
+    """Запомнить режим символа по успешно принятому ордеру."""
+    if idx in (1, 2):
+        _HEDGE_SYMS.add(sym)
+    elif idx == 0:
+        _HEDGE_SYMS.discard(sym)
+
 
 _detect_position_mode()

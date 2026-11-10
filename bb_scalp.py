@@ -157,8 +157,10 @@ def check_scalp_signals(positions, balance_usdt):
         if scalp_margin <= 0 or free_margin < scalp_margin * 1.5:
             continue
 
-        qty = math.ceil(scalp_margin * SCALP_LEVERAGE / entry_price * 100) / 100
-        if qty <= 0:
+        # размер по qtyStep символа: ceil(×100)/100 давал 0.09 BTC вместо 0.0009
+        from .auto_entry import _qty_by_step
+        qty = _qty_by_step(sym, scalp_margin * SCALP_LEVERAGE / entry_price)
+        if not qty:
             continue
 
         msg = (f'⚡ СКАЛЬП {sym} {direction} x{SCALP_LEVERAGE}: '
@@ -192,8 +194,8 @@ def execute_scalp(entry_info):
     except Exception as e:
         log_event(f'⚠️ bb_scalp: {e}')
 
-    from . import POSITION_IDX
-    idx = POSITION_IDX.get(side, 0)
+    from . import position_idx
+    idx = position_idx(sym, side)
     try:
         order = bybit('POST', '/v5/order/create', {
             'category': 'linear', 'symbol': sym, 'side': side,

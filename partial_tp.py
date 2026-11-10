@@ -23,6 +23,7 @@ from statistics import mean, stdev
 sys.path.insert(0, str(Path.home()))
 sys.path.insert(0, str(Path(__file__).parent))
 from .api import bybit, fetch_positions, fetch_orders, cancel_order, place_order, fetch_funding_total
+from .alerts import log_event
 
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
@@ -187,25 +188,43 @@ def check_partial_tp(positions=None) -> list[str]:
         if not tp_orders:
             continue
 
-        # Обновляем самый дальний TP (Upper BB → меняем долю)
-        # Отменяем существующие TP
+        # Обновляем сплит TP: СНАЧАЛА ставим новые, ПОТОМ снимаем старые.
+        # Раньше порядок был обратный — сбой между шагами оставлял позицию без TP
+        # (аудит 10.11). ponytail: на секунду в стакане висят два набора reduce-only
+        # TP; если оба сработают, второй биржа урежет по остатку позиции.
+        mid_qty = pos_size * new_mid
+        up_qty = pos_size * new_up
+
+        new_orders = []
+        try:
+            if mid_qty > 0:
+                new_orders.append(place_order(
+                    sym, "Sell", "Limit", mid_qty, bb["sma"], reduce_only=True,
+                    position_idx=pos.get("positionIdx", 0)))
+            if up_qty > 0:
+                new_orders.append(place_order(
+                    sym, "Sell", "Limit", up_qty, bb["upper"], reduce_only=True,
+                    position_idx=pos.get("positionIdx", 0)))
+        except Exception as e:  # noqa: BLE001 — сеть/биржа: старые TP важнее падения
+            log_event(f'⚠️ partial_tp {sym}: новые TP не выставлены ({e}) — старые оставлены')
+            continue
+        if any(not isinstance(o, dict) or o.get("retCode") != 0 for o in new_orders):
+            # частичный успех: снимаем то, что успели поставить, старые TP остаются
+            for o in new_orders:
+                oid = (o.get("result") or {}).get("orderId") if isinstance(o, dict) else None
+                if oid:
+                    try:
+                        cancel_order(sym, oid)
+                    except Exception as e:  # noqa: BLE001 — уборка не должна маскировать отказ
+                        log_event(f'⚠️ partial_tp {sym}: не удалось снять новый TP {oid}: {e}')
+            log_event(f'⚠️ partial_tp {sym}: биржа не приняла новые TP — старые оставлены')
+            continue
+
         for o in tp_orders:
             try:
                 cancel_order(sym, o["orderId"])
             except Exception:
                 pass
-
-        # Ставим новые TP с новым сплитом
-        mid_qty = pos_size * new_mid
-        up_qty = pos_size * new_up
-
-        if mid_qty > 0:
-            place_order(sym, "Sell", "Limit", mid_qty, bb["sma"], reduce_only=True,
-                       position_idx=pos.get("positionIdx", 0))
-
-        if up_qty > 0:
-            place_order(sym, "Sell", "Limit", up_qty, bb["upper"], reduce_only=True,
-                       position_idx=pos.get("positionIdx", 0))
 
         # Сохраняем состояние
         state[sym] = {

@@ -1,6 +1,7 @@
 """Авто-вход по 9-метричному скорингу (v4.0)."""
-import json, math, os, time
-from . import BYBIT_CLI, DATA_DIR, MAX_POSITION_VALUE
+import json, os, time
+from decimal import Decimal, ROUND_FLOOR
+from . import BYBIT_CLI, DATA_DIR, MAX_POSITION_VALUE, learn_position_idx, position_idx
 from . import safe_run
 from .api import bybit, account_wallet, get_bb_data, set_leverage, verify_leverage
 from .alerts import log_event, add_alert
@@ -463,22 +464,45 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     }
 
 
-def _apply_corr_sizing(margin: float, qty: int, corr_sizer: float, price: float, lev: int):
+def _apply_corr_sizing(margin: float, qty: float, corr_sizer: float, price: float, lev: int, sym: str):
     """Корреляционный сайзинг: при r>0.70 corr_sizer=0.5 режет и маржу, и количество.
 
     Раньше corr_sizer считался и логировался («size ×0.5»), но к размеру не
-    применялся — позиция открывалась полной. Возвращает (margin, qty).
+    применялся — позиция открывалась полной. Возвращает (margin, qty); qty=None —
+    если после урезания размер меньше minOrderQty.
     """
     if corr_sizer >= 1.0 or price <= 0:
         return margin, qty
     margin *= corr_sizer
-    return margin, max(1, math.ceil(margin * lev / price))
+    return margin, _qty_by_step(sym, margin * lev / price)
 
 
 def _strategy_leverage(side='Buy'):
     """Плечо стороны из конфига стратегии (long/short). Дефолт 3 — как в config.py."""
     strat = Config().strategy.long if side == 'Buy' else Config().strategy.short
     return int(strat.get('leverage', 3))
+
+
+def _qty_by_step(sym, qty: float):
+    """qty, усечённый до qtyStep символа. None — если меньше minOrderQty.
+
+    Раньше qty = ceil(...) давал целые монеты: BTCUSDT в вотчлисте → «1 BTC»
+    на $5 маржи (пруф 10.11: 0.0002 → 1.0). Лимиты берём у того же хелпера,
+    что auto_tp (fail-closed, без молчаливых дефолтов).
+    """
+    try:
+        from .auto_tp import _get_qty_limits
+        step, min_qty = _get_qty_limits(sym)
+    except Exception:  # noqa: BLE001 — fail-closed: без лимитов символа размер не считаем
+        return None
+    if not step or not min_qty:
+        return None
+    # Decimal: str(1e-05) не содержит точки, а float-деление теряет шаг
+    # (0.0003 / 0.0001 = 2.9999... → floor дал бы 0.0002).
+    step_d, min_d = Decimal(str(step)), Decimal(str(min_qty))
+    steps = (Decimal(str(qty)) / step_d).to_integral_value(rounding=ROUND_FLOOR)
+    q = steps * step_d
+    return float(q) if q >= min_d else None
 
 
 def apply_entry_leverage(sym, side='Buy'):
@@ -647,18 +671,28 @@ def auto_entry_scan(positions):
             price = round(bb2['lower'] * sym_discount * entry_discount_mult, 4)
             # плечо берём из того же источника, что apply_entry_leverage ниже:
             # литерал 3 расходился с конфигом при смене leverage
-            qty = math.ceil(margin * _strategy_leverage('Buy') / price)
+            notional = margin * _strategy_leverage('Buy')
+            qty = _qty_by_step(sym, notional / price)
+            if qty is None:
+                log_event(f'⚠️ {sym}: ${notional:.2f} меньше minOrderQty — вход пропущен')
+                continue
             # ── v4: Streak size multiplier — половинный размер при 3+ лосях ──
+            skipped_by_streak = False
             try:
                 from bybit_ws.journal.self_learn import get_streak_status
                 streak = get_streak_status()
                 mult = streak.get("size_multiplier", 1.0)
                 if mult < 1.0:
-                    qty = max(1, math.ceil(qty * mult))
-                    log_event(f'⚠️ STREAK SIZE: {streak["consecutive_losses"]} losses → size ×{mult} → {qty}')
+                    q2 = _qty_by_step(sym, notional * mult / price)
+                    if q2 is None:
+                        log_event(f'⚠️ STREAK SIZE {sym}: урезанный размер < minOrderQty — вход пропущен')
+                        skipped_by_streak = True
+                    else:
+                        qty = q2
+                        log_event(f'⚠️ STREAK SIZE: {streak["consecutive_losses"]} losses → size ×{mult} → {qty}')
             except Exception:
                 pass
-            if qty < 1:
+            if skipped_by_streak:
                 continue
 
             if sym in positions:
@@ -667,7 +701,7 @@ def auto_entry_scan(positions):
                     continue
 
             pos_data = bybit('GET', f'/v5/position/list?category=linear&settleCoin=USDT&symbol={sym}')
-            idx = 0
+            idx = position_idx(sym, 'Buy')
             if pos_data and pos_data.get('retCode') == 0:
                 for p in pos_data['result'].get('list', []):
                     if float(p.get('size', 0)) > 0:
@@ -787,7 +821,11 @@ def auto_entry_scan(positions):
                     log_event(f'⚠️ CORR CHECK FAILED {sym}: {e} — вход заблокирован')
                     continue
             # применяем решение корреляционного сайзинга (см. _apply_corr_sizing)
-            margin, qty = _apply_corr_sizing(margin, qty, corr_sizer, price, _strategy_leverage('Buy'))
+            margin, qty = _apply_corr_sizing(margin, qty, corr_sizer, price, _strategy_leverage('Buy'), sym)
+            if qty is None:
+                log_event(f'⚠️ {sym}: после corr-сайзинга размер < minOrderQty — вход пропущен')
+                continue
+            qty = float(qty)
 
             # ── Symbol concentration check (28.06.2026) ──
             # Не более MAX_RISK_PER_SYMBOL_PCT от депозита на один тикер
@@ -840,6 +878,8 @@ def auto_entry_scan(positions):
             if result and result.get('retCode') != 0:
                 log_event(f'⛔ POST-ONLY LONG {sym}: {result.get("retMsg", "?")} — вход не открыт')
             if result and result.get('retCode') == 0:
+                # режим символа запоминаем по факту принятого ордера
+                learn_position_idx(sym, idx)
                 # ── Сверка фактического плеча (mismatch → алерт) ──
                 verify_leverage(sym, lev)
                 # ── Фаза 4.3.2: Telegram-алерт при входе ──

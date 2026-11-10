@@ -200,8 +200,8 @@ def execute_funding_entry(entry_info):
     except Exception as e:
         log_event(f'⚠️ funding_entry: {e}')
 
-    from . import POSITION_IDX
-    idx = POSITION_IDX.get(side, 0)
+    from . import learn_position_idx, position_idx
+    idx = position_idx(sym, side)
     try:
         order = bybit('POST', '/v5/order/create', {
             'category': 'linear', 'symbol': sym, 'side': side,
@@ -220,10 +220,16 @@ def execute_funding_entry(entry_info):
                 'slTriggerBy': 'MarkPrice', 'tpTriggerBy': 'MarkPrice',
                 'tpslMode': 'Full',
             }
+            learn_position_idx(sym, idx)
             ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
-            if ts_resp.get('retCode') != 0:
-                ret_msg = ts_resp.get('retMsg', '?')
-                log_event(f'⚠️ FUNDING {sym}: SL/TP не выставился — {ret_msg}')
+            if not ts_resp or ts_resp.get('retCode') != 0:
+                ret_msg = ts_resp.get('retMsg', '?') if ts_resp else 'no response'
+                log_event(f'⛔ FUNDING {sym}: SL/TP не выставился — {ret_msg}')
+                try:
+                    from .alerts import add_alert
+                    add_alert('SL', f'⛔ {sym}: FUNDING-позиция без SL/TP ({ret_msg})')
+                except Exception as e:  # noqa: BLE001 — алерт не должен ломать вход
+                    log_event(f'⚠️ FUNDING {sym}: add_alert упал — {e}')
             return True
         else:
             log_event(f'⚠️ FUNDING {sym}: {order.get("retMsg", "?")}')

@@ -262,6 +262,12 @@ def _calc_default_sl(sym: str, p: dict, is_long: bool, mark: float, entry: float
         atr = 0.0
 
     mult, lo, hi = _sl_params()
+    # Ликвидация лонга ≈ 1/lev − MMR: при 25x это −3.7%, а кламп 10% отправил бы
+    # стоп за цену ликвидации (пруф 10.11: BTC 74 385 → SL 66 960, liq 71 669).
+    lev = float(leverage or 0)
+    if lev > 0:
+        hi = min(hi, 0.8 / lev)
+        lo = min(lo, hi)
     if atr > 0 and entry > 0:
         dist = max(lo, min(hi, mult * atr / entry))
         if is_long:
@@ -270,9 +276,10 @@ def _calc_default_sl(sym: str, p: dict, is_long: bool, mark: float, entry: float
             target = round(entry * (1 + dist), 4)
         return target, f'ATR SL {dist*100:.1f}%'
 
-    # fallback: фикс −10% (нет ATR / ошибка сети)
+    # fallback: −10%, но не дальше ликвидации
+    dist = min(0.10, 0.8 / lev) if lev > 0 else 0.10
     if is_long:
-        target = round(entry * 0.90, 4)
+        target = round(entry * (1 - dist), 4)
     else:
-        target = round(entry * 1.10, 4)
-    return target, 'default -10%'
+        target = round(entry * (1 + dist), 4)
+    return target, f'default {"-" if is_long else "+"}{dist*100:.1f}%'
