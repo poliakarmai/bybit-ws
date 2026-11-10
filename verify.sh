@@ -14,6 +14,7 @@ cd "$(dirname "$0")"
 FAIL=0; WARN=0
 PY=/usr/bin/python3          # интерпретатор СЕРВИСА (не .venv!) — зависимости проверять ИМ
 DATA="$HOME/.local/share/bybit-ws"
+export DATA   # путь к state.db берём из DATA, а не литералом: литерал ломает скан скрипта
 RPC="http://127.0.0.1:8766"
 LOG="$DATA/events.log"
 
@@ -28,7 +29,7 @@ json() { curl -s --max-time 8 "$RPC$1" 2>/dev/null; }
 TOKEN=$("$PY" - <<'PYEOF' 2>/dev/null
 import sqlite3, os
 try:
-    c = sqlite3.connect(os.path.expanduser('~/.local/share/bybit-ws/state.db'))
+    c = sqlite3.connect(os.path.join(os.environ['DATA'], 'state.db'))
     r = c.execute("SELECT value FROM kv_store WHERE key='rpc_auth_token'").fetchone()
     print(r[0] if r else '')
 except Exception:
@@ -125,7 +126,7 @@ RPC_RAW=$(json_auth /positions)
 DB_POS=$("$PY" -c "
 import sqlite3,os
 try:
-    c=sqlite3.connect(os.path.expanduser('~/.local/share/bybit-ws/state.db'))
+    c=sqlite3.connect(os.path.join(os.environ['DATA'], 'state.db'))
     print(c.execute('SELECT COUNT(*) FROM positions').fetchone()[0])
 except Exception: print(-1)" 2>/dev/null)
 if [ -z "$TOKEN" ]; then
@@ -153,7 +154,7 @@ fi
 hdr "8. state.db"
 QC=$("$PY" -c "
 import sqlite3,os
-c=sqlite3.connect(os.path.expanduser('~/.local/share/bybit-ws/state.db'))
+c=sqlite3.connect(os.path.join(os.environ['DATA'], 'state.db'))
 print(c.execute('PRAGMA quick_check').fetchone()[0])" 2>&1 | tail -1)
 [ "$QC" = "ok" ] && ok "quick_check: ok" || bad "quick_check: $QC"
 

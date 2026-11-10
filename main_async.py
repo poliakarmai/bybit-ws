@@ -12,13 +12,11 @@ RPC-сервер — в отдельном потоке (как и раньше)
 """
 
 import asyncio
-import json
 import os
 import signal
-import sys
+import threading
 import time
 import traceback
-import threading
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -28,45 +26,51 @@ DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 HEALTH_FILE = DATA_DIR / "health.txt"
 
 # ── Импорты ──
-from . import EVENTS_LOG, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT
-from .config import Config
-from .alerts import log_event, add_alert, send_telegram_alert
-from .push_notifier import send_critical_alert, send_high_alert
-from .snapshot import save_json, load_json
+from . import ORDERS_SNAPSHOT, POSITIONS_SNAPSHOT
+from .alerts import add_alert, log_event, send_telegram_alert
 
 # Async API
 from .api import (
-    fetch_positions_and_orders,
     fetch_orders_async,
+    fetch_positions_and_orders,
     get_bb_data_async,
-    bybit_async,
 )
+from .config import Config
+from .push_notifier import send_critical_alert, send_high_alert
+from .snapshot import save_json
 
 # Async DB
-from .state_db import adb, StateDB
+from .state_db import StateDB, adb
+
 sync_db = StateDB()
 
 # Синхронные модули (вызываются через executor)
-from .unified_sl import manage_sl
-from .auto_tp import auto_take_profit, apply_auto_tp
-from .cleanup import report_expired_orders
-from .pump_detect import check_pumps, check_weekly_pumps
-from .overbought import check_overbought, check_overbought_async, rotate_watchlist
-from .correlation import check_correlation, tighten_correlation_sl
-from .funding_rotation import check_funding_rotation
-from .dca import check_dca
-from .reporting import should_send_summary, send_summary, check_profit_triggers
-from .auto_entry import auto_entry_scan, record_sl_hit
-from .auto_short import check_auto_short, check_junk_dca, check_short_time_sl, should_disable_short
-from .sl_reentry import notify_sl_hit, check_sl_reentry
-from .margin_alerts import check_margin_utilization
 from . import protections
-from .funding_entry import check_funding_signals, execute_funding_entry
+from .auto_entry import auto_entry_scan
+from .auto_short import (
+    check_auto_short,
+    check_junk_dca,
+    check_short_time_sl,
+    should_disable_short,
+)
+from .auto_tp import apply_auto_tp, auto_take_profit
 from .bb_scalp import check_scalp_signals, execute_scalp
+from .cleanup import report_expired_orders
+from .correlation import check_correlation
+from .dca import check_dca
+from .funding_entry import check_funding_signals, execute_funding_entry
+from .funding_rotation import check_funding_rotation
+from .margin_alerts import check_margin_utilization
 from .mean_revert import check_mean_revert, execute_mean_revert
+from .metrics import ensure_today, record_alert
+from .overbought import check_overbought_async, rotate_watchlist
 from .partial_tp import check_partial_tp
-from .metrics import record_alert, record_auto_entry, ensure_today
-from .risk_manager import check as risk_check, is_circuit_breaker_active
+from .pump_detect import check_pumps, check_weekly_pumps
+from .reporting import check_profit_triggers, send_summary, should_send_summary
+from .risk_manager import check as risk_check
+from .risk_manager import is_circuit_breaker_active
+from .sl_reentry import check_sl_reentry
+from .unified_sl import manage_sl
 
 # ── Константы ──
 SHUTDOWN = False
@@ -85,7 +89,7 @@ def _sync_manual_marks(positions):
     поставить, знает только биржа (createType=CreateByUser).
     """
     from .alerts import log_event
-    from .manual_positions import is_manual_position, mark_manual_position, entry_origin
+    from .manual_positions import entry_origin, is_manual_position, mark_manual_position
     for sym, p in (positions or {}).items():
         if is_manual_position(sym):
             continue
@@ -188,12 +192,19 @@ def classify_exit(exit_price, sl, tp, hold_hours, tol=SLTP_MATCH_TOL, exec_type=
 def _import_bybit_trades(data_dir):
     """Sync helper: import closed trades from Bybit API + dedup + canary tracking."""
     import json as _json
-    from .api import bybit
+
     from .alerts import log_event
+    from .api import bybit
+    from .journal.self_learn import (
+        match_canary_entry as _match_canary,
+    )
     from .journal.self_learn import (
         record_canary_result as _record_canary,
-        match_canary_entry as _match_canary,
-        record_exit as _record_exit,        # NEW v4
+    )
+    from .journal.self_learn import (
+        record_exit as _record_exit,  # NEW v4
+    )
+    from .journal.self_learn import (
         record_trade_result as _record_streak,  # NEW v4
     )
     trades_file = data_dir / 'trades.jsonl'
@@ -253,7 +264,10 @@ def _import_bybit_trades(data_dir):
                     try:
                         diag = sync_db.get_entry_diagnostic_for_close(sym, closing_side) or {}
                         try:
-                            from .manual_positions import is_manual_position, entry_origin
+                            from .manual_positions import (
+                                entry_origin,
+                                is_manual_position,
+                            )
                             _manual = 1 if is_manual_position(sym, include_closed=True) else 0
                             # Ордер входа решает: если он без нашего префикса —
                             # вход ручной, чья бы метка ни лежала в pumps.json.
@@ -319,7 +333,9 @@ def _import_bybit_trades(data_dir):
                                 log_event(f'⏭ self-learn: {sym} без валидного hold — micro-update пропущен')
                             else:
                                 try:
-                                    from .journal.self_learn import on_trade_closed as _micro_update
+                                    from .journal.self_learn import (
+                                        on_trade_closed as _micro_update,
+                                    )
                                     _micro_update(sym, side, pnl, hold_h, exit_reason)
                                 except Exception as e:
                                     log_event(f'⚠️ self-learn micro-update failed for {sym}: {e}')
@@ -495,8 +511,10 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
     Возвращает (positions, orders, new_last_rest_sync).
     """
     from .ws_client import (
-        is_full_enabled, is_private_connected, is_private_stale,
-        get_all_positions, get_executions,
+        get_all_positions,
+        is_full_enabled,
+        is_private_connected,
+        is_private_stale,
     )
 
     if is_full_enabled() and is_private_connected() and not is_private_stale(120):
@@ -776,7 +794,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             if isinstance(item, Exception):
                 log_event(f'⚠️ heavy task {i} failed: {item}')
                 continue
-            result, err = item if isinstance(item, tuple) else (item, None)
+            _result, err = item if isinstance(item, tuple) else (item, None)
             if err:
                 log_event(f'⏱️ heavy task {i}: timeout — {err}')
 
@@ -823,7 +841,7 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
     # ── Auto-TP: ATR-based тейк-профиты ──
     try:
-        tp_actions, tp_err = await run_in_thread(auto_take_profit, positions or {}, orders or {})
+        tp_actions, _tp_err = await run_in_thread(auto_take_profit, positions or {}, orders or {})
         if tp_actions:
             await run_in_thread(apply_auto_tp, tp_actions)
     except Exception as e:
@@ -839,8 +857,6 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
 async def async_main_loop():
     """Async главный цикл — замена main_loop()."""
-    global SHUTDOWN
-
     cfg = Config()
     CYCLE_SECONDS = cfg.monitor.cycle_seconds
     HEAVY_CYCLE = cfg.monitor.heavy_cycle
@@ -851,7 +867,7 @@ async def async_main_loop():
     _REST_SYNC_INTERVAL = 60.0  # REST-сверка раз в 60 сек
 
     log_event('🚀 Async main loop v2 started' + (' [WS FULL]' if _WS_FULL_ENABLED else ''))
-    print(f"[{datetime.now():%H:%M:%S}] 🚀 Async main loop: cycle={CYCLE_SECONDS}s heavy={HEAVY_CYCLE}"
+    print(f"[{datetime.now().astimezone():%H:%M:%S}] 🚀 Async main loop: cycle={CYCLE_SECONDS}s heavy={HEAVY_CYCLE}"
           + (' WS_FULL=ON' if _WS_FULL_ENABLED else ''))
 
     # ── Инициализация метрик за сегодня ──
@@ -867,7 +883,7 @@ async def async_main_loop():
             optuna_p = load_optuna_params()
             if optuna_p:
                 log_event(f'📊 Optuna ENABLED: {len(optuna_p)} symbols loaded')
-                print(f'[{datetime.now():%H:%M:%S}] 📊 Optuna: {len(optuna_p)} symbols with tuned params')
+                print(f'[{datetime.now().astimezone():%H:%M:%S}] 📊 Optuna: {len(optuna_p)} symbols with tuned params')
             else:
                 log_event('📊 Optuna ENABLED but no params found — run optuna_tuner first')
         except Exception as e:
@@ -890,7 +906,7 @@ async def async_main_loop():
     # RPC — запускаем в отдельном потоке (как в main.py)
     rpc_thread = None
     try:
-        from .rpc import start_rpc_server, rpc_state
+        from .rpc import start_rpc_server
         rpc_bind = cfg.rpc.bind
         rpc_port = cfg.rpc.port
         rpc_thread = threading.Thread(
@@ -906,14 +922,15 @@ async def async_main_loop():
     # WebSocket push-сервер для real-time дашборда (:8767)
     try:
         from .rpc import start_ws_server
-        ws_push_thread = start_ws_server(port=8768, bind='127.0.0.1')
+        start_ws_server(port=8768, bind='127.0.0.1')
         log_event('📡 WebSocket push server on 127.0.0.1:8768 (real-time dashboard)')
     except Exception as e:
         log_event(f'⚠️ WS push server start error: {e}')
 
     # WebSocket — в потоке (публичный + приватный при BYBIT_WS_FULL_ENABLED=1)
     try:
-        from .ws_client import start as ws_start, is_full_enabled as ws_full
+        from .ws_client import is_full_enabled as ws_full
+        from .ws_client import start as ws_start
         ws_thread = threading.Thread(target=ws_start, daemon=True)
         ws_thread.start()
         if ws_full():
@@ -951,7 +968,7 @@ async def async_main_loop():
                 )
                 prev_positions, prev_orders = dict(new_positions), dict(new_orders)
                 _pending_reconcile(new_positions)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Пустой снапшот = слепой цикл (manage_sl/auto_tp не увидят позиций) — держим прошлый.
                 log_event(f'⚠️ positions snapshot TIMEOUT (20s) — прошлый снапшот ({len(prev_positions)} поз.)')
                 new_positions, new_orders = dict(prev_positions), dict(prev_orders)
@@ -961,7 +978,8 @@ async def async_main_loop():
 
             # ── Обновляем RPC-состояние ──
             try:
-                from .rpc import rpc_state as _rpc_state, update_health as _rpc_health
+                from .rpc import rpc_state as _rpc_state
+                from .rpc import update_health as _rpc_health
                 _rpc_health(alive=True, cycle_count=cycle)
                 _rpc_state['alive'] = True
                 _rpc_state['cycle_count'] = cycle
@@ -995,7 +1013,7 @@ async def async_main_loop():
 
                 # ── V10: Time exit — закрыть позиции-зомби (каждый цикл) ──
                 try:
-                    from .time_exit import check_time_exit, apply_time_exits
+                    from .time_exit import apply_time_exits, check_time_exit
                     stale, _ = await run_in_thread(check_time_exit, new_positions, new_orders)
                     if stale:
                         result, _ = await run_in_thread(apply_time_exits, stale)
@@ -1016,7 +1034,7 @@ async def async_main_loop():
                         send_telegram_alert(msg, level='STOP')
 
             # ── Risk Manager: circuit breaker check (каждый цикл) ──
-            risk_result, risk_err = await run_in_thread(
+            risk_result, _risk_err = await run_in_thread(
                 risk_check, new_positions or {}
             )
             if isinstance(risk_result, tuple) and len(risk_result) == 2:
@@ -1057,7 +1075,8 @@ async def async_main_loop():
             # ── A/B-тест: логирование статуса (каждые 10 циклов) ──
             if cycle % 10 == 0:
                 try:
-                    from .ab_test import is_ab_enabled, get_status as _ab_status
+                    from .ab_test import get_status as _ab_status
+                    from .ab_test import is_ab_enabled
                     if is_ab_enabled():
                         ab = _ab_status()
                         if isinstance(ab, dict) and (ab.get('significance') or {}).get('verdict', '') not in ('', 'недостаточно данных'):
@@ -1071,11 +1090,15 @@ async def async_main_loop():
             try:
                 from .journal.self_learn import (
                     apply_journal_insights as _apply_insights,
-                    should_run_self_learn_v6 as _should_learn,
+                )
+                from .journal.self_learn import (
                     mark_self_learn_run as _mark_learn,
                 )
+                from .journal.self_learn import (
+                    should_run_self_learn_v6 as _should_learn,
+                )
             except ImportError:
-                _should_learn = lambda: cycle % 720 == 1
+                _should_learn = lambda c=cycle: c % 720 == 1
                 _mark_learn = lambda: None
                 _apply_insights = None
 
@@ -1132,14 +1155,19 @@ async def async_main_loop():
 
                     # ── NEW v7-10: composite score + stress test + v10 features ──
                     try:
-                        from .journal.self_learn import (
-                            composite_score_v8, weighted_composite_score, causal_analysis,
-                            stress_test_params, get_params_for_regime,
-                            monte_carlo_stress_test, monte_carlo_stress_test_v9,
-                            detect_anomalous_trades, save_params_version,
-                        )
                         # Загружаем сырые трейды из SQLite (с pnl!)
                         import sqlite3 as _sql_raw
+
+                        from .journal.self_learn import (
+                            causal_analysis,
+                            composite_score_v8,
+                            detect_anomalous_trades,
+                            get_params_for_regime,
+                            monte_carlo_stress_test_v9,
+                            save_params_version,
+                            stress_test_params,
+                            weighted_composite_score,
+                        )
                         raw_db = Path.home() / ".local" / "share" / "bybit-ws" / "state.db"
                         raw_trades = []
                         if raw_db.exists():
@@ -1198,7 +1226,10 @@ async def async_main_loop():
 
                     # ── V9: ensemble bandit status ──
                     try:
-                        from .journal.self_learn import load_ensemble, get_regime_drift_detector
+                        from .journal.self_learn import (
+                            get_regime_drift_detector,
+                            load_ensemble,
+                        )
                         ensemble = load_ensemble()
                         best_all = ensemble.get_all_best()
                         for regime, best in best_all.items():
