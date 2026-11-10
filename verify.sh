@@ -105,9 +105,25 @@ fi
 # ── 6. Свежесть данных ───────────────────────────────────────────────────
 hdr "6. Свежесть данных"
 now=$(date +%s)
+# correlation.json пишется только при ≥2 позициях (иначе пар не существует и
+# check_correlation выходит раньше записи) — «устарел» на 1 позиции это ложняк.
+POS_N=$("$PY" - <<'PYEOF' 2>/dev/null
+import os, sqlite3
+try:
+    c = sqlite3.connect(os.path.join(os.environ['DATA'], 'state.db'))
+    print(c.execute('SELECT count(*) FROM positions').fetchone()[0])
+except Exception:
+    print(0)
+PYEOF
+)
+POS_N=${POS_N:-0}
 for f in correlation.json:900 positions.json:300; do
     name=${f%%:*}; max=${f##*:}
     p="$DATA/$name"
+    if [ "$name" = "correlation.json" ] && [ "$POS_N" -lt 2 ]; then
+        ok "$name не актуален: позиций $POS_N (<2), пары не считаются"
+        continue
+    fi
     if [ ! -f "$p" ]; then
         warn "$name отсутствует"
         continue
@@ -165,7 +181,9 @@ if [ -f "$LOG" ]; then
     # (до фикса) висят в логе весь день и держат ложный warning.
     SINCE=$(date -d "$(systemctl --user show bybit-ws-async -p ActiveEnterTimestamp --value 2>/dev/null)" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
     [ -n "$SINCE" ] || SINCE="$(date '+%Y-%m-%d') 00:00:00"
-    ERR=$(awk -v since="$SINCE" '{ts=substr($0,2,19); if (ts>=since && tolower($0) ~ /traceback|critical|❌/) n++} END{print n+0}' "$LOG" 2>/dev/null)
+    # Строки без ведущего "[timestamp]" (продолжения traceback) substr превращал в
+    # мусорные "даты" вроде "raceback (most rec", и они проходили сравнение ts>=since.
+    ERR=$(awk -v since="$SINCE" '{ts=substr($0,2,19); if (ts ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] / && ts>=since && tolower($0) ~ /traceback|critical|❌/) n++} END{print n+0}' "$LOG" 2>/dev/null)
     ERR=${ERR:-0}
     if [ "$ERR" -eq 0 ]; then
         ok "нет ошибок/traceback с $SINCE"
