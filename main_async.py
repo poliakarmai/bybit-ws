@@ -470,18 +470,18 @@ async def async_positions_snapshot():
         log_event(f'⚠️ async fetch_positions error: {e}')
         return {}, {}
 
-    # Сохраняем снепшоты
-    if positions:
-        await asyncio.get_event_loop().run_in_executor(
-            None, save_json, POSITIONS_SNAPSHOT, positions
-        )
-        await asyncio.get_event_loop().run_in_executor(
-            None, sync_db.save_positions, positions
-        )
-    if orders:
-        await asyncio.get_event_loop().run_in_executor(
-            None, save_json, ORDERS_SNAPSHOT, orders
-        )
+    # Сохраняем снепшоты ВСЕГДА, включая пустой dict: «позиций нет» — тоже факт.
+    # Гвард `if positions:` оставлял закрытые позиции в state.db навсегда, и
+    # /positions показывал фантомы (10.11: GRAM/LTC после закрытия, 0 на бирже).
+    await asyncio.get_event_loop().run_in_executor(
+        None, save_json, POSITIONS_SNAPSHOT, positions
+    )
+    await asyncio.get_event_loop().run_in_executor(
+        None, sync_db.save_positions, positions
+    )
+    await asyncio.get_event_loop().run_in_executor(
+        None, save_json, ORDERS_SNAPSHOT, orders
+    )
 
     return positions, orders
 
@@ -518,25 +518,25 @@ async def async_positions_snapshot_ws(last_rest_sync: float, rest_interval: floa
         if now - last_rest_sync > rest_interval:
             try:
                 rest_positions, rest_orders = await fetch_positions_and_orders()
-                if rest_positions:
-                    # Сохраняем снепшоты
-                    await asyncio.get_event_loop().run_in_executor(
-                        None, save_json, POSITIONS_SNAPSHOT, rest_positions
-                    )
-                    await asyncio.get_event_loop().run_in_executor(
-                        None, sync_db.save_positions, rest_positions
-                    )
-                    # Сверяем: если REST отличается → логируем, но используем REST
-                    ws_keys = set(positions.keys())
-                    rest_keys = set(rest_positions.keys())
-                    if ws_keys != rest_keys:
-                        log_event(f'🔄 WS/REST desync: WS={ws_keys} REST={rest_keys}')
-                        positions = rest_positions
-                    orders = rest_orders if rest_orders else orders
-                    if rest_orders:
-                        _ORDERS_CACHE.clear()
-                        _ORDERS_CACHE.update(rest_orders)
-                    new_last_rest_sync = now
+                # Пустой dict — валидный ответ «позиций нет»: снимок и state.db
+                # обновляем всегда, иначе закрытая позиция живёт в БД вечно.
+                await asyncio.get_event_loop().run_in_executor(
+                    None, save_json, POSITIONS_SNAPSHOT, rest_positions
+                )
+                await asyncio.get_event_loop().run_in_executor(
+                    None, sync_db.save_positions, rest_positions
+                )
+                # Сверяем: если REST отличается → логируем, но используем REST
+                ws_keys = set(positions.keys())
+                rest_keys = set(rest_positions.keys())
+                if ws_keys != rest_keys:
+                    log_event(f'🔄 WS/REST desync: WS={ws_keys} REST={rest_keys}')
+                    positions = rest_positions
+                orders = rest_orders if rest_orders else orders
+                if rest_orders:
+                    _ORDERS_CACHE.clear()
+                    _ORDERS_CACHE.update(rest_orders)
+                new_last_rest_sync = now
             except Exception as e:
                 log_event(f'⚠️ WS REST sync error: {e}')
 

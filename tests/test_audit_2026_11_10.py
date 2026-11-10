@@ -186,3 +186,32 @@ def test_auto_short_state_does_not_claim_sl_on_reject():
     src = (ROOT / "auto_short.py").read_text()
     assert "state_entry['no_sl'] = not ts_ok" in src
     assert src.count("state_entry['no_sl'] = not ts_ok") == 2
+
+
+def test_empty_positions_snapshot_clears_db(monkeypatch):
+    """Закрытая позиция должна исчезать из state.db: пустой снимок — тоже факт."""
+    import asyncio
+    from bybit_ws import main_async as ma
+
+    saved = []
+
+    class FakeDB:
+        def save_positions(self, positions):
+            saved.append(positions)
+
+    async def fake_fetch():
+        return {}, {}
+
+    monkeypatch.setattr(ma, "fetch_positions_and_orders", fake_fetch)
+    monkeypatch.setattr(ma, "sync_db", FakeDB())
+    monkeypatch.setattr(ma, "save_json", lambda path, data: None)
+
+    # не asyncio.run: он закрывает loop и ломает тесты, живущие на get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(ma.async_positions_snapshot())
+    finally:
+        loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    assert saved == [{}], f"пустой снимок не дошёл до БД (фантомные позиции): {saved}"
