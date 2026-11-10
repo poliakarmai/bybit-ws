@@ -161,8 +161,8 @@ def execute_mean_revert(entry_info):
     except Exception as e:
         log_event(f'⚠️ mean_revert: {e}')
 
-    from . import POSITION_IDX
-    idx = POSITION_IDX.get(side, 0)
+    from . import position_idx
+    idx = position_idx(sym, side)
     try:
         order = bybit('POST', '/v5/order/create', {
             'category': 'linear', 'symbol': sym, 'side': side,

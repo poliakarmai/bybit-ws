@@ -47,7 +47,7 @@ import time
 from .api import bybit, account_wallet, get_bb_data, fetch_orders, set_leverage, verify_leverage
 from .alerts import log_event, add_alert
 from .config import Config
-from . import DATA_DIR
+from . import DATA_DIR, learn_position_idx, position_idx
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -684,6 +684,7 @@ def check_auto_short(positions):
                 log_event(f'⚠️ Auto-SHORT {sym}: ошибка — {order.get("retMsg","?") if order else "no response"}')
                 continue
             # ── Сверка фактического плеча (mismatch → алерт) ──
+            learn_position_idx(sym, pos_idx)
             verify_leverage(sym, SHORT_LEVERAGE)
 
             # ── Canary: маркируем SHORT-вход для матчинга при закрытии ──
@@ -737,18 +738,24 @@ def check_auto_short(positions):
                 ts_body = {
                     'category': 'linear',
                     'symbol': sym,
-                    'positionIdx': 0,
+                    'positionIdx': position_idx(sym, 'Sell'),
                     'stopLoss': str(sl_price),
                     'slTriggerBy': 'MarkPrice',
                 }
                 if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
                     ts_body['takeProfit'] = str(tp_price)
                     ts_body['tpTriggerBy'] = 'MarkPrice'
-                bybit('POST', '/v5/position/trading-stop', ts_body)
-
-                state_entry['no_sl'] = False
-                state_entry['sl'] = sl_price
-                state_entry['tp'] = tp_price
+                ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
+                ts_ok = bool(ts_resp) and ts_resp.get('retCode') == 0
+                if not ts_ok:
+                    msg = ts_resp.get('retMsg', '?') if ts_resp else 'no response'
+                    log_event(f'⛔ TRADING-STOP {sym}: {msg} — позиция без SL/TP')
+                    add_alert('SL', f'⛔ {sym}: trading-stop отклонён ({msg})')
+                # state не должен врать: no_sl=True, если биржа стоп не приняла
+                state_entry['no_sl'] = not ts_ok
+                if ts_ok:
+                    state_entry['sl'] = sl_price
+                    state_entry['tp'] = tp_price
                 state_entry['pump_pct'] = round(chg_pct * 100, 1)
                 state_entry['dca_levels'] = []      # мартингейл отключён (риск-фикс)
                 state_entry['dca_placed'] = []
@@ -780,7 +787,7 @@ def check_auto_short(positions):
                 ts_body = {
                     'category': 'linear',
                     'symbol': sym,
-                    'positionIdx': 0,
+                    'positionIdx': position_idx(sym, 'Sell'),
                 }
                 if tp_price < price:  # для шорта TP должен быть НИЖЕ входа
                     ts_body['takeProfit'] = str(tp_price)
@@ -791,12 +798,16 @@ def check_auto_short(positions):
                 # но auto_sl в async-цикле не вызывается, позиция висела без SL.
                 ts_body['stopLoss'] = str(sl_price)
                 ts_body['slTriggerBy'] = 'MarkPrice'
-                state_entry['no_sl'] = False
-                
-                bybit('POST', '/v5/position/trading-stop', ts_body)
-
-                state_entry['sl'] = sl_price
-                state_entry['tp'] = tp_price
+                ts_resp = bybit('POST', '/v5/position/trading-stop', ts_body)
+                ts_ok = bool(ts_resp) and ts_resp.get('retCode') == 0
+                if not ts_ok:
+                    msg = ts_resp.get('retMsg', '?') if ts_resp else 'no response'
+                    log_event(f'⛔ TRADING-STOP {sym}: {msg} — позиция без SL/TP')
+                    add_alert('SL', f'⛔ {sym}: trading-stop отклонён ({msg})')
+                state_entry['no_sl'] = not ts_ok
+                if ts_ok:
+                    state_entry['sl'] = sl_price
+                    state_entry['tp'] = tp_price
 
                 state[sym] = state_entry
                 _save_state(state)

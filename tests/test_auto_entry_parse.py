@@ -29,22 +29,26 @@ def test_short_line_returns_empty(ae):
     assert ae._parse_ticker_line('SOLUSDT 1.5') == {}
 
 
-def test_corr_sizing_halves_size(ae):
+def test_corr_sizing_halves_size(ae, monkeypatch):
     """r>0.70 → corr_sizer=0.5 реально режет маржу и количество (было: только лог)."""
-    margin, qty = ae._apply_corr_sizing(100.0, 30, 0.5, 10.0, 3)
+    from bybit_ws import auto_tp
+    monkeypatch.setattr(auto_tp, "_get_qty_limits", lambda s: (1.0, 1.0))
+    margin, qty = ae._apply_corr_sizing(100.0, 30, 0.5, 10.0, 3, "SOLUSDT")
     assert margin == pytest.approx(50.0)
     assert qty == 15, f'половина от 30, получили {qty}'
 
 
 def test_corr_sizing_no_op(ae):
     """Без корреляции размер не меняется."""
-    assert ae._apply_corr_sizing(100.0, 30, 1.0, 10.0, 3) == (100.0, 30)
+    assert ae._apply_corr_sizing(100.0, 30, 1.0, 10.0, 3, "SOLUSDT") == (100.0, 30)
 
 
-def test_corr_sizing_never_zero_qty(ae):
-    """Урезанная маржа не превращается в нулевой ордер."""
-    _, qty = ae._apply_corr_sizing(0.5, 2, 0.5, 10.0, 3)
-    assert qty >= 1
+def test_corr_sizing_never_rounds_up_to_one_coin(ae, monkeypatch):
+    """Урезанная маржа не превращается в «1 целую монету» (прод-баг: 1 BTC на $5)."""
+    from bybit_ws import auto_tp
+    monkeypatch.setattr(auto_tp, "_get_qty_limits", lambda s: (0.001, 0.001))
+    _, qty = ae._apply_corr_sizing(0.5, 2, 0.5, 74385.0, 3, "BTCUSDT")
+    assert qty is None  # ниже minOrderQty → вход пропускается, а не 1 BTC
 
 
 def test_valid_line_parsed(ae):

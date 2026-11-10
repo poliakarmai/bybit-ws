@@ -28,8 +28,14 @@ def locked_open(path: str, mode: str = 'w'):
                 yield f
             finally:
                 f.close()
+        elif 'a' in mode:
+            # Append пишем прямо в целевой файл: tempfile+os.replace обнулял его
+            # (аудит 10.11: safe_json_append x3 → 1 строка).
+            with open(path, mode) as f:
+                yield f
+                f.flush()
+                os.fsync(f.fileno())
         else:
-            # Запись: атомарно через временный файл
             dirname = os.path.dirname(path) or '.'
             with tempfile.NamedTemporaryFile(mode=mode, dir=dirname, delete=False, suffix='.tmp') as tf:
                 tmp_path = tf.name

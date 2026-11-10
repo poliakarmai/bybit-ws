@@ -320,7 +320,7 @@ def check_pumps(positions=None):
             if sym not in live_syms and active_pump_shorts < MAX_PUMP_SHORTS and sym not in ONE_WAY:
                 vol_ok, vol_detail = _confirm_volume_spike(sym)
                 if vol_ok:
-                    if _place_pump_short(sym, last_price, 'init', prev, last_price):
+                    if _place_pump_short(sym, last_price, 'init', state, last_price):
                         alerts.append(f'🐻 Pump-SHORT {sym}: вход #1 @ ${last_price:.4f} ({vol_detail})')
                         active_pump_shorts += 1
                 else:
@@ -344,7 +344,7 @@ def check_pumps(positions=None):
                     and sym not in ONE_WAY):
                 vol_ok, vol_detail = _confirm_volume_spike(sym)
                 if vol_ok:
-                    if _place_pump_short(sym, last_price, level_label, prev, prev_peak):
+                    if _place_pump_short(sym, last_price, level_label, state, prev_peak):
                         alerts.append(f'🐻 Pump-DCA {sym}: уровень #{dca_level} @ ${last_price:.4f} ({vol_detail})')
                         active_pump_shorts += 1
                 else:

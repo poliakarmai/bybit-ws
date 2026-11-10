@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 
 from .api import bybit
+from .alerts import log_event
 from .file_utils import safe_json_write
 
 # Cache: avoid calling API too often
