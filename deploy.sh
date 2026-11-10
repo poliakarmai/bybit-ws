@@ -32,6 +32,7 @@ python3 test_smoke.py || {
 
 # ── 4. Graceful рестарт ──
 echo "🔄 Рестарт сервиса..."
+START_TS=$(date +%s)
 systemctl --user stop bybit-ws-async
 for i in $(seq 1 10); do
     systemctl --user is-active bybit-ws-async > /dev/null 2>&1 || break
@@ -45,8 +46,16 @@ systemctl --user is-active bybit-ws-async > /dev/null 2>&1 && {
 systemctl --user start bybit-ws-async
 sleep 5
 
-# ── 5. Canary monitoring ──
+# Ждём первую запись health.txt от НОВОГО процесса: после рестарта файл держит
+# mtime прошлого запуска, а cold start (LSTM/torch) пишет первый health через
+# 60-90с — canary падал на 62с, хотя сервис жив (10.11.2026).
 HEALTH_FILE=~/.local/share/bybit-ws/health.txt
+for _ in $(seq 1 60); do
+    [ "$(stat -c %Y "$HEALTH_FILE" 2>/dev/null || echo 0)" -ge "$START_TS" ] && break
+    sleep 3
+done
+
+# ── 5. Canary monitoring ──
 MAX_CHECKS=8
 MAX_HEALTH_AGE=60
 
