@@ -143,7 +143,6 @@ def auto_tune_symbol(symbol: str, trades: list):
         return  # недостаточно данных
 
     wins = [t for t in trades if t.get("pnl", 0) > 0]
-    losses = [t for t in trades if t.get("pnl", 0) <= 0]
     wr = len(wins) / len(trades) if trades else 0
     avg_hold = sum(t.get("hold_hours", 0) for t in trades) / len(trades)
     total_pnl = sum(t.get("pnl", 0) for t in trades)
@@ -198,7 +197,7 @@ def record_exit(symbol: str, side: str, pnl: float, reason: str,
     except Exception as e:
         logger.warning(f"exit_stats: {e}")
 
-def get_exit_stats(symbol: str = None, days: int = 30) -> dict:
+def get_exit_stats(symbol: str | None = None, days: int = 30) -> dict:
     """Статистика причин закрытия."""
     if not EXIT_STATS.exists():
         return {"total": 0, "reasons": {}, "symbols": {}}
@@ -419,7 +418,7 @@ def should_use_canary() -> bool:
     return random.random() < CANARY_ENTRY_PCT
 
 def get_canary_param(param_name: str, baseline_value: Any,
-                     symbol: str = None, side: str = None) -> Any:
+                     symbol: str | None = None, side: str | None = None) -> Any:
     """v4: проверяет symbol_params, session_params, затем общие params."""
     if not should_use_canary():
         return baseline_value
@@ -457,7 +456,7 @@ def mark_canary_entry(symbol: str, side: str, entry_ts: float):
             logger.warning(f"canary mark entry: {e}")
 
 def match_canary_entry(symbol: str, side: str, close_ts: float,
-                       window: int = None) -> bool:
+                       window: int | None = None) -> bool:
     if window is None:
         window = CANARY_MATCH_WINDOW
     with _entries_lock:
@@ -483,7 +482,6 @@ def match_canary_entry(symbol: str, side: str, close_ts: float,
                 matched = True
             else:
                 kept.append(line)
-        now = time.time()
         kept = [l for l in kept if _entry_age(l) < CANARY_WINDOW_HOURS * 3600 or _entry_age(l) < 0]
         try:
             CANARY_ENTRIES.write_text("\n".join(kept) + ("\n" if kept else ""))
@@ -679,7 +677,6 @@ async def apply_journal_insights(journal: JournalResult, cfg) -> dict:
     for sym, stats in per_symbol.items():
         sym_trades = stats.get("total_trades", 0)
         sym_wr = stats.get("win_rate", 0.5)
-        sym_pnl = stats.get("total_pnl", 0)
         sym_hold = stats.get("avg_hold_hours", 24)
 
         if sym_trades < 5:  # NEW: снижен порог с 8 до 5
@@ -896,7 +893,7 @@ def mark_self_learn_run():
 # 6. REGIME-AWARE ANALYSIS (v5)
 # ══════════════════════════════════════════════════════
 
-def get_regime_aware_stats(db_path: str = None) -> dict:
+def get_regime_aware_stats(db_path: str | None = None) -> dict:
     """Статистика сделок с разбивкой по рыночному режиму на момент входа.
 
     Читает trade_history и LSTM-кеш чтобы понять в каком режиме были входы.
@@ -994,7 +991,7 @@ def _get_symbol_cluster(symbol: str) -> str:
     return "unknown"
 
 
-def get_cluster_stats(db_path: str = None) -> dict:
+def get_cluster_stats(db_path: str | None = None) -> dict:
     """Статистика сделок с группировкой по кластерам волатильности.
 
     Когда на отдельный символ < 5 сделок — агрегируем по кластеру.
@@ -1112,7 +1109,6 @@ def analyze_sl_exits(trades: list) -> str:
         return 'NORMAL'
 
     quick_sl = [t for t in sl_exits if getattr(t, 'hold_hours', 0) < 0.5]
-    normal_sl = [t for t in sl_exits if 0.5 <= getattr(t, 'hold_hours', 0) < 4]
     slow_sl = [t for t in sl_exits if getattr(t, 'hold_hours', 0) >= 4]
 
     total = len(sl_exits)
@@ -1270,7 +1266,7 @@ def check_global_rollback(current_wr: float, window_hours: int = 48,
 FILTER_NAMES = ['MTF', 'Orderbook', 'Volume', 'EntryJudge', 'Correlation']
 
 
-def track_filter_performance(db_path: str = None) -> dict:
+def track_filter_performance(db_path: str | None = None) -> dict:
     """Анализ вклада каждого фильтра в WR.
 
     Для каждого фильтра сравнивает WR сделок где фильтр pass vs fail.
@@ -1354,8 +1350,8 @@ def calculate_wr_with_ci(wins: int, total: int) -> tuple:
 # V6: WALK-FORWARD VALIDATION
 # ══════════════════════════════════════════════════════
 
-def walk_forward_validation(new_params: dict, historical_trades: list = None,
-                             db_path: str = None) -> dict:
+def walk_forward_validation(new_params: dict, historical_trades: list | None = None,
+                             db_path: str | None = None) -> dict:
     """Проверить новые параметры на исторических данных (70/30 split).
 
     Returns: {approved: bool, current_wr: float, simulated_wr: float, ...}
@@ -1586,7 +1582,7 @@ def save_regime_params(params: dict):
     REGIME_PARAMS_PATH.write_text(json.dumps(params, indent=2))
 
 
-def get_params_for_regime(regime: str = None) -> dict:
+def get_params_for_regime(regime: str | None = None) -> dict:
     """Получить параметры для текущего (или указанного) режима."""
     if regime is None:
         # Авто-определение из LSTM кеша
@@ -1656,7 +1652,7 @@ STRESS_SCENARIOS = [
 ]
 
 
-def stress_test_params(params: dict, trades: list = None) -> dict:
+def stress_test_params(params: dict, trades: list | None = None) -> dict:
     """Проверить параметры на стресс-сценариях.
 
     Симулирует: что было бы с текущими позициями и параметрами в каждом кризисе.
@@ -1677,7 +1673,6 @@ def stress_test_params(params: dict, trades: list = None) -> dict:
     for scenario in STRESS_SCENARIOS:
         # Симулируем влияние на позиции
         simulated_dd = 0
-        pos_count = len(current_positions) if current_positions else 7
 
         if current_positions:
             for pos in current_positions:
@@ -1719,7 +1714,7 @@ def stress_test_params(params: dict, trades: list = None) -> dict:
 # V7: DRAWDOWN-BASED LEARNING
 # ══════════════════════════════════════════════════════
 
-def drawdown_adjustment(current_dd_pct: float = None) -> dict:
+def drawdown_adjustment(current_dd_pct: float | None = None) -> dict:
     """Адаптивные параметры в зависимости от текущей просадки.
 
     current_dd_pct: 0.05 = 5% drawdown, -0.05 = 5% profit.
@@ -1741,7 +1736,6 @@ def drawdown_adjustment(current_dd_pct: float = None) -> dict:
             for p in reversed(pnls):
                 cumulative += p
                 peak = max(peak, cumulative)
-            total_pnl = sum(pnls)
             current_dd_pct = (peak - cumulative) / abs(peak) if peak > 0 else 0
         except Exception:
             current_dd_pct = 0
@@ -1830,7 +1824,7 @@ class ParameterBandit:
     Автоматически балансирует exploration vs exploitation.
     """
 
-    def __init__(self, param_sets: list = None):
+    def __init__(self, param_sets: list | None = None):
         """
         Args:
             param_sets: [{min_score: 25, sl_pct: 5}, {min_score: 30, sl_pct: 4}, ...]
@@ -1925,13 +1919,12 @@ def monte_carlo_stress_test(params: dict, n_simulations: int = 1000,
 
     sl_pct = params.get("sl_pct", 5)
     max_pos = params.get("max_positions", 7)
-    tp_mult = params.get("tp_mult", 1.0)
 
     for _ in range(n_simulations):
         # Случайный crash-профиль
         btc_drop = _random.uniform(0.20, 0.60)       # BTC: -20% to -60%
         alt_drop = btc_drop * _random.uniform(1.2, 2.0)  # Alts: 1.2x-2x BTC
-        duration_h = _random.uniform(1, 72)            # 1-72ч
+        _duration_h = _random.uniform(1, 72)           # 1-72ч (RNG-вызов сохранён)
         vol_spike = _random.uniform(2.0, 8.0)          # 2x-8x волатильность
 
         # Симуляция: каждая позиция теряет min(SL%, alt_drop * vol_factor)
@@ -2129,7 +2122,7 @@ COMPOSITE_WEIGHTS = {
 }
 
 
-def composite_score_v8(trades: list, regime: str = None) -> dict:
+def composite_score_v8(trades: list, regime: str | None = None) -> dict:
     """Composite score с адаптивными весами по режиму рынка."""
     if regime is None:
         regime = "RANGING"
@@ -2207,7 +2200,7 @@ def composite_score_v8(trades: list, regime: str = None) -> dict:
 PARAMS_HISTORY_DIR = DATA_DIR / "params_history"
 
 
-def save_params_version(params: dict, reason: str, parent_version: str = None) -> str:
+def save_params_version(params: dict, reason: str, parent_version: str | None = None) -> str:
     """Сохранить снепшот параметров как версию."""
     PARAMS_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2264,7 +2257,7 @@ class DynamicParameterBandit:
     Каждые 24ч: удаляет 2 худшие руки, добавляет 2 вариации лучшей.
     """
 
-    def __init__(self, base_params: dict = None, n_arms: int = 5):
+    def __init__(self, base_params: dict | None = None, n_arms: int = 5):
         import random as _random
         if base_params is None:
             base_params = {"min_score": 30, "sl_pct": 5.0, "tp_mult": 1.2}
@@ -2575,7 +2568,7 @@ class ParameterEnsemble:
             for regime in self.REGIMES
         }
 
-    def select_params(self, regime: str = None) -> tuple:
+    def select_params(self, regime: str | None = None) -> tuple:
         """Выбрать параметры для текущего режима."""
         if regime is None or regime not in self.bandits:
             regime = "RANGING"
@@ -2615,7 +2608,7 @@ def save_ensemble(ensemble: ParameterEnsemble):
     ENSEMBLE_PATH.write_text(json.dumps(ensemble.to_dict(), indent=2))
 
 
-def pick_bandit_params(regime: str = None) -> tuple:
+def pick_bandit_params(regime: str | None = None) -> tuple:
     """Thompson: sample arm для входа → (params, arm_idx).
 
     Вызывается в entry-path; выбранную руку ОБЯЗАТЕЛЬНО записать
@@ -2685,7 +2678,7 @@ def load_ensemble() -> ParameterEnsemble:
     return ParameterEnsemble()
 
 
-def get_bandit_best_params(regime: str = None, min_trades: int = 20) -> dict:
+def get_bandit_best_params(regime: str | None = None, min_trades: int = 20) -> dict:
     """Best arm bandit для режима → params (min_score/sl_pct/tp_mult), если достаточно сделок.
 
     Источник выученных per-regime параметров. Приоритет в runtime:
@@ -2706,7 +2699,7 @@ def get_bandit_best_params(regime: str = None, min_trades: int = 20) -> dict:
 # ══════════════════════════════════════════════════════
 
 def on_trade_closed(symbol: str, side: str, pnl: float, hold_hours: float,
-                    exit_reason: str, regime: str = None):
+                    exit_reason: str, regime: str | None = None):
     """Вызывается после КАЖДОЙ закрытой сделки для микро-обучения.
 
     Инкрементальные обновления без canary: bandit posterior, drift, regime stats.
@@ -2774,7 +2767,7 @@ def on_trade_closed(symbol: str, side: str, pnl: float, hold_hours: float,
 # ══════════════════════════════════════════════════════
 
 def robust_bandit_update(bandit, arm_idx: int, pnl: float,
-                          recent_pnls: list = None) -> str:
+                          recent_pnls: list | None = None) -> str:
     """Обновление bandit с защитой от outlier-сделок.
 
     Возвращает: 'applied' | 'outlier' | 'damped'
@@ -2838,7 +2831,7 @@ def weighted_wr(trades: list, decay_rate: float = 0.005) -> float:
     return sum(w * win for w, win in zip(weights, wins)) / total_w if total_w > 0 else 0.0
 
 
-def weighted_composite_score(trades: list, regime: str = None, decay_rate: float = 0.01) -> dict:
+def weighted_composite_score(trades: list, regime: str | None = None, decay_rate: float = 0.01) -> dict:
     """Composite score с exponential decay."""
     if not trades:
         return {"score": 0.5, "wr": 0, "pf": 0, "sharpe": 0, "max_dd": 0, "avg_hold": 0}
@@ -2943,7 +2936,7 @@ class CoordinatedEnsemble:
 # V10: CAUSAL INFERENCE
 # ══════════════════════════════════════════════════════
 
-def causal_analysis(trades: list, btc_return_24h: float = None) -> str:
+def causal_analysis(trades: list, btc_return_24h: float | None = None) -> str:
     """Почему WR упал? MARKET_CONDITIONS или PARAMETERS?"""
     if len(trades) < 50:
         return "UNCLEAR"
