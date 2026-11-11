@@ -215,7 +215,8 @@ def get_exit_stats(symbol: str | None = None, days: int = 30) -> dict:
             entry = json.loads(line)
             try:
                 ts = datetime.fromisoformat(entry["ts"]).timestamp()
-            except Exception:
+            except Exception as e:
+                logger.debug("skip bad ts: %s", e)
                 continue
             if ts < cutoff: continue
             if symbol and entry.get("symbol") != symbol: continue
@@ -540,7 +541,7 @@ def _finalize_canary(state: dict):
         baseline_wins, baseline_trades
     )
 
-    wr, ci_low, ci_high = calculate_wr_with_ci(state["canary_wins"], canary_trades)
+    _, ci_low, ci_high = calculate_wr_with_ci(state["canary_wins"], canary_trades)
 
     if prob_canary_better > 0.95:
         # Canary статистически значимо лучше
@@ -659,7 +660,7 @@ async def apply_journal_insights(journal: JournalResult, cfg) -> dict:
         # Сдвиг к кластерному WR
         cluster_stats = get_cluster_stats()
         cluster_wr = 0.5
-        for c, s in cluster_stats.items():
+        for s in cluster_stats.values():
             if s["trades"] > 10:
                 cluster_wr = s["win_rate"]
                 break
@@ -1169,10 +1170,7 @@ def should_run_self_learn_v6(min_trades: int = 10,
             return True
 
     # Условие 2: fallback — прошло ≥fallback_hours
-    if hours_since >= fallback_hours:
-        return True
-
-    return False
+    return hours_since >= fallback_hours
 
 
 def _count_trades_since(since_ts: float) -> int:
@@ -2011,14 +2009,13 @@ class ConceptDriftDetector:
 
         drift = self.baseline_wr - current_wr
 
-        if drift > self.threshold and not self.drift_detected:
+        if drift > self.threshold and not self.drift_detected and len(self.recent_outcomes) >= self.confirm_window:
             # Подтверждение: последние N сделок
-            if len(self.recent_outcomes) >= self.confirm_window:
-                recent_wr = sum(self.recent_outcomes[-self.confirm_window:]) / self.confirm_window
-                if recent_wr < 0.30:
-                    self.drift_detected = True
-                    self.drift_since = datetime.now(UTC)
-                    return True
+            recent_wr = sum(self.recent_outcomes[-self.confirm_window:]) / self.confirm_window
+            if recent_wr < 0.30:
+                self.drift_detected = True
+                self.drift_since = datetime.now(UTC)
+                return True
 
         # Сброс если восстановились
         if self.drift_detected and drift < self.threshold * 0.5:
@@ -2484,14 +2481,13 @@ class RegimeAwareDriftDetector:
         drift = baseline_wr - current_wr
         threshold = 0.10  # 10% drop for regime-specific
 
-        if drift > threshold and not self.drift_detected:
-            if len(window) >= 10:
-                recent_wr = sum(window[-10:]) / 10
-                if recent_wr < 0.30:
-                    self.drift_detected = True
-                    self.drift_regime = regime
-                    self.drift_since = datetime.now(UTC)
-                    return True
+        if drift > threshold and not self.drift_detected and len(window) >= 10:
+            recent_wr = sum(window[-10:]) / 10
+            if recent_wr < 0.30:
+                self.drift_detected = True
+                self.drift_regime = regime
+                self.drift_since = datetime.now(UTC)
+                return True
 
         # Recovery: drift практически исчез
         if self.drift_detected and drift < threshold * 0.3:
@@ -2557,7 +2553,7 @@ def get_regime_drift_detector() -> RegimeAwareDriftDetector:
 class ParameterEnsemble:
     """Ансамбль: отдельный DynamicParameterBandit для каждого режима."""
 
-    REGIMES = ["TRENDING_UP", "TRENDING_DOWN", "RANGING", "HIGH_VOL", "LOW_VOL", "CHOPPY"]
+    REGIMES = ("TRENDING_UP", "TRENDING_DOWN", "RANGING", "HIGH_VOL", "LOW_VOL", "CHOPPY")
 
     def __init__(self):
         base_params = {
@@ -2658,7 +2654,8 @@ def pop_arm_assignment(symbol: str, side: str, close_ts: float,
             continue
         try:
             rec = json.loads(line)
-        except Exception:
+        except Exception as e:
+            logger.debug("skip bad json line: %s", e)
             continue
         if (found is None
                 and rec.get("symbol") == symbol and rec.get("side") == side

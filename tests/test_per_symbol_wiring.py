@@ -76,7 +76,7 @@ def test_n_eff_gate_pass_on_realistic_concentration():
 
     # ~90 символов: топ ~5-19 сделок, хвост 1-2 (как в проде)
     counts = [19, 11, 11, 8, 7, 6, 5, 5, 4, 4, 4, 3, 3, 3, 3] + [2] * 25 + [1] * 50
-    per_symbol = {"S%02d" % i: {"total_trades": c} for i, c in enumerate(counts)}
+    per_symbol = {f"S{i:02d}": {"total_trades": c} for i, c in enumerate(counts)}
     n = _n_eff(per_symbol)
     assert n >= sl.N_EFF_MIN, f"n_eff={n:.1f} < N_EFF_MIN={sl.N_EFF_MIN} — гейт снова заблокирует"
 
