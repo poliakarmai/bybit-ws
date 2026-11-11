@@ -375,7 +375,7 @@ alerts:
   push:
     enabled: true                  # ntfy push-уведомления (Фаза 6.4)
     ntfy_server: "https://ntfy.sh" # или self-hosted
-    ntfy_topic: ""                 # имя топика (задать или ${NTFY_TOPIC})
+    ntfy_topic: ""                 # имя топика (задать или ${{NTFY_TOPIC}})
     telegram_fallback: true        # слать в Telegram если ntfy недоступен
     dedup_ttl: 300                 # 5 мин — не слать одинаковый алерт чаще
 """

@@ -485,7 +485,8 @@ class RPCHandler(BaseHTTPRequestHandler):
     def _get_jwt_secret(cls) -> str:
         if cls._JWT_SECRET is not None:
             return cls._JWT_SECRET
-        cfg = _get_config()
+        from .config import Config
+        cfg = Config()
         secret = getattr(cfg, 'rpc', None)
         if secret:
             secret = getattr(secret, 'jwt_secret', '')

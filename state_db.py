@@ -718,6 +718,7 @@ class AsyncStateDB:
         return self._db
 
     async def get_positions(self):
+        import aiosqlite
         db = await self._ensure_db()
         db.row_factory = aiosqlite.Row
         rows = await db.execute('SELECT * FROM positions')

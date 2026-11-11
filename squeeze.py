@@ -11,6 +11,7 @@ import time
 from . import DATA_DIR
 from .api import bybit
 from .file_utils import safe_json_write
+from .alerts import log_event
 
 SQUEEZE_STATE_FILE = os.path.join(DATA_DIR, 'squeeze.json')
 BB_WIDTH_THRESHOLD = 5.0    # % ширины BB
