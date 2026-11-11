@@ -48,10 +48,10 @@ from .constants import (
 )
 
 __all__ = [
-    "ALERT_DEDUP_FILE",
-    "ALERT_DEDUP_TTL",
     "ALERTS",
     "ALERTS_LOG",
+    "ALERT_DEDUP_FILE",
+    "ALERT_DEDUP_TTL",
     "BYBIT_CLI",
     "COVERAGE_CHECK_INTERVAL",
     "DATA_DIR",
