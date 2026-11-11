@@ -66,7 +66,7 @@ class BacktestEngine:
         self,
         candles: list[dict],       # [{open, high, low, close, timestamp}, ...]
         strategy_fn: Callable,     # (candles, params) → list[Trade]
-        strategy_params: dict = None,
+        strategy_params: dict | None = None,
     ) -> BacktestResult:
         """Run backtest on historical candles."""
         trades = strategy_fn(candles, strategy_params or {}, self.fees, self.slippage)

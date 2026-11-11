@@ -10,7 +10,7 @@ import math
 import os
 import re
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from . import DATA_DIR
 from .api import bybit, place_stop_loss

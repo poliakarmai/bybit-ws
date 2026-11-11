@@ -13,7 +13,7 @@ DQN (Deep Q-Network) на Stable-Baselines3.
 import json
 import os
 import sys
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np

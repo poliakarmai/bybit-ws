@@ -16,7 +16,7 @@ Structured logging module — JSON-логи для Grafana Loki / grep-friendly.
 import json
 import logging
 import os
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 

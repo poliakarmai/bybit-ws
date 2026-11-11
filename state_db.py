@@ -24,7 +24,7 @@ import os
 import sqlite3
 import threading
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 DB_PATH = os.path.join(DATA_DIR, 'state.db')

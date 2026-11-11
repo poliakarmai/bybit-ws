@@ -1,6 +1,6 @@
 """Сводки, трейд-журнал, аудит стратегии."""
 import os
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from . import DATA_DIR
 from .alerts import log_event, send_telegram_alert

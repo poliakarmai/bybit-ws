@@ -22,7 +22,7 @@ import re
 import sqlite3
 import sys
 from collections import Counter
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"

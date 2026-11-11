@@ -13,7 +13,7 @@ import logging
 import math
 import os
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 _log = logging.getLogger('bybit.risk_manager')
@@ -424,8 +424,7 @@ def cluster_risk(
         if ts:
             try:
                 age = (datetime.now(UTC) - datetime.fromisoformat(str(ts))).total_seconds()
-            except Exception:
-                age = None
+            except Exception: age = None
         if age is None or age > max_age:
             result['stale'] = True
             result['reason'] = 'stale snapshot'
@@ -1087,7 +1086,7 @@ def check_correlation_panic(positions: dict) -> str | None:
 # Emergency Close / Kill Switch
 # ═══════════════════════════════════════════════════════════════════════════
 
-def emergency_close_all(reason: str, positions: dict = None) -> dict:
+def emergency_close_all(reason: str, positions: dict | None = None) -> dict:
     """Закрыть ВСЕ позиции по рынку + отменить ВСЕ открытые ордера.
     Вызывается из RPC /emergency_close и /kill_switch.
 

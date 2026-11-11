@@ -98,7 +98,7 @@ def _stopout(row: dict) -> bool:
     return str(row.get('exit_reason') or '').upper().startswith('SL')
 
 
-def compute_locks(trades: list[dict], cfg: dict, now: float = None) -> dict:
+def compute_locks(trades: list[dict], cfg: dict, now: float | None = None) -> dict:
     """Правила → замки. Чистая функция: сделки и конфиг снаружи (тесты без БД).
 
     trades — закрытые сделки, новые первыми, с полями symbol/pnl/closed_at/exit_reason.
@@ -134,7 +134,7 @@ def compute_locks(trades: list[dict], cfg: dict, now: float = None) -> dict:
     return locks
 
 
-def evaluate(now: float = None, trades: list[dict] = None) -> dict:
+def evaluate(now: float | None = None, trades: list[dict] | None = None) -> dict:
     """Пересчитать замки, слить с ещё живыми, сохранить, залогировать новое."""
     cfg = _cfg()
     now = time.time() if now is None else now
@@ -190,7 +190,7 @@ def announce_lock(symbol: str, why: str) -> None:
         log_event(f'🛑 вход {symbol or "—"} заблокирован: {why}')
 
 
-def lock_reason(symbol: str = None, state: dict = None) -> str | None:
+def lock_reason(symbol: str | None = None, state: dict | None = None) -> str | None:
     """Причина замка (None = можно входить). Читает состояние, НЕ пересчитывает."""
     st = _load_state() if state is None else state
     now = time.time()

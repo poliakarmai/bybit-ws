@@ -1,6 +1,6 @@
 """Метрики успешности."""
 import json
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from . import METRICS_FILE
 from .file_utils import safe_json_write

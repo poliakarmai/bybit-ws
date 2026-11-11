@@ -29,7 +29,7 @@ import os
 import pickle  # только для обратной совместимости, новые модели через json
 import sys
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np

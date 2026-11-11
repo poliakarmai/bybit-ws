@@ -11,7 +11,7 @@ import os
 import re
 import subprocess
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from .constants import (
     ALERT_DEDUP_FILE,

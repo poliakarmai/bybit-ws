@@ -48,13 +48,13 @@ class ExchangeAdapter(ABC):
 
     @abstractmethod
     def place_order(self, symbol: str, side: str, qty: float,
-                    order_type: str = "Market", price: float = None,
+                    order_type: str = "Market", price: float | None = None,
                     reduce_only: bool = False) -> dict:
         """Place order. Returns {order_id, status}."""
         ...
 
     @abstractmethod
-    def set_trading_stop(self, symbol: str, side: str, sl: float = None, tp: float = None) -> dict:
+    def set_trading_stop(self, symbol: str, side: str, sl: float | None = None, tp: float | None = None) -> dict:
         """Set SL/TP for position."""
         ...
 
@@ -129,7 +129,7 @@ class BybitAdapter(ExchangeAdapter):
         return fp()
 
     def place_order(self, symbol: str, side: str, qty: float,
-                    order_type: str = "Market", price: float = None,
+                    order_type: str = "Market", price: float | None = None,
                     reduce_only: bool = False) -> dict:
         b, _ = self._import_bybit()
         body = {
@@ -144,7 +144,7 @@ class BybitAdapter(ExchangeAdapter):
         r = b('POST', '/v5/order/create', body)
         return {'order_id': r.get('result', {}).get('orderId'), 'status': 'ok' if r and r.get('retCode') == 0 else 'error'}
 
-    def set_trading_stop(self, symbol: str, side: str, sl: float = None, tp: float = None) -> dict:
+    def set_trading_stop(self, symbol: str, side: str, sl: float | None = None, tp: float | None = None) -> dict:
         b, fp = self._import_bybit()
         pos = fp().get(symbol, {})
         body = {'category': 'linear', 'symbol': symbol, 'positionIdx': pos.get('positionIdx', 0)}
@@ -206,7 +206,7 @@ class BinanceAdapter(ExchangeAdapter):
         ).hexdigest()
         return params
 
-    def _get(self, path: str, params: dict = None, signed: bool = False) -> dict:
+    def _get(self, path: str, params: dict | None = None, signed: bool = False) -> dict:
         params = params or {}
         if signed:
             params = self._sign(params)
@@ -262,7 +262,7 @@ class BinanceAdapter(ExchangeAdapter):
         return result
 
     def place_order(self, symbol: str, side: str, qty: float,
-                    order_type: str = "Market", price: float = None,
+                    order_type: str = "Market", price: float | None = None,
                     reduce_only: bool = False) -> dict:
         if not self._key:
             return {'status': 'error', 'reason': 'no API key'}
@@ -282,7 +282,7 @@ class BinanceAdapter(ExchangeAdapter):
         data = r.json() if r.status_code == 200 else {}
         return {'order_id': data.get('orderId'), 'status': 'ok' if data.get('orderId') else 'error'}
 
-    def set_trading_stop(self, symbol: str, side: str, sl: float = None, tp: float = None) -> dict:
+    def set_trading_stop(self, symbol: str, side: str, sl: float | None = None, tp: float | None = None) -> dict:
         if not self._key:
             return {'status': 'error'}
         result = {'status': 'ok'}
@@ -398,7 +398,7 @@ class OKXAdapter(ExchangeAdapter):
         return result
 
     def place_order(self, symbol: str, side: str, qty: float,
-                    order_type: str = "Market", price: float = None,
+                    order_type: str = "Market", price: float | None = None,
                     reduce_only: bool = False) -> dict:
         if not self._key:
             return {'status': 'error', 'reason': 'no API key'}
@@ -416,7 +416,7 @@ class OKXAdapter(ExchangeAdapter):
         data = r.json() if r.status_code == 200 else {}
         return {'order_id': data.get('data', [{}])[0].get('ordId'), 'status': 'ok' if data.get('code') == '0' else 'error'}
 
-    def set_trading_stop(self, symbol: str, side: str, sl: float = None, tp: float = None) -> dict:
+    def set_trading_stop(self, symbol: str, side: str, sl: float | None = None, tp: float | None = None) -> dict:
         if not self._key:
             return {'status': 'error'}
         okx_symbol = symbol.replace('USDT', '-USDT-SWAP')
@@ -465,7 +465,7 @@ _adapters = {
     'okx': OKXAdapter,
 }
 
-def get_exchange(name: str = None) -> ExchangeAdapter:
+def get_exchange(name: str | None = None) -> ExchangeAdapter:
     """Get exchange adapter by name. Default from BYBIT_EXCHANGE env var."""
     name = name or EXCHANGE
     if name not in _adapters:

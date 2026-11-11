@@ -249,7 +249,7 @@ def calculate_margin(score: float, risk_pct: float | None = None) -> float:
 
 
 def margin_for_strategy(strategy: str, score: float = 5.5,
-                        symbol: str = None, use_atr: bool = False) -> float:
+                        symbol: str | None = None, use_atr: bool = False) -> float:
     """
     Маржа под конкретную стратегию.
 
@@ -262,8 +262,7 @@ def margin_for_strategy(strategy: str, score: float = 5.5,
     try:
         from .protections import lock_reason
         _lock = lock_reason(symbol)
-    except Exception:
-        _lock = None  # замки не должны ломать сайзинг
+    except Exception: _lock = None  # замки не должны ломать сайзинг
     if _lock:
         # Лог отдельно: сломанный логгер не должен отменять замок (fail-closed).
         try:
@@ -361,9 +360,9 @@ def get_atr(symbol: str, interval: str = 'D', period: int = 14) -> float | None:
 
 def atr_margin(symbol: str, score: float = 5.5,
                side: str = 'Buy', interval: str = 'D',
-               atr_mult: float = None, risk_per_trade: float = None,
-               price: float = None, leverage: float = None,
-               sl_clamp: tuple = None) -> dict:
+               atr_mult: float | None = None, risk_per_trade: float | None = None,
+               price: float | None = None, leverage: float | None = None,
+               sl_clamp: tuple | None = None) -> dict:
     """ATR-осведомлённый расчёт маржи.
 
     Без `price`: margin = risk_per_trade (старое поведение, риск НЕ постоянный —

@@ -11,7 +11,7 @@ v2.7: + секция использования маржи (из positions.json)
 import json
 import os
 import sys
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 HOME = os.path.expanduser("~")
 DATA_DIR = os.path.join(HOME, ".local", "share", "bybit-ws")

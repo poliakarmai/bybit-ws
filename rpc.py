@@ -326,7 +326,7 @@ ERROR_CODES = {
     500: 'internal_error',
 }
 
-def _error(handler, error: str, detail: str = "", status: int = 400, error_code: str = None):
+def _error(handler, error: str, detail: str = "", status: int = 400, error_code: str | None = None):
     """Стандартный error-ответ с кодом ошибки.
 
     Args:
@@ -1167,7 +1167,7 @@ class RPCHandler(BaseHTTPRequestHandler):
             if k.startswith("20") and len(k) >= 8:
                 try:
                     d = datetime.datetime.strptime(k[:10], "%Y-%m-%d")  # noqa: DTZ007 — дата
-                    if d.date() == datetime.datetime.now(datetime.timezone.utc).date():
+                    if d.date() == datetime.datetime.now(datetime.UTC).date():
                         today_key = k
                         break
                 except Exception:
@@ -1197,7 +1197,7 @@ class RPCHandler(BaseHTTPRequestHandler):
                 try:
                     import datetime
                     d = datetime.datetime.strptime(date_key[:10], "%Y-%m-%d")  # noqa: DTZ007 — дата
-                    if d.date() == datetime.datetime.now(datetime.timezone.utc).date():
+                    if d.date() == datetime.datetime.now(datetime.UTC).date():
                         last_trade_date = date_key
                         break
                 except Exception:

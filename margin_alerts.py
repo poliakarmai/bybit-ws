@@ -12,7 +12,7 @@
 import json
 import os
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from . import DATA_DIR, EVENTS_LOG
 from .config import Config
@@ -52,7 +52,7 @@ def _save_alert_state(state: dict):
         pass
 
 
-def _should_alert(level_key: str, cooldown: float = None) -> bool:
+def _should_alert(level_key: str, cooldown: float | None = None) -> bool:
     """Проверить, можно ли отправлять алерт уровня level_key.
 
     cooldown — свой интервал для «медленных» уровней (экспозиция держится часами,

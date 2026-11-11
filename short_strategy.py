@@ -18,7 +18,7 @@ import os
 
 # ── 7.1: SHORT Scanner ──
 
-def scan_short_candidates(tickers: list[dict], bb_cache: dict = None) -> list[dict]:
+def scan_short_candidates(tickers: list[dict], bb_cache: dict | None = None) -> list[dict]:
     """Dedicated SHORT scanner — not a mirror of LONG.
     
     Looks for:
@@ -111,7 +111,7 @@ def scan_short_candidates(tickers: list[dict], bb_cache: dict = None) -> list[di
 
 # ── 7.3: JUNK v2 — Auto pump detector ──
 
-def detect_pump_v2(ticker: dict, klines: list[dict] = None) -> dict:
+def detect_pump_v2(ticker: dict, klines: list[dict] | None = None) -> dict:
     """Auto-detect pump without manual 80% threshold.
     
     Returns {is_pump: bool, confidence: 0-100, reasons: [...]}
@@ -167,7 +167,7 @@ def detect_pump_v2(ticker: dict, klines: list[dict] = None) -> dict:
 
 # ── 7.2: SHORT ML Gate ──
 
-def train_short_ml_gate(training_data: list[dict] = None) -> dict:
+def train_short_ml_gate(training_data: list[dict] | None = None) -> dict:
     """Train a dedicated RandomForest model for SHORT signals.
     
     Features different from LONG ML:
@@ -228,7 +228,7 @@ def train_short_ml_gate(training_data: list[dict] = None) -> dict:
     }
 
 
-def predict_short_ml(signal: dict, model_path: str = None) -> float:
+def predict_short_ml(signal: dict, model_path: str | None = None) -> float:
     """Predict SHORT signal quality (0-1). 
     Temporary: score-based fallback when no trained model.
     """
@@ -284,7 +284,7 @@ def _load_long_training_data() -> list[dict]:
         return []
 
 
-def train_long_ml_gate(training_data: list[dict] = None) -> dict:
+def train_long_ml_gate(training_data: list[dict] | None = None) -> dict:
     """Train dedicated RandomForest for LONG signals.
     
     Features (LONG-specific):

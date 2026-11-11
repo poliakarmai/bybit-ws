@@ -19,7 +19,7 @@ import json
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
