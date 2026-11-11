@@ -67,6 +67,14 @@ CANARY_IDLE_TIMEOUT_HOURS = 24  # canary живёт весь self-learn цикл
 SELF_LEARN_HYSTERESIS = 0.10  # v10: изменение только если composite +10%
 SELF_LEARN_STATE = DATA_DIR / "self_learn_state.json"  # последний запуск
 
+# ── N_eff gate (концентрация выборки по символам) ──
+# n_eff = (Σw)² / Σw², w = число сделок символа → «эффективное число независимых
+# символов». Было 100 — недостижимо (символов ~95, реальная концентрация даёт ~24),
+# из-за чего apply_journal_insights молча блокировал самообучение (self_learn_skip).
+# 20 = страховка от вырожденной выборки (1-2 символа доминируют → n_eff≈1-2); тонкий
+# хвост символов и без того режется per-symbol порогом sym_trades < 5 ниже по коду.
+N_EFF_MIN = 20
+
 # ── Session zones ───────────────────────────────────
 def _session_hour() -> int:
     """Текущий час UTC (0-23)."""
@@ -613,7 +621,6 @@ async def apply_journal_insights(journal: dict, cfg) -> dict:
     # ── N_eff: effective sample size for learning decisions ──
     # N_eff = (Σw)² / Σw² — when weights are equal, N_eff = N
     # Below threshold → log decision but don't change params
-    N_EFF_MIN = 100
     n_eff = 0.0
     try:
         # Estimate N_eff from per-symbol trade counts (weights ~ trade count)

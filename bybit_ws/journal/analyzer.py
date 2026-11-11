@@ -61,6 +61,7 @@ class JournalProfile:
     total_pnl: float = 0.0
     max_drawdown: float = 0.0
     top_symbols: list[dict[str, Any]] = field(default_factory=list)
+    per_symbol: dict[str, dict[str, Any]] = field(default_factory=dict)
     roundtrips_sample: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -242,13 +243,23 @@ def compute_profile_from_roundtrips(rts: list[RoundTrip], total_trades: int | No
         running_max = max(running_max, cum)
         max_dd = min(max_dd, cum - running_max)
 
-    # Top symbols
+    # Top symbols + full per-symbol stats (для n_eff-гейта и per-symbol tuning в self_learn)
     sym_stats: dict[str, dict[str, Any]] = {}
     for rt in rts:
-        if rt.symbol not in sym_stats:
-            sym_stats[rt.symbol] = {"trades": 0, "pnl": 0.0}
-        sym_stats[rt.symbol]["trades"] += 1
-        sym_stats[rt.symbol]["pnl"] += rt.pnl
+        s = sym_stats.setdefault(rt.symbol, {"trades": 0, "pnl": 0.0, "wins": 0, "hold": 0.0})
+        s["trades"] += 1
+        s["pnl"] += rt.pnl
+        s["wins"] += 1 if rt.pnl > 0 else 0
+        s["hold"] += rt.hold_hours
+    per_symbol = {
+        k: {
+            "total_trades": v["trades"],
+            "win_rate": round(v["wins"] / v["trades"], 3),
+            "total_pnl": round(v["pnl"], 2),
+            "avg_hold_hours": round(v["hold"] / v["trades"], 1),
+        }
+        for k, v in sym_stats.items()
+    }
     top_symbols = sorted(
         [{"symbol": k, "trades": v["trades"], "pnl": round(v["pnl"], 2)}
          for k, v in sym_stats.items()],
@@ -271,6 +282,7 @@ def compute_profile_from_roundtrips(rts: list[RoundTrip], total_trades: int | No
         total_pnl=total_pnl,
         max_drawdown=max_dd,
         top_symbols=top_symbols,
+        per_symbol=per_symbol,
         roundtrips_sample=sample,
     )
 
@@ -514,6 +526,7 @@ def _build_result(profile: JournalProfile, rts: list[RoundTrip], trades: list[Tr
 
     return {
         "profile": profile.to_dict(),
+        "per_symbol": profile.per_symbol,
         "biases": [b.to_dict() for b in biases],
         "alerts": alerts,
         "analyzed_at": datetime.now(timezone.utc).isoformat(),
