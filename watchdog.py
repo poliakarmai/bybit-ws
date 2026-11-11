@@ -22,7 +22,7 @@ import re
 import sqlite3
 import sys
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
@@ -106,7 +106,7 @@ def should_alert(entries: int, n_blocks: int, min_blocks: int) -> bool:
 
 def build_report(hours: int, min_blocks: int, db_path: Path | None = None,
                  log_path: Path | None = None, now: datetime | None = None) -> dict:
-    now = now or datetime.now()
+    now = now or datetime.now(UTC)
     since = now - timedelta(hours=hours)
     lines = tail_lines(Path(log_path or EVENTS_LOG_PATH))
     reasons, last_block = scan_log(lines, since)

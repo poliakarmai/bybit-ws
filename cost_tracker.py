@@ -8,7 +8,7 @@ import json
 import os
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from . import EVENTS_LOG
 from .api import bybit
@@ -21,7 +21,7 @@ _last_check = 0.0
 
 
 def _log(msg):
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
     with open(EVENTS_LOG, 'a') as f:
         f.write(f'[{ts}] [cost_tracker] {msg}\n')
 
@@ -87,7 +87,7 @@ def fetch_and_log_closed_pnl():
         float(p.get('qty', 0))
         pnl = float(p.get('closedPnl', 0))
         created_time = datetime.fromtimestamp(
-            int(p.get('createdTime', 0)) / 1000
+            int(p.get('createdTime', 0)) / 1000, UTC
         ).strftime('%Y-%m-%d %H:%M:%S')
 
         # Комиссию API не отдаёт явно в closed-pnl, но PnL уже net of fees.

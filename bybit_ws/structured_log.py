@@ -16,7 +16,7 @@ Structured logging module — JSON-логи для Grafana Loki / grep-friendly.
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +49,7 @@ def _write_json(entry: dict[str, Any]):
 def _make_entry(level: str, message: str, **kwargs) -> dict:
     """Сформировать JSON-запись."""
     entry = {
-        'ts': datetime.now().isoformat(),
+        'ts': datetime.now(UTC).isoformat(),
         'level': level,
         'message': message,
     }

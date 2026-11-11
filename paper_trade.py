@@ -17,7 +17,7 @@ import math
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from statistics import mean, stdev
 
@@ -504,7 +504,7 @@ def main():
             print('  Последние 5 сделок:')
             for t in result.trades[-5:]:
                 emoji = '✅' if t['pnl'] > 0 else '🔴'
-                entry_dt = datetime.fromtimestamp(t['entry_time'] / 1000).strftime('%d.%m')
+                entry_dt = datetime.fromtimestamp(t['entry_time'] / 1000, UTC).strftime('%d.%m')
                 print(f'  {emoji} {entry_dt} {t["side"]} {t["entry"]:.4f}→{t["exit"]:.4f} '
                       f'{t["pnl"]:+.2f} ({t["pnl_pct"]:+.2f}%) [{t["reason"]}]')
 

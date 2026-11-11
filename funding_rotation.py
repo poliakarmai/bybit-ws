@@ -20,7 +20,7 @@ import json
 import math
 import os
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from .alerts import add_alert, log_event
 from .api import bybit
@@ -60,7 +60,7 @@ def _save_state(state):
     os.makedirs(os.path.dirname(ROTATION_STATE_FILE), exist_ok=True)
     safe_json_write(str(ROTATION_STATE_FILE), state, indent=2)
 def _reset_daily(state):
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = datetime.now(UTC).strftime('%Y-%m-%d')
     if state.get('last_reset') != today:
         state['daily_count'] = 0
         state['last_reset'] = today

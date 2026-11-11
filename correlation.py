@@ -10,7 +10,7 @@ import math
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from . import DATA_DIR
 from .api import bybit, place_stop_loss
@@ -132,7 +132,7 @@ def check_correlation(positions):
             'pairs': [],
             'flagged': [],
             'messages': [],
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'position_count': len(positions) if positions else 0,
         }
 
@@ -150,7 +150,7 @@ def check_correlation(positions):
             'pairs': [],
             'flagged': [],
             'messages': [],
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'position_count': len(positions),
             'symbols_fetched': len(prices),
         }
@@ -257,7 +257,7 @@ def check_correlation(positions):
         'pairs': pairs,
         'flagged': flagged,
         'messages': messages,
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(UTC).isoformat(),
         'position_count': len(positions),
         'symbols_fetched': len(prices),
         'threshold': CORRELATION_THRESHOLD,

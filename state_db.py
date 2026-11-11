@@ -24,7 +24,7 @@ import os
 import sqlite3
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 DB_PATH = os.path.join(DATA_DIR, 'state.db')
@@ -768,7 +768,7 @@ class AsyncStateDB:
 
     async def get_metrics(self, date=None):
         if date is None:
-            date = datetime.now().strftime('%Y-%m-%d')
+            date = datetime.now(UTC).strftime('%Y-%m-%d')
         db = await self._ensure_db()
         # Агрегация
         rows = await db.execute('''

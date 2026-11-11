@@ -19,7 +19,7 @@ import json
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
@@ -33,7 +33,7 @@ def load_live_entries(days: int) -> list[dict]:
         print(f"⚠️  State DB не найдена: {STATE_DB}")
         return []
     
-    cutoff_ts = int((datetime.now() - timedelta(days=days)).timestamp())
+    cutoff_ts = int((datetime.now(UTC) - timedelta(days=days)).timestamp())
     
     try:
         conn = sqlite3.connect(f"file:{STATE_DB}?mode=ro", uri=True)
@@ -138,8 +138,8 @@ def compare_entries(live: list[dict], backtest: list[dict], tolerance_minutes: i
                 matched.append({
                     "symbol": live_entry["symbol"],
                     "side": live_entry["side"],
-                    "live_time": datetime.fromtimestamp(live_entry["opened_at"]).isoformat(),
-                    "backtest_time": datetime.fromtimestamp(bt_entry["opened_at"]).isoformat(),
+                    "live_time": datetime.fromtimestamp(live_entry["opened_at"], UTC).isoformat(),
+                    "backtest_time": datetime.fromtimestamp(bt_entry["opened_at"], UTC).isoformat(),
                     "time_diff_seconds": time_diff,
                     "live_strategy": live_entry.get("strategy"),
                 })
@@ -153,7 +153,7 @@ def compare_entries(live: list[dict], backtest: list[dict], tolerance_minutes: i
             only_live.append({
                 "symbol": entry["symbol"],
                 "side": entry["side"],
-                "opened_at": datetime.fromtimestamp(entry["opened_at"]).isoformat(),
+                "opened_at": datetime.fromtimestamp(entry["opened_at"], UTC).isoformat(),
                 "strategy": entry.get("strategy"),
             })
     
@@ -163,7 +163,7 @@ def compare_entries(live: list[dict], backtest: list[dict], tolerance_minutes: i
             only_backtest.append({
                 "symbol": entry["symbol"],
                 "side": entry["side"],
-                "opened_at": datetime.fromtimestamp(entry["opened_at"]).isoformat(),
+                "opened_at": datetime.fromtimestamp(entry["opened_at"], UTC).isoformat(),
             })
     
     return {
@@ -235,10 +235,10 @@ def generate_report(days: int, interval: int) -> dict:
     
     # Сохраняем отчёт в JSON
     OUTPUT_DIR.mkdir(exist_ok=True)
-    report_file = OUTPUT_DIR / f"parity_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    report_file = OUTPUT_DIR / f"parity_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.json"
     
     report_data = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "days": days,
         "interval": interval,
         "result": result,

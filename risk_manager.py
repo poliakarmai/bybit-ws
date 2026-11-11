@@ -13,7 +13,7 @@ import logging
 import math
 import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, UTC
 from pathlib import Path
 
 _log = logging.getLogger('bybit.risk_manager')
@@ -208,7 +208,7 @@ def _save_risk_state(state: dict):
 
 def _today_key() -> str:
     """Ключ сегодняшнего дня (YYYY-MM-DD)."""
-    return datetime.now().strftime('%Y-%m-%d')
+    return datetime.now(UTC).strftime('%Y-%m-%d')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -423,7 +423,7 @@ def cluster_risk(
         age = None
         if ts:
             try:
-                age = (datetime.now() - datetime.fromisoformat(str(ts))).total_seconds()
+                age = (datetime.now(UTC) - datetime.fromisoformat(str(ts))).total_seconds()
             except Exception:
                 age = None
         if age is None or age > max_age:
@@ -617,7 +617,7 @@ def check_circuit_breaker(config=None) -> tuple[bool, str]:
     if _circuit_breaker_active:
         # Проверяем: новый день — автосброс
         today = _today_key()
-        breaker_date = datetime.fromtimestamp(_circuit_breaker_ts).strftime('%Y-%m-%d')
+        breaker_date = datetime.fromtimestamp(_circuit_breaker_ts, UTC).strftime('%Y-%m-%d')
         if breaker_date != today:
             _circuit_breaker_active = False
             _circuit_breaker_reason = ''
@@ -696,7 +696,7 @@ def get_circuit_breaker_status() -> dict:
     # Проверяем авто-сброс (новый день)
     can_auto_reset = False
     if _circuit_breaker_active and _circuit_breaker_ts > 0:
-        breaker_date = datetime.fromtimestamp(_circuit_breaker_ts).strftime('%Y-%m-%d')
+        breaker_date = datetime.fromtimestamp(_circuit_breaker_ts, UTC).strftime('%Y-%m-%d')
         if breaker_date != _today_key():
             can_auto_reset = True
 
@@ -1042,7 +1042,7 @@ def get_risk_full(positions: dict | None = None) -> dict:
             'total_margin': round(total_margin, 2),
             'sector_counts': sector_counts,
         },
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(UTC).isoformat(),
     }
 
 

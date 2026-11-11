@@ -12,7 +12,7 @@
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from . import DATA_DIR, EVENTS_LOG
 from .config import Config
@@ -26,7 +26,7 @@ _GROSS_ALERT_COOLDOWN = 4 * 3600  # экспозиция меняется мед
 
 def _log_event(msg: str):
     """Локальный логгер (не зависим от alerts.log_event)."""
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
     line = f'[{ts}] {msg}\n'
     os.makedirs(os.path.dirname(EVENTS_LOG), exist_ok=True)
     with open(EVENTS_LOG, 'a') as f:

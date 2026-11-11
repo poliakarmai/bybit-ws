@@ -129,8 +129,8 @@ def safe_op(fn, *args, default=None, desc='', **kwargs):
         return fn(*args, **kwargs)
     except Exception as e:
         try:
-            from datetime import datetime
-            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            from datetime import datetime, UTC
+            ts = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
             name = getattr(fn, '__name__', str(fn))
             ctx = f' ({desc})' if desc else ''
             with open(EVENTS_LOG, 'a') as f:

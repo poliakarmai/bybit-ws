@@ -1,13 +1,13 @@
 """Метрики успешности."""
 import json
-from datetime import datetime
+from datetime import datetime, UTC
 
 from . import METRICS_FILE
 from .file_utils import safe_json_write
 
 
 def _today_key():
-    return datetime.now().strftime('%Y-%m-%d')
+    return datetime.now(UTC).strftime('%Y-%m-%d')
 
 def _load_metrics():
     """Безопасная загрузка metrics.json с fallback на пустой словарь."""

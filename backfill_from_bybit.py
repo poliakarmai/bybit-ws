@@ -68,7 +68,7 @@ def main():
     for rid, sym, closed_at in rows:
         item = closed.get((closed_at, sym))
         if not item:
-            missing.append((sym, datetime.fromtimestamp(closed_at).strftime('%Y-%m-%d %H:%M')))
+            missing.append((sym, datetime.fromtimestamp(closed_at, UTC).strftime('%Y-%m-%d %H:%M')))
             continue
         matched += 1
         fees = float(item.get('openFee') or 0) + float(item.get('closeFee') or 0)

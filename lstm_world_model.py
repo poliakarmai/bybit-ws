@@ -17,7 +17,7 @@ import json
 import math
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 import numpy as np
@@ -421,7 +421,7 @@ def train_world_model(lambda_world=0.03, epochs=200, force=False):
                 'val_acc': best_val_acc,
                 'world_mse': best_world_mse,
                 'epoch': best_epoch,
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(UTC).isoformat(),
             }, WORLD_MODEL_PATH)
 
         if (epoch + 1) % 10 == 0:
@@ -443,7 +443,7 @@ def train_world_model(lambda_world=0.03, epochs=200, force=False):
         'val_acc': val_acc.item(),
         'world_mse': val_world_loss.item(),
         'epoch': epochs,
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(UTC).isoformat(),
     }, latest_path)
     print(f"💾 Best модель сохранена: {WORLD_MODEL_PATH}")
     print(f"   Latest модель (epoch {epochs}): {latest_path}")
@@ -672,7 +672,7 @@ def get_cached_world_prediction(symbol: str, force_refresh: bool = False):
             'predicted_return_pct': round(predicted_return_pct, 4),
             'predicted_close_t1': round(predicted_close_t1, 4),
             'current_close': current_close,
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
         }
         _world_cache[sym] = entry
         _world_cache_ts[sym] = now

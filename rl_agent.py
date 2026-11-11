@@ -13,7 +13,7 @@ DQN (Deep Q-Network) на Stable-Baselines3.
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 import numpy as np
@@ -148,7 +148,7 @@ def train(symbols=('BTCUSDT', 'ETHUSDT'), days=365, timesteps=100_000):
             'timesteps': total_timesteps,
             'symbols': list(symbols),
             'days': days,
-            'trained_at': datetime.now().isoformat(),
+            'trained_at': datetime.now(UTC).isoformat(),
             'n_features': 13,
         }, indent=2)
     print(f"\n✅ Модель сохранена: {MODEL_PATH}")

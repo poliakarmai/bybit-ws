@@ -1,6 +1,6 @@
 """Сводки, трейд-журнал, аудит стратегии."""
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from . import DATA_DIR
 from .alerts import log_event, send_telegram_alert
@@ -17,7 +17,7 @@ PROFIT_LEVELS = [30, 50, 100]
 # ── Сводка портфеля ──
 
 def should_send_summary():
-    now = datetime.now()
+    now = datetime.now(UTC)
     hour, minute = now.hour, now.minute
     if hour not in (9, 21):
         return None
@@ -92,7 +92,7 @@ def send_summary(label):
         msg = msg[:3500] + '...'
     send_telegram_alert(msg)
     with open(SUMMARY_SENT_FILE, 'w') as f:
-        f.write(datetime.now().strftime('%Y-%m-%d-%H'))
+        f.write(datetime.now(UTC).strftime('%Y-%m-%d-%H'))
 
 # ── Профит-триггеры ──
 
@@ -124,8 +124,8 @@ def log_trade(sym, entry, exit_price, pnl, side, reason, alert_ref='', strategy=
         log_trade._seen = set()
     log_trade._seen.add(dedup_key)
 
-    now = datetime.now().strftime('%Y-%m-%d %H:%M')
-    now_iso = datetime.now().isoformat()
+    now = datetime.now(UTC).strftime('%Y-%m-%d %H:%M')
+    now_iso = datetime.now(UTC).isoformat()
     ref_str = f' [{alert_ref}]' if alert_ref else ''
     strat_str = f' | {strategy}' if strategy else ''
     line = f'| {now} | {sym} | {side} | ${entry:.4f} | ${exit_price:.4f} | ${pnl:+.2f} | {reason}{ref_str}{strat_str} |'
@@ -222,7 +222,7 @@ def check_daily_pnl_alert():
         with open(METRICS_FILE) as f:
             metrics = json.load(f)
         
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now(UTC).strftime('%Y-%m-%d')
         today_entry = metrics.get(today, {})
         today_pnl = today_entry.get('pnl_total', 0)
         
@@ -230,7 +230,7 @@ def check_daily_pnl_alert():
             return None  # профитный день — не алертим
         
         # Собрать PnL за последние 7 дней (включая сегодня)
-        now = datetime.now()
+        now = datetime.now(UTC)
         week_pnls = {}
         for i in range(7):
             d = now - timedelta(days=i)

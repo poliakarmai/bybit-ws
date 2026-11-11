@@ -3,7 +3,7 @@
 Run: cd /home/openclaw/bybit-ws && python3 -m pytest test_cluster_risk.py -q
 """
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from unittest.mock import patch
 
 # Ensure bybit_ws package is importable (symlink bybit_ws -> . in parent dir)
@@ -31,7 +31,7 @@ def _cfg(mode='shadow', **over):
 
 
 def _snap(pairs, age_sec=0):
-    ts = (datetime.now() - timedelta(seconds=age_sec)).isoformat()
+    ts = (datetime.now(UTC) - timedelta(seconds=age_sec)).isoformat()
     return {'timestamp': ts, 'pairs': pairs}
 
 

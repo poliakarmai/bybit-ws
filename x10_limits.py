@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from .file_utils import safe_json_write
 from .state_db import db  # SQLite dual-write
@@ -50,7 +50,7 @@ def _save(state):
 
 
 def _today_key():
-    return datetime.now().strftime('%Y-%m-%d')
+    return datetime.now(UTC).strftime('%Y-%m-%d')
 
 
 def record_x10_trade(strategy: str, pnl: float):

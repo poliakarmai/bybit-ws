@@ -7,7 +7,7 @@ v2: режимы simple (DESIGN.md: один re-entry на Lower BB) и ladder (
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from .alerts import _is_duplicate, add_alert, log_event
 from .api import bybit, get_bb_data
@@ -84,7 +84,7 @@ def notify_sl_hit(symbol, sl_price, entry_price, side='Buy'):
         'entry_price': float(entry_price),
         'side': side,
         'sl_time': now,
-        'sl_time_str': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'sl_time_str': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S'),
         'pending': True,
         'last_reentry_ts': state.get(symbol, {}).get('last_reentry_ts', 0),
         'reentry_count': state.get(symbol, {}).get('reentry_count', 0),

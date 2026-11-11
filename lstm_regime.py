@@ -29,7 +29,7 @@ import os
 import pickle  # только для обратной совместимости, новые модели через json
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 import numpy as np
@@ -617,7 +617,7 @@ def train_model(force=False, candidate=False):
                 'fear_greed': round(macro_vals[2] * 100, 0),
             },
             'val_accuracy': round(best_val_acc, 3),
-            'trained_at': datetime.now().isoformat(),
+            'trained_at': datetime.now(UTC).isoformat(),
             'symbols': [d['symbol'] for d in data],
         }, indent=2)
     print(f"   Модель: {model_path}")
@@ -778,7 +778,7 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> dict | None:
                 CLASS_NAMES[i]: round(float(avg_probs[i]), 3)
                 for i in range(N_CLASSES)
             },
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
         }
 
         # Кеширование. Атомарно: open('w') усекает файл до нуля, и любой

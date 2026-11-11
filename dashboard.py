@@ -11,7 +11,7 @@ v2.7: + секция использования маржи (из positions.json)
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 
 HOME = os.path.expanduser("~")
 DATA_DIR = os.path.join(HOME, ".local", "share", "bybit-ws")
@@ -429,7 +429,7 @@ def render_svg(rows: list[dict], trades_count: int, unique_trades: int) -> str:
         '📊 Винрейт по символам (Bybit WS)',
         '</text>',
         f'<text x="{SVG_W // 2}" y="{PAD_TOP + 48}" text-anchor="middle" fill="{TEXT_HEADER}" font-size="11">',
-        f'Сделок: {trades_count} (уникальных: {unique_trades}) • {datetime.now().strftime("%Y-%m-%d %H:%M")}',
+        f'Сделок: {trades_count} (уникальных: {unique_trades}) • {datetime.now(UTC).strftime("%Y-%m-%d %H:%M")}',
         '</text>',
         # Шапка таблицы
         f'<rect x="{PAD_X}" y="{HEADER_Y}" width="{TOTAL_W}" height="{HEADER_H}" fill="{HEADER_BG}" rx="4"/>',
@@ -935,7 +935,7 @@ def render_svg_shifted(rows: list[dict], trades_count: int, unique_trades: int,
     parts.append(
         f'<text x="{svg_w // 2}" y="{y_offset + 48}" text-anchor="middle" '
         f'fill="{TEXT_HEADER}" font-size="11">'
-        f'Сделок: {trades_count} (уникальных: {unique_trades}) • {datetime.now().strftime("%Y-%m-%d %H:%M")}'
+        f'Сделок: {trades_count} (уникальных: {unique_trades}) • {datetime.now(UTC).strftime("%Y-%m-%d %H:%M")}'
         f'</text>'
     )
 

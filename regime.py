@@ -9,7 +9,7 @@ import json
 import math
 import os
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from .alerts import log_event
 from .api import bybit
@@ -226,7 +226,7 @@ def check_regime(force: bool = False) -> dict:
             "btc_turnover_24h": btc_vol_24h,
             "eth_turnover_24h": eth_vol_24h,
             "btc_vol_ratio": round(btc_vol_ratio, 2) if btc_vol_ratio else None,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         result = {

@@ -9,7 +9,7 @@ import json
 import math
 import random
 import sqlite3
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -284,7 +284,7 @@ def generate_report(trades: list[dict] | None = None,
     n_trades = len(trades)
 
     report = {
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "source": str(db_path),
         "summary": {
             "total_trades": n_trades,

@@ -13,7 +13,7 @@ Confluence Paper Tracker — Фаза 4.3.5
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 from .file_utils import safe_json_write
@@ -60,7 +60,7 @@ def track_signal(
             "confluence": confluence,
             "score": score,
             "ts": int(time.time()),
-            "date": datetime.now().strftime("%Y-%m-%d"),
+            "date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "status": "open",  # open → tp / sl / closed
             "pnl": 0.0,
             "pnl_pct": 0.0,

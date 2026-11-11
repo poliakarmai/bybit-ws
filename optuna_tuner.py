@@ -23,7 +23,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 try:
@@ -338,7 +338,7 @@ def optimize_single(
         'backtest_avg_pnl': attrs.get('avg_pnl', 0.0),
         'optuna_value': round(best_value, 2),
         'optuna_trials': len(study.trials),
-        'optimized_at': datetime.now().isoformat(),
+        'optimized_at': datetime.now(UTC).isoformat(),
     }
 
 

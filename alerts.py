@@ -11,7 +11,7 @@ import os
 import re
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from .constants import (
     ALERT_DEDUP_FILE,
@@ -60,7 +60,7 @@ def log_event(msg):
     import os as _os
     if _os.environ.get('BYBIT_LOG_SILENT') == '1':
         return
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
     line = f'[{ts}] {msg}\n'
 
     # Ротация лога при превышении max_size_mb
@@ -118,11 +118,11 @@ def add_alert(level, msg):
         if not msg:
             return
     msg = str(msg)
-    ts = datetime.now().strftime('%H:%M:%S')
+    ts = datetime.now(UTC).strftime('%H:%M:%S')
     entry = f'[{ts}] [{level}] {msg}'
     ALERTS.append(entry)
     with open(ALERTS_LOG, 'a') as f:
-        f.write(f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] {entry}\n')
+        f.write(f'[{datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")}] {entry}\n')
     log_event(f'⚠️ {level}: {msg}')
     if level in ('STOP', 'TP', 'ENTRY', 'CONFLUENCE'):
         # Пробуем push-уведомления (ntfy → Telegram fallback)
