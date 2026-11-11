@@ -68,7 +68,7 @@ def scan_log(lines: list[str], since: datetime) -> tuple[Counter, datetime | Non
         if not mt:
             continue
         try:
-            ts = datetime.strptime(mt.group(1), "%Y-%m-%d %H:%M:%S")
+            ts = datetime.strptime(mt.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
         except ValueError:
             continue
         if ts < since:

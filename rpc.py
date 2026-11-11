@@ -1166,8 +1166,8 @@ class RPCHandler(BaseHTTPRequestHandler):
         for k in sorted(metrics.keys(), reverse=True):
             if k.startswith("20") and len(k) >= 8:
                 try:
-                    d = datetime.datetime.strptime(k[:10], "%Y-%m-%d")
-                    if d.date() == datetime.date.today():
+                    d = datetime.datetime.strptime(k[:10], "%Y-%m-%d")  # noqa: DTZ007 — дата
+                    if d.date() == datetime.datetime.now(datetime.timezone.utc).date():
                         today_key = k
                         break
                 except Exception:
@@ -1196,8 +1196,8 @@ class RPCHandler(BaseHTTPRequestHandler):
             if date_key.startswith("20") and len(date_key) >= 8:
                 try:
                     import datetime
-                    d = datetime.datetime.strptime(date_key[:10], "%Y-%m-%d")
-                    if d.date() == datetime.date.today():
+                    d = datetime.datetime.strptime(date_key[:10], "%Y-%m-%d")  # noqa: DTZ007 — дата
+                    if d.date() == datetime.datetime.now(datetime.timezone.utc).date():
                         last_trade_date = date_key
                         break
                 except Exception:

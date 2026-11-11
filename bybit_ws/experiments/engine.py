@@ -109,7 +109,7 @@ def resolve_end_ms(end_date: str | None = None) -> int:
       воспроизводимым при одинаковых inputs.
     """
     if end_date:
-        dt = datetime.strptime(end_date, "%Y-%m-%d")
+        dt = datetime.strptime(end_date, "%Y-%m-%d")  # noqa: DTZ007 — tz на след. строке (.replace(tzinfo=UTC))
         dt = (dt + timedelta(days=1)).replace(tzinfo=UTC)
         return int(dt.timestamp() * 1000)
     now = datetime.now(UTC)

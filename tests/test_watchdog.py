@@ -7,14 +7,14 @@
 
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from watchdog import build_report, reason_key, should_alert, tail_lines
 
-NOW = datetime(2026, 10, 31, 9, 0, 0)
+NOW = datetime(2026, 10, 31, 9, 0, 0, tzinfo=UTC)
 DEPOSIT = "💸 Депозит $-5.6 < $30.0 — входы заблокированы"
 SKIP = "🚫 auto_short: SOLUSDT dry-spell throttle (12 холостых) — пропускаю"
 POST_ONLY = "⛔ POST-ONLY LONG BTCUSDT: Order would immediately match — вход не открыт"

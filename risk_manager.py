@@ -13,7 +13,7 @@ import logging
 import math
 import os
 import time
-from datetime import date, datetime, UTC
+from datetime import datetime, UTC
 from pathlib import Path
 
 _log = logging.getLogger('bybit.risk_manager')
@@ -253,7 +253,7 @@ def get_daily_pnl() -> dict:
     # которого никто не пишет → realized всегда был 0, и circuit breaker видел только unrealized.
     try:
         from .state_db import StateDB
-        day_start = int(datetime.combine(date.today(), datetime.min.time()).timestamp())
+        day_start = int(datetime.combine(datetime.now(UTC).date(), datetime.min.time(), tzinfo=UTC).timestamp())
         row = StateDB().conn.execute(
             'SELECT COALESCE(SUM(pnl), 0) FROM trade_history WHERE closed_at >= ?',
             (day_start,)).fetchone()
