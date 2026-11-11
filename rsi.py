@@ -9,9 +9,9 @@ import os
 import time
 
 from . import DATA_DIR
+from .alerts import log_event
 from .api import bybit, get_bb_data
 from .file_utils import safe_json_write
-from .alerts import log_event
 
 RSI_PERIOD = 14
 DIVERGENCE_STATE_FILE = os.path.join(DATA_DIR, 'rsi_divergence.json')

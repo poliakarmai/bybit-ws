@@ -34,7 +34,7 @@ from bybit_ws.state_db import StateDB
 def _make_data_dir(tmp_path, symbols):
     """Мини-каталог данных: state.db с pump_state + pumps.json. Возвращает (dir, db)."""
     db = StateDB(str(tmp_path / 'state.db'))
-    db.conn  # схема
+    _ = db.conn  # схема
     db.conn.executemany('INSERT OR REPLACE INTO pump_state (symbol) VALUES (?)',
                         [(s,) for s in symbols])
     db.conn.commit()

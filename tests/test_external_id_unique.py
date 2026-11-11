@@ -21,7 +21,7 @@ import pytest
 def sdb(tmp_path):
     mod = pytest.importorskip('bybit_ws.state_db')
     db = mod.StateDB(str(tmp_path / 'state.db'))
-    db.conn  # схема + миграции
+    _ = db.conn  # схема + миграции
     yield db
     db.close()
 
@@ -62,7 +62,7 @@ def test_migration_dedupes_existing_rows(tmp_path):
     raw.close()
 
     db = mod.StateDB(path)
-    db.conn  # _migrate() чистит дубли + создаёт индекс
+    _ = db.conn  # _migrate() чистит дубли + создаёт индекс
     rows = db.conn.execute(
         "SELECT id, external_id FROM trade_history ORDER BY id").fetchall()
     db.close()

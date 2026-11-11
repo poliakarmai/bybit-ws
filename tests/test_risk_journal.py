@@ -28,7 +28,7 @@ def rm(tmp_path, monkeypatch):
     sdb = pytest.importorskip('bybit_ws.state_db')
     rm = pytest.importorskip('bybit_ws.risk_manager')
     db = sdb.StateDB(str(tmp_path / 'state.db'))
-    db.conn  # схема
+    _ = db.conn  # схема
     monkeypatch.setattr(sdb, 'db', db)          # _log_decision берёт singleton отсюда
     monkeypatch.setattr(rm, 'get_daily_pnl',
                         lambda: {'total_pnl': 0.0, 'date': '2026-10-25',

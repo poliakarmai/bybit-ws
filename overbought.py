@@ -12,9 +12,9 @@ from . import (
     _save_short_alerts,
     safe_run,
 )
+from .alerts import log_event
 from .api import get_bb_data, get_bb_data_async
 from .file_utils import safe_json_write
-from .alerts import log_event
 
 # Статический watchlist (fallback)
 STATIC_WATCHLIST = [

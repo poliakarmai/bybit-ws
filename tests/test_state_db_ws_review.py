@@ -27,7 +27,7 @@ import pytest
 def sdb(tmp_path):
     mod = pytest.importorskip('bybit_ws.state_db')
     db = mod.StateDB(str(tmp_path / 'state.db'))
-    db.conn  # инициализация схемы + миграции
+    _ = db.conn  # инициализация схемы + миграции
     yield db
     db.close()
 

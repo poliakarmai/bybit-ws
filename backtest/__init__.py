@@ -9,7 +9,6 @@ import random
 import statistics
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass

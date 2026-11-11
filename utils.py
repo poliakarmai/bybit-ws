@@ -3,9 +3,9 @@
 Фикс код-ревью Manus AI: устранение дублирования кода между модулями.
 """
 
+from .alerts import log_event
 from .api import bybit
 from .config import Config
-from .alerts import log_event
 
 
 def get_tier_ab(cfg=None):
