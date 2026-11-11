@@ -77,6 +77,11 @@ SELF_LEARN_STATE = DATA_DIR / "self_learn_state.json"  # последний за
 N_EFF_MIN = 20
 
 # ── Session zones ───────────────────────────────────
+def _iso(s: str) -> datetime:
+    """ISO -> aware-UTC; старые naive-строки состояния считаем UTC (сдвиг ≤2ч незначим)."""
+    dt = datetime.fromisoformat(s)
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
+
 def _session_hour() -> int:
     """Текущий час UTC (0-23)."""
     return datetime.now(UTC).hour
@@ -127,7 +132,7 @@ def update_symbol_profile(symbol: str, updates: dict, reason: str = ""):
         profiles[symbol] = {}
     for k, v in updates.items():
         profiles[symbol][k] = v
-    profiles[symbol]["_updated"] = datetime.now().isoformat()
+    profiles[symbol]["_updated"] = datetime.now(UTC).isoformat()
     if reason:
         profiles[symbol]["_reason"] = reason
     with _profiles_lock:
@@ -181,7 +186,7 @@ def record_exit(symbol: str, side: str, pnl: float, reason: str,
                 hold_hours: float = 0, entry_price: float = 0, exit_price: float = 0):
     """Записать причину закрытия позиции для статистики."""
     entry = {
-        "ts": datetime.now().isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "symbol": symbol,
         "side": side,
         "pnl": round(pnl, 4),
@@ -283,7 +288,7 @@ def record_trade_result(pnl: float):
             if s["consecutive_losses"] > 0:
                 s["total_consecutive_runs"].append({
                     "type": "loss", "count": s["consecutive_losses"],
-                    "ended": datetime.now().isoformat()
+                    "ended": datetime.now(UTC).isoformat()
                 })
             s["consecutive_losses"] = 0
         else:
@@ -291,17 +296,17 @@ def record_trade_result(pnl: float):
             if s["consecutive_wins"] > 0:
                 s["total_consecutive_runs"].append({
                     "type": "win", "count": s["consecutive_wins"],
-                    "ended": datetime.now().isoformat()
+                    "ended": datetime.now(UTC).isoformat()
                 })
             s["consecutive_wins"] = 0
 
         # Cooldown logic
         losses = s["consecutive_losses"]
         if losses >= 5:
-            s["cooldown_until"] = (datetime.now().timestamp() + 86400)  # 24h стоп
+            s["cooldown_until"] = (datetime.now(UTC).timestamp() + 86400)  # 24h стоп
             logger.warning(f"🛑 LOSS STREAK {losses}: cooldown 24h!")
         elif losses >= 3:
-            s["cooldown_until"] = (datetime.now().timestamp() + 14400)  # 4h
+            s["cooldown_until"] = (datetime.now(UTC).timestamp() + 14400)  # 4h
             logger.warning(f"⚠️ LOSS STREAK {losses}: cooldown 4h, half size")
 
         _save_streak(s)
@@ -309,7 +314,7 @@ def record_trade_result(pnl: float):
 def get_streak_status() -> dict:
     """Текущий статус серии: размер позиции ×? и активен ли cooldown."""
     s = _load_streak()
-    now = datetime.now().timestamp()
+    now = datetime.now(UTC).timestamp()
     cooldown_until = s.get("cooldown_until")
 
     if cooldown_until and now < cooldown_until:
@@ -357,7 +362,7 @@ def _save_canary_state(state: dict):
     CANARY_STATE.write_text(json.dumps(state, indent=2))
 
 def _log_adjustment(entry: dict):
-    entry["ts"] = datetime.now().isoformat()
+    entry["ts"] = datetime.now(UTC).isoformat()
     try:
         LEARN_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(LEARN_LOG, "a") as f:
@@ -379,8 +384,8 @@ def is_canary_active() -> bool:
     started = state.get("started_at")
     if started:
         try:
-            started_ts = datetime.fromisoformat(started)
-            hours_elapsed = (datetime.now() - started_ts).total_seconds() / 3600
+            started_ts = _iso(started)
+            hours_elapsed = (datetime.now(UTC) - started_ts).total_seconds() / 3600
             # ── NEW: idle timeout — нет сделок > CANARY_IDLE_TIMEOUT_HOURS → авто-откат ──
             canary_trades = state.get("canary_trades", 0)
             if canary_trades == 0 and hours_elapsed > CANARY_IDLE_TIMEOUT_HOURS:
@@ -399,7 +404,7 @@ def _auto_rollback_idle_canary(state: dict, hours_elapsed: float):
     state["active"] = False
     state["rolled_back"] = True
     state["history"].append({
-        "ts": datetime.now().isoformat(), "action": "rollback",
+        "ts": datetime.now(UTC).isoformat(), "action": "rollback",
         "reason": f"idle timeout: 0 trades in {hours_elapsed:.1f}h"
     })
     _save_canary_state(state)
@@ -446,7 +451,7 @@ def get_canary_param(param_name: str, baseline_value: Any,
 
 def mark_canary_entry(symbol: str, side: str, entry_ts: float):
     entry = {"symbol": symbol, "side": side, "entry_ts": entry_ts,
-             "marked_at": datetime.now().isoformat()}
+             "marked_at": datetime.now(UTC).isoformat()}
     with _entries_lock:
         try:
             CANARY_ENTRIES.parent.mkdir(parents=True, exist_ok=True)
@@ -497,15 +502,15 @@ def record_canary_result(win: bool):
         if win:
             state["canary_wins"] = state.get("canary_wins", 0) + 1
         state["history"].append({
-            "ts": datetime.now().isoformat(), "action": "trade", "win": win,
+            "ts": datetime.now(UTC).isoformat(), "action": "trade", "win": win,
             "canary_trades": state["canary_trades"],
             "canary_wins": state["canary_wins"],
         })
         started = state.get("started_at")
         if started and state["canary_trades"] >= 10:
             try:
-                started_ts = datetime.fromisoformat(started)
-                hours_elapsed = (datetime.now() - started_ts).total_seconds() / 3600
+                started_ts = _iso(started)
+                hours_elapsed = (datetime.now(UTC) - started_ts).total_seconds() / 3600
                 if hours_elapsed >= CANARY_WINDOW_HOURS:
                     _finalize_canary(state)
                     return
@@ -519,7 +524,7 @@ def _finalize_canary(state: dict):
     if canary_trades < 5:
         state["active"] = False
         state["rolled_back"] = True
-        state["history"].append({"ts": datetime.now().isoformat(), "action": "rollback",
+        state["history"].append({"ts": datetime.now(UTC).isoformat(), "action": "rollback",
                                  "reason": f"insufficient data ({canary_trades} < 5)"})
         _save_canary_state(state)
         _log_canary_decision(state, "rollback", "insufficient data")
@@ -544,7 +549,7 @@ def _finalize_canary(state: dict):
         for sym, params in sym_params.items():
             update_symbol_profile(sym, params,
                                   f"canary promote: P(better)={prob_canary_better:.2f}")
-        state["history"].append({"ts": datetime.now().isoformat(), "action": "promote",
+        state["history"].append({"ts": datetime.now(UTC).isoformat(), "action": "promote",
                                  "reason": f"Bayesian P(better)={prob_canary_better:.3f}, "
                                            f"WR={canary_wr:.1%} CI[{ci_low:.0%}-{ci_high:.0%}]",
                                  "params": state.get("params", {})})
@@ -554,7 +559,7 @@ def _finalize_canary(state: dict):
     elif prob_canary_better < 0.05:
         # Canary статистически значимо хуже
         state["active"] = False; state["rolled_back"] = True
-        state["history"].append({"ts": datetime.now().isoformat(), "action": "rollback",
+        state["history"].append({"ts": datetime.now(UTC).isoformat(), "action": "rollback",
                                  "reason": f"Bayesian P(better)={prob_canary_better:.3f}"})
         _save_canary_state(state)
         _log_canary_decision(state, "rollback", f"P(better)={prob_canary_better:.3f}")
@@ -563,7 +568,7 @@ def _finalize_canary(state: dict):
         wr_drop = baseline_wr - canary_wr
         if wr_drop > CANARY_WR_DROP_THRESHOLD:
             state["active"] = False; state["rolled_back"] = True
-            state["history"].append({"ts": datetime.now().isoformat(), "action": "rollback",
+            state["history"].append({"ts": datetime.now(UTC).isoformat(), "action": "rollback",
                                      "reason": f"WR drop: {canary_wr:.3f} vs {baseline_wr:.3f} "
                                                f"(Bayesian P={prob_canary_better:.2f})"})
             _save_canary_state(state)
@@ -575,7 +580,7 @@ def _finalize_canary(state: dict):
             for sym, params in sym_params.items():
                 update_symbol_profile(sym, params,
                                       f"canary promote (conservative): P(better)={prob_canary_better:.2f}")
-            state["history"].append({"ts": datetime.now().isoformat(), "action": "promote",
+            state["history"].append({"ts": datetime.now(UTC).isoformat(), "action": "promote",
                                      "reason": f"Conservative: P(better)={prob_canary_better:.3f}, "
                                                f"no significant drop",
                                      "params": state.get("params", {}),
@@ -839,11 +844,11 @@ async def apply_journal_insights(journal: JournalResult, cfg) -> dict:
                 "active": True,
                 "params": new_params,
                 "baseline": baseline_vals,
-                "started_at": datetime.now().isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
                 "canary_trades": 0, "canary_wins": 0,
                 "baseline_wr": win_rate,
                 "promoted": False, "rolled_back": False,
-                "history": [{"ts": datetime.now().isoformat(), "action": "start",
+                "history": [{"ts": datetime.now(UTC).isoformat(), "action": "start",
                              "params": new_params, "baseline_wr": win_rate}],
                 "symbol_params": symbol_params,
                 "session_params": session_params,
@@ -885,7 +890,7 @@ def mark_self_learn_run():
     SELF_LEARN_STATE.parent.mkdir(parents=True, exist_ok=True)
     SELF_LEARN_STATE.write_text(json.dumps({
         "last_run_ts": time.time(),
-        "last_run_iso": datetime.now().isoformat(),
+        "last_run_iso": datetime.now(UTC).isoformat(),
     }))
 
 
@@ -940,7 +945,7 @@ def get_regime_aware_stats(db_path: str | None = None) -> dict:
     by_regime = {}
     for r in rows:
         # Приблизительно определяем режим по дате входа
-        entry_date = datetime.fromtimestamp(r["entry_at"]).strftime("%Y-%m-%d")
+        entry_date = datetime.fromtimestamp(r["entry_at"], UTC).strftime("%Y-%m-%d")
         regime = regime_log.get(entry_date, current_regime)
 
         if regime not in by_regime:
@@ -1205,7 +1210,7 @@ def save_params_snapshot(params: dict, wr: float, reason: str = "manual"):
             pass
 
     snapshots.append({
-        "ts": datetime.now().isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "params": params,
         "wr": wr,
         "reason": reason,
@@ -1237,8 +1242,8 @@ def check_global_rollback(current_wr: float, window_hours: int = 48,
         return None
 
     last_change = snapshots[-1]
-    change_ts = datetime.fromisoformat(last_change["ts"])
-    hours_since = (datetime.now() - change_ts).total_seconds() / 3600
+    change_ts = _iso(last_change["ts"])
+    hours_since = (datetime.now(UTC) - change_ts).total_seconds() / 3600
 
     if hours_since < 2:  # слишком рано
         return None
@@ -1606,7 +1611,7 @@ def update_regime_params(regime: str, updates: dict, reason: str = ""):
     if regime not in params:
         params[regime] = dict(DEFAULT_REGIME_PARAMS.get(regime, {}))
     params[regime].update(updates)
-    params[regime]["_updated"] = datetime.now().isoformat()
+    params[regime]["_updated"] = datetime.now(UTC).isoformat()
     if reason:
         params[regime]["_reason"] = reason
     save_regime_params(params)
@@ -2012,7 +2017,7 @@ class ConceptDriftDetector:
                 recent_wr = sum(self.recent_outcomes[-self.confirm_window:]) / self.confirm_window
                 if recent_wr < 0.30:
                     self.drift_detected = True
-                    self.drift_since = datetime.now()
+                    self.drift_since = datetime.now(UTC)
                     return True
 
         # Сброс если восстановились
@@ -2212,7 +2217,7 @@ def save_params_version(params: dict, reason: str, parent_version: str | None = 
     snapshot = {
         "version": version_id,
         "parent": parent_version,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "params": params,
         "reason": reason,
     }
@@ -2485,7 +2490,7 @@ class RegimeAwareDriftDetector:
                 if recent_wr < 0.30:
                     self.drift_detected = True
                     self.drift_regime = regime
-                    self.drift_since = datetime.now()
+                    self.drift_since = datetime.now(UTC)
                     return True
 
         # Recovery: drift практически исчез
@@ -2628,7 +2633,7 @@ def record_arm_assignment(symbol: str, side: str, entry_ts: float,
         return
     rec = {"symbol": symbol, "side": side, "entry_ts": float(entry_ts),
            "regime": regime, "arm_idx": int(arm_idx),
-           "ts": datetime.now().isoformat()}
+           "ts": datetime.now(UTC).isoformat()}
     try:
         ARM_ASSIGNMENTS.parent.mkdir(parents=True, exist_ok=True)
         with open(ARM_ASSIGNMENTS, "a") as f:
@@ -2755,7 +2760,7 @@ def on_trade_closed(symbol: str, side: str, pnl: float, hold_hours: float,
         profiles[symbol]["total_pnl"] += pnl
         profiles[symbol]["total_hold"] += hold_hours
         profiles[symbol]["last_exit_reason"] = exit_reason
-        profiles[symbol]["_updated"] = datetime.now().isoformat()
+        profiles[symbol]["_updated"] = datetime.now(UTC).isoformat()
         with _profiles_lock:
             _save_symbol_profiles(profiles)
     except Exception:
@@ -2811,7 +2816,7 @@ def weighted_wr(trades: list, decay_rate: float = 0.005) -> float:
     decay_rate=0.005 → через 200 дней вес = 37%."""
     if not trades:
         return 0.0
-    now = datetime.now()
+    now = datetime.now(UTC)
     weights, wins = [], []
     for t in trades:
         closed_ts = t.get("closed_at") if isinstance(t, dict) else getattr(t, "closed_at", None)
@@ -2819,7 +2824,7 @@ def weighted_wr(trades: list, decay_rate: float = 0.005) -> float:
             closed_ts = t.get("entry_at") if isinstance(t, dict) else getattr(t, "entry_at", None)
         if closed_ts:
             try:
-                age_days = (now - datetime.fromtimestamp(float(closed_ts))).total_seconds() / 86400
+                age_days = (now - datetime.fromtimestamp(float(closed_ts), UTC)).total_seconds() / 86400
                 w = max(0.05, __import__('math').exp(-decay_rate * age_days))
             except (ValueError, OSError):
                 w = 1.0
@@ -2835,7 +2840,7 @@ def weighted_composite_score(trades: list, regime: str | None = None, decay_rate
     """Composite score с exponential decay."""
     if not trades:
         return {"score": 0.5, "wr": 0, "pf": 0, "sharpe": 0, "max_dd": 0, "avg_hold": 0}
-    now = datetime.now()
+    now = datetime.now(UTC)
     weights, pnls, holds = [], [], []
     for t in trades:
         closed_ts = (t.get("closed_at") if isinstance(t, dict) else getattr(t, "closed_at", None)) or \
@@ -2843,7 +2848,7 @@ def weighted_composite_score(trades: list, regime: str | None = None, decay_rate
         w = 1.0
         if closed_ts:
             try:
-                age_days = (now - datetime.fromtimestamp(float(closed_ts))).total_seconds() / 86400
+                age_days = (now - datetime.fromtimestamp(float(closed_ts), UTC)).total_seconds() / 86400
                 w = max(0.05, __import__('math').exp(-decay_rate * age_days))
             except (ValueError, OSError):
                 pass
