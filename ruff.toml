@@ -4,11 +4,10 @@
 # цикла: падение одной стратегии или телеметрии не должно убивать 30-секундный
 # цикл. Всё остальное линтер проверяет.
 #
-# main.py — deprecation-заглушка (sys.exit на строке 3, весь код ниже не
-# выполняется). gridsignal-bot.py — legacy бот, заменён gridsignal_scanner.py.
-# Оба — мёртвый код, в линт не берём.
+# gridsignal-bot.py — legacy бот, заменён gridsignal_scanner.py, но на нём висит
+# живой тест test_async_blocking_gridsignal.py (сканирует на async-блокировки) —
+# в линт не берём.
 exclude = [
-    "main.py",
     "gridsignal-bot.py",
 ]
 
