@@ -249,8 +249,7 @@ def check_correlation(positions):
                         messages.remove(orig_msg)
 
         # Добавляем батчированные сообщения
-        for batch_msg in batched.values():
-            messages.append(batch_msg)
+        messages.extend(batched.values())
 
     # Save snapshot for dashboard
     result = {

@@ -139,9 +139,8 @@ def check_regime(force: bool = False) -> dict:
     now = time.time()
 
     # Return cache if fresh enough
-    if not force and (now - _regime_cache["ts"]) < REGIME_CACHE_TTL:
-        if _regime_cache["regime"] != "UNKNOWN":
-            return _regime_cache
+    if not force and (now - _regime_cache["ts"]) < REGIME_CACHE_TTL and _regime_cache["regime"] != "UNKNOWN":
+        return _regime_cache
 
     try:
         # Fetch BTC and ETH klines (1h candles, 24 candles = 24h)

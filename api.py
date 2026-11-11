@@ -107,9 +107,7 @@ _CB_MAX_COOLDOWN = 900 # максимум паузы (15 мин) — exponential
 
 def _cb_check() -> bool:
     """Проверить circuit breaker. True = можно делать запрос."""
-    if _cb_until > 0 and time.monotonic() < _cb_until:
-        return False  # тормоз активен
-    return True
+    return not (_cb_until > 0 and time.monotonic() < _cb_until)  # False = тормоз активен
 
 
 def _cb_record(success: bool):

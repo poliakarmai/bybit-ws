@@ -13,4 +13,4 @@ exclude = [
 ]
 
 [lint]
-ignore = ["BLE001", "S110"]
+ignore = ["BLE001", "S110", "N999"]  # N999: __init__.py/__main__.py — стандартные dunder-файлы

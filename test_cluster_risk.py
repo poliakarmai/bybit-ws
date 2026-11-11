@@ -170,13 +170,13 @@ class TestPortfolioSlice:
     while any single correlation cluster is only ~$15.
     """
 
-    POSITIONS = {
+    POSITIONS = {  # noqa: RUF012 — фикстура теста
         'BBBUSDT': {'side': 'Buy', 'size': 1, 'entry': 100, 'stopLoss': 90, 'margin': 30},
         'CCCUSDT': {'side': 'Buy', 'size': 1, 'entry': 100, 'stopLoss': 90, 'margin': 30},
         'DDDUSDT': {'side': 'Buy', 'size': 1, 'entry': 100, 'stopLoss': 90, 'margin': 30},
     }
     # new symbol correlates with nothing above threshold -> cluster empty, portfolio $30 > $25
-    LOW_PAIRS = [['AAAUSDT', 'BBBUSDT', 0.30]]
+    LOW_PAIRS = [['AAAUSDT', 'BBBUSDT', 0.30]]  # noqa: RUF012 — фикстура теста
 
     def test_portfolio_over_budget_flags_even_without_cluster(self):
         with patch('bybit_ws.risk_manager._load_correlation_snapshot',

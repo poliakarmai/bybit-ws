@@ -61,11 +61,10 @@ def rotate_watchlist():
         for line in r.stdout.split('\n')[:80]:
             parts = line.split()
             for p in parts:
-                if p.endswith('USDT') and len(p) > 6:
-                    if p not in symbols:
-                        symbols.append(p)
-                        if len(symbols) >= 40:
-                            break
+                if p.endswith('USDT') and len(p) > 6 and p not in symbols:
+                    symbols.append(p)
+                    if len(symbols) >= 40:
+                        break
             if len(symbols) >= 40:
                 break
         _save_watchlist(symbols)

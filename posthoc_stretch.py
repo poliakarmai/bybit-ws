@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.request
 from collections import Counter
+from pathlib import Path
 
 DB = "/home/openclaw/.local/share/bybit-ws/state.db"
 CACHE = os.path.expanduser("~/.cache/bybit-ws-daily-kline.json")
@@ -112,18 +113,18 @@ def maxdd(pnls):
 def metrics(ts):
     n = len(ts)
     if not n:
-        return dict(n=0, wr=0, pnl=0, pf=0, avg=0, dd=0)
+        return {"n": 0, "wr": 0, "pnl": 0, "pf": 0, "avg": 0, "dd": 0}
     p = [t["pnl"] for t in ts]
     wins = [x for x in p if x > 0]
     losses = [x for x in p if x <= 0]
-    return dict(
-        n=n,
-        wr=100 * len(wins) / n,
-        pnl=sum(p),
-        pf=sum(wins) / abs(sum(losses)) if losses and sum(losses) else math.inf,
-        avg=sum(p) / n,
-        dd=maxdd(p),
-    )
+    return {
+        "n": n,
+        "wr": 100 * len(wins) / n,
+        "pnl": sum(p),
+        "pf": sum(wins) / abs(sum(losses)) if losses and sum(losses) else math.inf,
+        "avg": sum(p) / n,
+        "dd": maxdd(p),
+    }
 
 
 def perm_test(a, b, iters=20000, seed=42):
@@ -162,14 +163,14 @@ def table(title, trades):
 # ---------- main ----------
 def run():
     trades = load_trades()
-    cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
+    cache = json.loads(Path(CACHE).read_text()) if os.path.exists(CACHE) else {}
     # fetch only what's needed: WARM days before earliest entry .. today
     start = min(t["entry_at"] for t in trades) * 1000 - WARM * DAY
     end = int(time.time() * 1000)
     symbols = sorted({t["symbol"] for t in trades})
     for s in symbols:
         fetch_daily(s, start, end, cache)
-    json.dump(cache, open(CACHE, "w"))
+    Path(CACHE).write_text(json.dumps(cache))
 
     ok, skipped = [], []
     for t in trades:
@@ -222,7 +223,7 @@ def selftest():
     ts = []
     for i in range(200):
         bad = i % 4 == 0
-        ts.append(dict(side="Buy", pnl=-5.0 if bad else 1.0, stretch=0.8 if bad else 0.1))
+        ts.append({"side": "Buy", "pnl": -5.0 if bad else 1.0, "stretch": 0.8 if bad else 0.1})
     m0, mk = metrics(ts), metrics([t for t in ts if t["stretch"] <= 0.5])
     assert m0["n"] == 200 and m0["wr"] == 75.0, m0
     assert mk["n"] == 150 and mk["pnl"] > m0["pnl"] and mk["wr"] == 100.0, mk

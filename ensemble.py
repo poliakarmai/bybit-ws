@@ -262,7 +262,7 @@ if __name__ == '__main__':
         enter, conf, details = ensemble_should_enter(signal, market)
         print(f'Enter: {enter} (conf={conf:.2f})')
         print(f'Score: {details["weighted_score"]} / {details["threshold"]}')
-        for k, v in details['reasons'].items():
+        for v in details['reasons'].values():
             print(f'  {v}')
         print(f'Weights: {details["weights"]}')
     elif len(sys.argv) > 1 and sys.argv[1] == 'weights':

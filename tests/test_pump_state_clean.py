@@ -39,7 +39,7 @@ def _make_data_dir(tmp_path, symbols):
                         [(s,) for s in symbols])
     db.conn.commit()
     (tmp_path / 'pumps.json').write_text(
-        '{%s}' % ','.join('"%s": {}' % s for s in symbols))
+        '{%s}' % ','.join('"%s": {}' % s for s in symbols))  # noqa: UP031 — тестовый %-формат
     return Path(tmp_path), db
 
 

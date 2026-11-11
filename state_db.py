@@ -600,9 +600,8 @@ class StateDB:
         if not isinstance(val, dict):
             return None
         try:
-            if entry_price and val.get('entry'):
-                if abs(float(val['entry']) - float(entry_price)) / float(entry_price) > entry_tol:
-                    return None
+            if entry_price and val.get('entry') and abs(float(val['entry']) - float(entry_price)) / float(entry_price) > entry_tol:
+                return None
         except (TypeError, ValueError, ZeroDivisionError):
             return None
         return val

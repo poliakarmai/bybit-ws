@@ -63,9 +63,8 @@ def _should_alert(level_key: str, cooldown: float | None = None) -> bool:
     cd = cooldown or _MARGIN_ALERT_COOLDOWN
     # Очистка старых записей
     state = {k: v for k, v in state.items() if now - v < max(cd, _MARGIN_ALERT_COOLDOWN) * 2}
-    if level_key in state:
-        if now - state[level_key] < cd:
-            return False
+    if level_key in state and now - state[level_key] < cd:
+        return False
     state[level_key] = now
     _save_alert_state(state)
     return True

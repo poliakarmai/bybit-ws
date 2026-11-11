@@ -35,7 +35,7 @@ def load_params(path: str | None) -> dict:
         return dict(engine.DEFAULT_PARAMS)
     raw = json.loads(Path(path).read_text())
     if not isinstance(raw, dict):
-        raise ValueError("params.json должен быть JSON-объектом {param: value}")
+        raise ValueError("params.json должен быть JSON-объектом {param: value}")  # noqa: TRY004 — CLI-валидация
     merged = dict(engine.DEFAULT_PARAMS)
     merged.update(raw)
     return merged

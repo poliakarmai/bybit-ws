@@ -27,7 +27,7 @@ class TestVolatilityScaleDisabled:
 
 
 class TestIsHighVolatilityEnabled:
-    CFG = {
+    CFG = {  # noqa: RUF012 — фикстура теста
         'enabled': True,
         'atr_ratio_threshold': 2.0,
         'baseline_days': 20,
@@ -73,7 +73,7 @@ class TestIsHighVolatilityEnabled:
 
 
 class TestVolatilityScaleEnabled:
-    CFG = {
+    CFG = {  # noqa: RUF012 — фикстура теста
         'enabled': True,
         'atr_ratio_threshold': 2.0,
         'baseline_days': 20,

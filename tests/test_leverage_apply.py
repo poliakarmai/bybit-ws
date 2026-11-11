@@ -133,7 +133,7 @@ def test_manual_entry_marks_position_exactly_once():
     Два вызова (первый с note+auto_sltp, второй с leverage) перезаписывали друг друга —
     позиция теряла auto_sltp=True и заметку, т.е. оставалась без авто-SL/TP.
     """
-    src = open(os.path.join(os.path.dirname(__file__), '..', 'rpc.py'), encoding='utf-8').read()
+    src = open(os.path.join(os.path.dirname(__file__), '..', 'rpc.py'), encoding='utf-8').read()  # noqa: SIM115
     hits = [m.start() for m in re.finditer(r'mark_manual_position\(', src)]
     assert len(hits) == 1, f'mark_manual_position вызывается {len(hits)} раз'
     call = ' '.join(src[hits[0]:hits[0] + 200].split())

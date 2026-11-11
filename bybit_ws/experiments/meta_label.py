@@ -330,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             feats = build_features(klines, idx, bb_period=params.get("bb_period", 20),
                                    bb_std=params.get("bb_std_mult", 2.0))
-        except Exception:
+        except Exception:  # noqa: S112 — намеренный skip битой записи
             continue
 
         if any(not math.isfinite(v) for v in feats):
@@ -356,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
                 vertical_bars=args.vertical_bars,
                 klines=klines,
             )
-        except Exception:
+        except Exception:  # noqa: S112 — намеренный skip битой записи
             continue
 
         # Map label: +1 (TP) → 1, else → 0

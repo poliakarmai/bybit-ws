@@ -57,10 +57,9 @@ def trailing_sl(positions):
                 # Защита: не опускаем SL, если он уже в прибыли
                 if current_sl is not None and current_sl > entry:
                     continue  # SL уже зафиксирован выше входа — не трогаем
-                if current_sl is None or sl_target > (current_sl or 0):
-                    if mark > sl_target > entry:
-                        actions.append((sym, idx, side, size, sl_target))
-                        log_event(f'🔺 Trailing SL {sym}: entry=${entry:.4f} mark=${mark:.4f} pnl={pnl_pct:.1f}% W_bb={bb_pos:.0f}% → SL=${sl_target:.4f}')
+                if (current_sl is None or sl_target > (current_sl or 0)) and mark > sl_target > entry:
+                    actions.append((sym, idx, side, size, sl_target))
+                    log_event(f'🔺 Trailing SL {sym}: entry=${entry:.4f} mark=${mark:.4f} pnl={pnl_pct:.1f}% W_bb={bb_pos:.0f}% → SL=${sl_target:.4f}')
         elif side == 'Sell':
             # SHORT: цена у нижней полосы, профит >15%
             pnl_pct = (entry - mark) / entry * 100
@@ -74,10 +73,9 @@ def trailing_sl(positions):
                 # Защита: не поднимаем SL для SHORT, если он уже в прибыли
                 if current_sl is not None and current_sl < entry:
                     continue  # SL уже зафиксирован ниже входа — не трогаем
-                if current_sl is None or sl_target < (current_sl or float('inf')):
-                    if entry > sl_target > mark:
-                        actions.append((sym, idx, side, size, sl_target))
-                        log_event(f'🔻 Trailing SL {sym}: entry=${entry:.4f} mark=${mark:.4f} pnl={pnl_pct:.1f}% W_bb={bb_pos:.0f}% → SL=${sl_target:.4f}')
+                if (current_sl is None or sl_target < (current_sl or float('inf'))) and entry > sl_target > mark:
+                    actions.append((sym, idx, side, size, sl_target))
+                    log_event(f'🔻 Trailing SL {sym}: entry=${entry:.4f} mark=${mark:.4f} pnl={pnl_pct:.1f}% W_bb={bb_pos:.0f}% → SL=${sl_target:.4f}')
     return actions
 
 def apply_trailing_sl(actions):
@@ -249,13 +247,12 @@ def trailing_sl_x10(positions):
             # Защита: не опускаем SL, если он уже в прибыли (ручная фиксация)
             if current_sl is not None and current_sl > entry:
                 continue
-            if current_sl is None or sl_target > (current_sl or 0):
-                if mark > sl_target > entry:
-                    actions.append((sym, idx, side, size, sl_target))
-                    log_event(
-                        f'⚡ x10 Trail SL {sym}: entry=${entry:.4f} '
-                        f'mark=${mark:.4f} pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
-                    )
+            if (current_sl is None or sl_target > (current_sl or 0)) and mark > sl_target > entry:
+                actions.append((sym, idx, side, size, sl_target))
+                log_event(
+                    f'⚡ x10 Trail SL {sym}: entry=${entry:.4f} '
+                    f'mark=${mark:.4f} pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
+                )
 
         elif side == 'Sell':
             pnl_pct = (entry - mark) / entry * 100
@@ -274,12 +271,11 @@ def trailing_sl_x10(positions):
             # Защита: не поднимаем SL для SHORT, если он уже в прибыли
             if current_sl is not None and current_sl < entry:
                 continue
-            if current_sl is None or sl_target < (current_sl or float('inf')):
-                if entry > sl_target > mark:
-                    actions.append((sym, idx, side, size, sl_target))
-                    log_event(
-                        f'⚡ x10 Trail SL {sym}: entry=${entry:.4f} '
-                        f'mark=${mark:.4f} pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
-                    )
+            if (current_sl is None or sl_target < (current_sl or float('inf'))) and entry > sl_target > mark:
+                actions.append((sym, idx, side, size, sl_target))
+                log_event(
+                    f'⚡ x10 Trail SL {sym}: entry=${entry:.4f} '
+                    f'mark=${mark:.4f} pnl={pnl_pct:.1f}% → SL=${sl_target:.4f}'
+                )
 
     return actions

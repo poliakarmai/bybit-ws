@@ -337,7 +337,7 @@ if __name__ == '__main__':
     # Быстрый тест
     if not HAS_GYM:
         print("❌ gymnasium не установлен")
-        exit(1)
+        raise SystemExit(1)
 
     # Тест на синтетических данных
     np.random.seed(42)

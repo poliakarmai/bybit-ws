@@ -479,7 +479,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         json.dump(params_arg, pfile)
                     cmd.extend(["--params", params_path])
                 try:
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
+                    r = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=180)  # returncode/stdout обрабатывается ниже
                     if r.returncode != 0:
                         text = f"❌ Backtest error:\n{r.stderr or r.stdout or 'unknown error'}"
                     elif not os.path.exists(out_path):

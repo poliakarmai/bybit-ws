@@ -51,9 +51,9 @@ def load_trade_history(db_path: str | Path = STATE_DB) -> list[dict[str, Any]]:
             exit_p = float(r["exit_price"])
             size = float(r["size"])
             pnl = float(r["pnl"] or 0)
-            fees = float(r["fees"] or 0) if "fees" in r.keys() else 0.0
-            side = r["side"] if "side" in r.keys() else "Buy"
-            closed_at = r["closed_at"] if "closed_at" in r.keys() else ""
+            fees = float(r["fees"] or 0) if "fees" in r else 0.0
+            side = r.get("side", "Buy")
+            closed_at = r.get("closed_at", "")
 
             # Normalize PnL direction for SHORT
             if side == "Sell":
@@ -69,7 +69,7 @@ def load_trade_history(db_path: str | Path = STATE_DB) -> list[dict[str, Any]]:
                 "size": size,
                 "pnl": pnl,
                 "pnl_pct": pnl / (entry * size) * 100 if entry * size > 0 else 0,
-                "strategy": r["strategy"] if "strategy" in r.keys() else "",
+                "strategy": r.get("strategy", ""),
                 "closed_at": closed_at,
             })
         except (TypeError, ValueError, KeyError):

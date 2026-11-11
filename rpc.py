@@ -477,7 +477,7 @@ class RPCHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # тихий режим
 
-    _OLD_TOKENS = {}  # {old_token: expires_at}
+    _OLD_TOKENS = {}  # noqa: RUF012 — класс-кэш токенов
     _JWT_SECRET = None  # cached JWT secret
     _JWT_ALGORITHM = 'HS256'
 
@@ -1490,9 +1490,8 @@ class RPCHandler(BaseHTTPRequestHandler):
         idem_key = self.headers.get('Idempotency-Key', '')
         if idem_key:
             cached = _idem_cache.get(idem_key)
-            if cached:
-                if time.time() - cached['ts'] < 3600:
-                    return _json_response(self, cached['response'], 200)
+            if cached and time.time() - cached['ts'] < 3600:
+                return _json_response(self, cached['response'], 200)
         # ── Валидация ──
         symbol = body.get('symbol', '').strip().upper()
         if not symbol or not symbol.endswith('USDT'):

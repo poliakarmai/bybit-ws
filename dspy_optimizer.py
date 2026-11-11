@@ -53,9 +53,9 @@ HMAC_SECRET: bytes = _HMAC_RAW.encode()
 
 def _sign_file(path: Path) -> None:
     """Подписать файл HMAC-SHA256."""
-    sha = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
     sig = hmac.new(HMAC_SECRET, sha.encode(), hashlib.sha256).hexdigest()
-    open(str(path) + '.hmac', 'w').write(sig)
+    Path(str(path) + '.hmac').write_text(sig)
 
 
 def _verify_file(path: Path) -> bool:
@@ -63,9 +63,9 @@ def _verify_file(path: Path) -> bool:
     sig_path = str(path) + '.hmac'
     if not os.path.exists(sig_path):
         return False
-    sha = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
     expected = hmac.new(HMAC_SECRET, sha.encode(), hashlib.sha256).hexdigest()
-    actual = open(sig_path).read().strip()
+    actual = Path(sig_path).read_text().strip()
     return hmac.compare_digest(expected, actual)
 
 
@@ -451,10 +451,9 @@ def predict(signal_data: dict) -> float | None:
         hmac_check_path = DSPY_MODEL_PATH / 'metadata.json' if DSPY_MODEL_PATH.is_dir() else DSPY_MODEL_PATH
         if not hmac_check_path.exists():
             hmac_check_path = DSPY_MODEL_PATH
-        if hmac_check_path.exists() and hmac_check_path.suffix == '.json':
-            if not _verify_file(hmac_check_path):
-                log_event('⚠️ DSPy: HMAC mismatch — модель могла быть изменена')
-                return None
+        if hmac_check_path.exists() and hmac_check_path.suffix == '.json' and not _verify_file(hmac_check_path):
+            log_event('⚠️ DSPy: HMAC mismatch — модель могла быть изменена')
+            return None
 
         # Загружаем через dspy.load (родной загрузчик)
         program = dspy.load(str(DSPY_MODEL_PATH))

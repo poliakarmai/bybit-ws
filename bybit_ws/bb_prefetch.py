@@ -44,7 +44,7 @@ def prefetch_bb_for_all(symbols: list[str], interval: str = 'D') -> int:
                 'ts': now,
             }
             loaded += 1
-        except Exception:
+        except Exception:  # noqa: S112 — намеренный skip битой записи
             continue
 
     return loaded

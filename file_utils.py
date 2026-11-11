@@ -23,7 +23,7 @@ def locked_open(path: str, mode: str = 'w'):
     with lock:
         if 'r' in mode and 'w' not in mode and 'a' not in mode:
             # Чтение: просто блокировка
-            f = open(path, mode)
+            f = open(path, mode)  # noqa: SIM115 — locked_open, закрыт в finally
             try:
                 yield f
             finally:

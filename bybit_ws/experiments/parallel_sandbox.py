@@ -67,7 +67,7 @@ def load_variants(path: str | None) -> list[dict]:
         for name, params in raw.items():
             variants.append({"name": name, "params": params})
     else:
-        raise ValueError("variants.json должен быть списком или объектом {name: params}")
+        raise ValueError("variants.json должен быть списком или объектом {name: params}")  # noqa: TRY004 — CLI-валидация
     return variants
 
 

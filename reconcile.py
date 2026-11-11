@@ -27,6 +27,7 @@ import os
 import sqlite3
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 try:
     from .file_utils import safe_json_write
@@ -371,7 +372,7 @@ def main():
     if a.offline:
         if not os.path.exists(out_path):
             sys.exit(f'нет сохранённого отчёта: {out_path}')
-        rep = json.load(open(out_path))
+        rep = json.loads(Path(out_path).read_text())
         print(json.dumps(rep, ensure_ascii=False, indent=1) if a.json else render(rep))
         return
 

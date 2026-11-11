@@ -603,9 +603,8 @@ def get_cached_world_prediction(symbol: str, force_refresh: bool = False):
     now = time.time()
 
     # Return cached if fresh
-    if not force_refresh and symbol in _world_cache:
-        if _world_cache_ts.get(symbol, 0) > now - _CACHE_TTL:
-            return _world_cache[symbol]
+    if not force_refresh and symbol in _world_cache and _world_cache_ts.get(symbol, 0) > now - _CACHE_TTL:
+        return _world_cache[symbol]
 
     try:
         model, scaler_params = _ensure_world_model()

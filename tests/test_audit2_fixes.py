@@ -175,7 +175,7 @@ def test_circuit_breaker_persisted(monkeypatch):
     monkeypatch.setattr(rm, '_circuit_breaker_active', False, raising=False)
 
     class _Cfg:
-        risk = {'max_daily_loss': 50}
+        risk = {'max_daily_loss': 50}  # noqa: RUF012 — фикстура теста
 
     monkeypatch.setattr(rm, '_cb_restored', True, raising=False)
     active, reason = rm.check_circuit_breaker(_Cfg())

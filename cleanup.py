@@ -91,9 +91,8 @@ def report_expired_orders(orders_now, now_ts):
 def clean_stale_orders(positions, orders):
     cleaned = []
     active_syms = set(positions.keys())
-    for key, o in orders.items():
-        if o['kind'] in ('SL', 'TP'):
-            if o['symbol'] not in active_syms:
-                cancel_order(o['symbol'], o['orderId'])
-                cleaned.append(f'🗑️ Мусор {o["kind"]} {o["symbol"]} @ ${o.get("trigger") or o.get("price"):.4f} — позиции нет')
+    for o in orders.values():
+        if o['kind'] in ('SL', 'TP') and o['symbol'] not in active_syms:
+            cancel_order(o['symbol'], o['orderId'])
+            cleaned.append(f'🗑️ Мусор {o["kind"]} {o["symbol"]} @ ${o.get("trigger") or o.get("price"):.4f} — позиции нет')
     return cleaned

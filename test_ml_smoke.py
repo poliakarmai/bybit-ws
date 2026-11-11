@@ -54,7 +54,7 @@ try:
     assert feat.shape == (13,), f'Expected (13,), got {feat.shape}'
     print(f'  ✅ _dict_to_features: shape={feat.shape}')
 
-    if hasattr(predict, '__call__'):
+    if callable(predict):
         action, name, conf = predict(feat)
         assert action in (0, 1, 2), f'Invalid action: {action}'
         print(f'  ✅ predict: action={action} ({name}) conf={conf:.2f}')

@@ -288,9 +288,8 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
         best, best_side = None, None
         if long_score and long_score["score"] >= min_score:
             best, best_side = long_score, "Buy"
-        if short_score and short_score["score"] >= min_score:
-            if not best or short_score["score"] > best["score"]:
-                best, best_side = short_score, "Sell"
+        if short_score and short_score["score"] >= min_score and (not best or short_score["score"] > best["score"]):
+            best, best_side = short_score, "Sell"
 
         if not best:
             equity_curve.append(exchange.equity)

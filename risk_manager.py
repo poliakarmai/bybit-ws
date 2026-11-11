@@ -242,7 +242,7 @@ def get_daily_pnl() -> dict:
             with open(positions_file) as f:
                 positions = json.load(f)
             if isinstance(positions, dict):
-                for sym, p in positions.items():
+                for p in positions.values():
                     if isinstance(p, dict):
                         result['unrealized_pnl'] += float(p.get('upnl', 0) or 0)
                 result['position_count'] = len(positions)
@@ -440,7 +440,7 @@ def cluster_risk(
         for pair in pairs:
             try:
                 s1, s2, r = pair[0], pair[1], float(pair[2])
-            except Exception:
+            except Exception:  # noqa: S112 — намеренный skip битой записи
                 continue
             if new_symbol not in (s1, s2):
                 continue

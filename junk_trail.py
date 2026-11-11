@@ -59,7 +59,7 @@ def trailing_junk_tp(positions, orders):
 
     # Собираем TP-ордера для JUNK-позиций
     tp_orders = {}  # sym -> [(orderId, price, qty), ...]
-    for key, o in orders.items():
+    for o in orders.values():
         if o['kind'] == 'TP' and o['side'] == 'Buy' and o['status'] in ('New', 'PartiallyFilled', 'Untriggered'):
             sym = o['symbol']
             if sym not in tp_orders:

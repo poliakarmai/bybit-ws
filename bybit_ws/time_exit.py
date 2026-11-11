@@ -99,10 +99,9 @@ def check_time_exit(positions: dict, open_orders: dict | None = None) -> list:
         has_tp_fill = False
         if open_orders:
             for o in (open_orders.values() if isinstance(open_orders, dict) else open_orders):
-                if isinstance(o, dict) and o.get('symbol') == sym:
-                    if o.get('kind') == 'TP' and o.get('status') == 'PartiallyFilled':
-                        has_tp_fill = True
-                        break
+                if isinstance(o, dict) and o.get('symbol') == sym and o.get('kind') == 'TP' and o.get('status') == 'PartiallyFilled':
+                    has_tp_fill = True
+                    break
 
         if has_tp_fill:
             continue  # был частичный TP — позиция двигалась

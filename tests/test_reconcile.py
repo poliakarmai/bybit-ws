@@ -118,9 +118,9 @@ def test_read_db_against_temp_db_and_matching_diff():
         db.conn.commit()
         db.close()
 
-        before = open(path, 'rb').read()
+        before = open(path, 'rb').read()  # noqa: SIM115
         dbr = reconcile.read_db(1_790_000_000 - 1, 1_790_000_000 + 1, path)
-        assert open(path, 'rb').read() == before, 'read_db изменила файл БД'
+        assert open(path, 'rb').read() == before, 'read_db изменила файл БД'  # noqa: SIM115
         assert dbr['ro']['total_changes'] == 0
         assert dbr['ro']['data_version_before'] == dbr['ro']['data_version_after']
 

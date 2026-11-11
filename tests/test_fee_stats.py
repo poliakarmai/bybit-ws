@@ -12,6 +12,8 @@ import sys
 sys.path.insert(0, '/home/openclaw')
 sys.path.insert(0, '/home/openclaw/bybit-ws')
 
+from pathlib import Path
+
 from bybit_ws import fee_stats as fs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,10 +51,10 @@ def test_summarize_basics():
 def test_entry_limits_are_post_only():
     """Входные лимитки авто-ветки — только PostOnly (закрытия остаются IOC)."""
     for fname in ('auto_entry.py', 'auto_short.py'):
-        src = open(os.path.join(ROOT, fname)).read()
+        src = Path(ROOT, fname).read_text()
         assert "'timeInForce': 'PostOnly'" in src, f'{fname}: входной ордер не PostOnly'
         assert "'timeInForce': 'GTC'" not in src, f'{fname}: входной ордер снова GTC'
-    assert "'timeInForce': 'IOC'" in open(os.path.join(ROOT, 'auto_short.py')).read(), \
+    assert "'timeInForce': 'IOC'" in Path(ROOT, 'auto_short.py').read_text(), \
         'auto_short: закрытие потеряло IOC'
 
 

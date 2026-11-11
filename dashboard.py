@@ -9,6 +9,7 @@ v2.7: + секция использования маржи (из positions.json)
 """
 
 import json
+import logging
 import os
 import sys
 from datetime import UTC, datetime
@@ -122,11 +123,11 @@ def compute_margin_stats(positions: dict) -> dict:
             from bybit_ws.config import Config
             max_margin = float(Config().risk.get('max_total_margin', 500))
         except Exception as e:
-            import logging; logging.getLogger('bybit.dashboard').warning(f'dashboard: {e}')
+            logging.getLogger('bybit.dashboard').warning(f'dashboard: {e}')
 
     total_margin = 0.0
     if positions:
-        for sym, p in positions.items():
+        for p in positions.values():
             margin = float(p.get('positionIM', 0))
             if margin == 0:
                 size = float(p.get('size', 0))

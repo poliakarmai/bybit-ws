@@ -68,7 +68,7 @@ def check_funding_flip():
                     except Exception as e:
                         log_event(f'⚠️ health: {e}')
                     break
-        except Exception:
+        except Exception:  # noqa: S112 — намеренный skip битой записи
             continue
     for sym, new_val in new_funding.items():
         old_val = old_funding.get(sym)
@@ -172,7 +172,7 @@ def check_funding_pump():
                 f'Цена ${bb["cur"]:.4f}, Upper ${bb["upper"]:.4f}'
             )
 
-        except Exception:
+        except Exception:  # noqa: S112 — намеренный skip битой записи
             continue
 
     save_json(os.path.join(DATA_DIR, 'funding_pump.json'), state)

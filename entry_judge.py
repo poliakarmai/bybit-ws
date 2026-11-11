@@ -136,8 +136,7 @@ Check:
             return {
                 "verdict": "revise",
                 "blocking_issues": [
-                    f"LLM circuit open — Entry Judge disabled for "
-                    f"{remaining}s"
+                    f"LLM circuit open — Entry Judge disabled for {remaining}s"
                 ],
                 "confidence": 0.0,
                 "notes": "circuit_breaker",

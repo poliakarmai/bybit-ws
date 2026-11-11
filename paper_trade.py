@@ -370,9 +370,8 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
         best_side = None
         if long_score and long_score['score'] >= MIN_SCORE:
             best, best_side = long_score, 'Buy'
-        if short_score and short_score['score'] >= MIN_SCORE:
-            if not best or short_score['score'] > best['score']:
-                best, best_side = short_score, 'Sell'
+        if short_score and short_score['score'] >= MIN_SCORE and (not best or short_score['score'] > best['score']):
+            best, best_side = short_score, 'Sell'
 
         if not best:
             equity_curve.append(exchange.equity)
