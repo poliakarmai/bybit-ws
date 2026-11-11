@@ -36,3 +36,20 @@ bybit-ws = "bybit_ws.main:run_cli"
 
 [tool.setuptools.packages.find]
 include = ["bybit_ws*"]
+
+[tool.mypy]
+# Симлинк-структура (bybit_ws/*.py -> ../*.py) + root __init__.py в папке с дефисом
+# «bybit-ws» ломают стандартный package-discovery mypy. explicit_package_bases +
+# mypy_path=. заставляют mypy резолвить пакет как bybit_ws (underscore).
+# follow_imports=skip — проверяем только тела целевых модулей, не тянем транзитивно
+# весь репо (в exchange_adapter/constants есть своя недоделанная типизация).
+files = [
+    "bybit_ws/file_utils.py",
+    "bybit_ws/config.py",
+    "bybit_ws/state_db.py",
+    "bybit_ws/api.py",
+]
+explicit_package_bases = true
+mypy_path = "."
+follow_imports = "skip"
+ignore_missing_imports = true

@@ -8,6 +8,7 @@ If no config exists, creates config.example.yaml with defaults.
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -40,7 +41,7 @@ def _env_subst(obj):
 
 # ── Default configuration ────────────────────────────────────────────────────
 
-_DEFAULT_STRATEGY_LONG = {
+_DEFAULT_STRATEGY_LONG: dict[str, Any] = {
     'leverage': 3,
     'margin_tiers': {7: 15, 5.5: 10, 0: 5},
     'entry_offset': 0.03,
@@ -503,7 +504,7 @@ def _lazy_config():
 # Make `config` a module-level attribute that lazily resolves
 import sys as _sys
 
-_module = _sys.modules[__name__]
+_module: Any = _sys.modules[__name__]
 
 
 class _LazyConfig:
