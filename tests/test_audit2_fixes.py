@@ -12,10 +12,10 @@ import sys
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
+import pytest
 
-from bybit_ws import api as api_mod  # noqa: E402
-from bybit_ws import risk_manager as rm  # noqa: E402
+from bybit_ws import api as api_mod
+from bybit_ws import risk_manager as rm
 
 
 # ── 1. Концентрация fail-closed ────────────────────────────────────────────
@@ -169,7 +169,7 @@ def test_order_link_id_not_overridden(monkeypatch):
 # ── 4. Персист circuit breaker ─────────────────────────────────────────────
 def test_circuit_breaker_persisted(monkeypatch):
     saved = {}
-    monkeypatch.setattr(rm, '_load_risk_state', lambda: {})
+    monkeypatch.setattr(rm, '_load_risk_state', dict)
     monkeypatch.setattr(rm, '_save_risk_state', lambda st: saved.update(st))
     monkeypatch.setattr(rm, 'get_daily_pnl', lambda: {'total_pnl': -100.0})
     monkeypatch.setattr(rm, '_circuit_breaker_active', False, raising=False)

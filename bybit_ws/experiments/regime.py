@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -28,8 +28,7 @@ from scipy.stats import t as student_t
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from bybit_ws.experiments import engine  # noqa: E402
-
+from bybit_ws.experiments import engine
 
 # ---------------------------------------------------------------------------
 # GaussianHMM — диагональная ковариация, scaled forward-backward, Viterbi
@@ -153,7 +152,7 @@ class GaussianHMM:
 
     # ── Fit (Baum-Welch EM) ────────────────────────────────────
 
-    def fit(self, X: np.ndarray) -> "GaussianHMM":
+    def fit(self, X: np.ndarray) -> GaussianHMM:
         """Baum-Welch EM. X: (T, D)."""
         X = np.asarray(X, dtype=np.float64)
         if X.ndim == 1:
@@ -383,7 +382,7 @@ def bocpd(observations: np.ndarray, hazard: float = 0.01,
 # ---------------------------------------------------------------------------
 
 def _fmt_ms_date(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%d")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -423,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     X = np.column_stack([log_return, realized_vol])
     feat_times = open_times[1:]
 
-    print(f"\n🧮 Features: log_return + realized_vol (14-bar rolling std)")
+    print("\n🧮 Features: log_return + realized_vol (14-bar rolling std)")
     print(f"   X shape: {X.shape}")
 
     # ── HMM ────────────────────────────────────────────────────
@@ -468,13 +467,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {ss['state']:>5}  {lbl:<6}  {ss['count']:>5}  "
               f"{ss['mean_lr']:>+13.4f}  {ss['mean_rv']:>10.4f}")
 
-    print(f"\n  Transition matrix A:")
+    print("\n  Transition matrix A:")
     for i in range(args.n_states):
         row = "  ".join(f"{model.A[i, j]:.4f}" for j in range(args.n_states))
         print(f"    [{row}]")
 
     # ── BOCPD ──────────────────────────────────────────────────
-    print(f"\n📊 BOCPD (hazard=0.01, NIG prior: μ₀=0, κ₀=1, α₀=1, β₀=1)")
+    print("\n📊 BOCPD (hazard=0.01, NIG prior: μ₀=0, κ₀=1, α₀=1, β₀=1)")
     print(f"{'='*80}")
     bocpd_result = bocpd(log_return, hazard=0.01)
 
@@ -482,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     rl = bocpd_result["run_length"]
 
     top5_idx = np.argsort(cp_prob)[::-1][:5]
-    print(f"  Top 5 changepoints (by predictive surprise, -log p):")
+    print("  Top 5 changepoints (by predictive surprise, -log p):")
     print(f"  {'rank':>4}  {'idx':>5}  {'date':<12}  {'surprise':>9}  {'log_ret':>9}")
     print(f"  {'─'*47}")
     for rank, idx in enumerate(top5_idx):
@@ -496,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── sanity checks ──────────────────────────────────────────
     print(f"\n{'='*80}")
-    print(f"  Synthetic sanity checks")
+    print("  Synthetic sanity checks")
     print(f"{'='*80}")
     _run_sanity_checks()
 
@@ -512,14 +511,14 @@ def _run_sanity_checks():
     X_synth = series.reshape(-1, 1)
 
     # ── HMM sanity ─────────────────────────────────────────────
-    print(f"\n  HMM on 2-regime series (200×N(0,1) + 200×N(5,1)):")
+    print("\n  HMM on 2-regime series (200×N(0,1) + 200×N(5,1)):")
     hmm = GaussianHMM(n_states=2, n_iter=100, random_state=42)
     hmm.fit(X_synth)
     states = hmm.predict(X_synth)
 
     learned_means = sorted(hmm.means.flatten())
     print(f"    Learned means: [{learned_means[0]:.4f}, {learned_means[1]:.4f}]")
-    print(f"    Expected:      [~0, ~5]")
+    print("    Expected:      [~0, ~5]")
 
     state_before = states[199]
     state_after = states[200]
@@ -534,17 +533,17 @@ def _run_sanity_checks():
     assert abs(learned_means[0]) < 1.0, f"Mean ~0 too far: {learned_means[0]}"
     assert abs(learned_means[1] - 5.0) < 1.0, f"Mean ~5 too far: {learned_means[1]}"
     assert flip_idx >= 195 and flip_idx <= 210, f"Flip too far from 200: {flip_idx}"
-    print(f"    ✅ PASS")
+    print("    ✅ PASS")
 
     # ── BOCPD sanity ───────────────────────────────────────────
-    print(f"\n  BOCPD on same series:")
+    print("\n  BOCPD on same series:")
     result = bocpd(series, hazard=0.01)
     cp_prob = result["changepoint_prob"]
     peak_idx = int(np.argmax(cp_prob))
     print(f"    Changepoint_prob argmax (surprise peak): index {peak_idx}")
-    print(f"    Expected: ~200")
+    print("    Expected: ~200")
     assert abs(peak_idx - 200) < 15, f"BOCPD peak too far from 200: {peak_idx}"
-    print(f"    ✅ PASS")
+    print("    ✅ PASS")
 
 
 if __name__ == "__main__":

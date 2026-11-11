@@ -20,16 +20,12 @@ Feature flag: BYBIT_AB_ENABLED (env, default 0).
 SQLite таблица: ab_results (в state.db)
 """
 
-import asyncio
 import hashlib
 import math
 import os
 import random
 import sqlite3
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
 
 # ── Пути ─────────────────────────────────────────────────────
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
@@ -114,7 +110,7 @@ def is_ab_enabled() -> bool:
     return AB_ENABLED
 
 
-def _generate_signal_id(symbol: str, side: str, ts: Optional[float] = None) -> str:
+def _generate_signal_id(symbol: str, side: str, ts: float | None = None) -> str:
     """Сгенерировать уникальный ID сигнала."""
     if ts is None:
         ts = time.time()
@@ -277,11 +273,9 @@ def _compute_metrics(rows: list[dict]) -> dict:
     peak = 0.0
     for p in pnls:
         cumulative += p
-        if cumulative > peak:
-            peak = cumulative
+        peak = max(peak, cumulative)
         dd = peak - cumulative
-        if dd > max_dd:
-            max_dd = dd
+        max_dd = max(max_dd, dd)
 
     # Sharpe ratio (упрощённый)
     mean_ret = avg_pnl

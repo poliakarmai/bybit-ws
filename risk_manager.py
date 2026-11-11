@@ -13,9 +13,8 @@ import logging
 import math
 import os
 import time
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Tuple
 
 _log = logging.getLogger('bybit.risk_manager')
 
@@ -52,7 +51,7 @@ DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 RISK_STATE_FILE = DATA_DIR / "risk_manager.json"
 
 
-def _get_wallet_balance() -> Optional[dict]:
+def _get_wallet_balance() -> dict | None:
     """Баланс счёта (USD) для риск-проверок.
 
     Берём уровень СЧЁТА, не монеты USDT: в UTA USDT-баланс отрицательный,
@@ -79,7 +78,10 @@ def _get_wallet_balance() -> Optional[dict]:
     return None
 
 # ── Константы ─────────────────────────────────────────────────────────────
-from .correlation import CORRELATION_THRESHOLD  # дедупликация: источник в correlation.py
+from .correlation import (
+    CORRELATION_THRESHOLD,  # дедупликация: источник в correlation.py
+)
+
 CIRCUIT_BREAKER_PCT = 0.80         # 80% от дневного лимита → circuit breaker
 DEFAULT_MAX_POSITIONS = 12          # базовый лимит позиций
 HIGH_VOLATILITY_MAX_POSITIONS = 5   # лимит при высокой волатильности
@@ -166,7 +168,8 @@ def check_symbol_concentration(symbol: str, new_margin: float, positions: dict) 
     # Правило: минимальный лот разрешён всегда, всё сверх него — по проценту.
     floor_margin = 0.0
     try:
-        from .position_sizing import _FB_MIN_MARGIN, _p as _ps_p
+        from .position_sizing import _FB_MIN_MARGIN
+        from .position_sizing import _p as _ps_p
         floor_margin = float(_ps_p('min_margin', _FB_MIN_MARGIN))
     except Exception:
         pass
@@ -274,7 +277,7 @@ def check_new_entry_correlation(
     positions: dict,
     new_symbol: str,
     new_side: str = 'Buy',
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Проверить, можно ли войти в новый тикер по корреляции.
 
     Запрещает вход, если новый тикер коррелирует >0.8 с существующей
@@ -452,8 +455,7 @@ def cluster_risk(
             if r <= threshold:
                 continue
             members.append(other)
-            if r > max_corr:
-                max_corr = r
+            max_corr = max(max_corr, r)
 
         result['members'] = members
         result['max_corr'] = max_corr
@@ -502,7 +504,7 @@ def check_cluster_risk(
     new_symbol: str,
     new_side: str = 'Buy',
     config=None,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Gate used by check(). Blocks ONLY when mode == 'enforce' and the cluster is
     over budget — where "over" (`cluster_risk()['over']`) means cluster used_usd >
     budget OR the whole same-side portfolio > budget. Так блокируется и портфельный
@@ -537,7 +539,7 @@ def check_cluster_risk(
         return True, f'cluster check error: {e}'
 
 
-def _load_correlation_snapshot() -> Optional[dict]:
+def _load_correlation_snapshot() -> dict | None:
     """Загрузить последний correlation snapshot."""
     corr_file = DATA_DIR / "correlation.json"
     if not corr_file.exists():
@@ -583,7 +585,7 @@ def get_correlation_matrix() -> dict:
 # Circuit Breaker
 # ═══════════════════════════════════════════════════════════════════════════
 
-def check_circuit_breaker(config=None) -> Tuple[bool, str]:
+def check_circuit_breaker(config=None) -> tuple[bool, str]:
     """Проверить состояние circuit breaker.
 
     Если daily PnL >= 80% от max_daily_loss — активируем circuit breaker.
@@ -817,7 +819,8 @@ def _log_decision(symbol, check, passed, reason='', margin=0.0, equity=0.0):
     — им гейт не мешает.
     """
     try:
-        from .state_db import DB_PATH, db as _db
+        from .state_db import DB_PATH
+        from .state_db import db as _db
         if (os.environ.get('BYBIT_LOG_SILENT') == '1'
                 and getattr(_db, 'path', None) == DB_PATH):
             return
@@ -828,10 +831,10 @@ def _log_decision(symbol, check, passed, reason='', margin=0.0, equity=0.0):
 
 def check(
     positions: dict,
-    new_symbol: Optional[str] = None,
-    new_side: Optional[str] = None,
+    new_symbol: str | None = None,
+    new_side: str | None = None,
     config=None,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Главная проверка риск-менеджера.
 
     Вызывается:
@@ -965,7 +968,7 @@ def check(
 # Полный отчёт
 # ═══════════════════════════════════════════════════════════════════════════
 
-def get_risk_full(positions: Optional[dict] = None) -> dict:
+def get_risk_full(positions: dict | None = None) -> dict:
     """Полный отчёт risk-менеджера.
 
     Returns:
@@ -1050,7 +1053,7 @@ def get_risk_full(positions: Optional[dict] = None) -> dict:
 BLACKSWAN_MIN_RED_POSITIONS = 5   # мин. кол-во позиций в минусе для алерта
 BLACKSWAN_TOTAL_UPNL_THRESHOLD = -150  # общий uPnL хуже этого → алерт (не закрытие!)
 
-def check_correlation_panic(positions: dict) -> Optional[str]:
+def check_correlation_panic(positions: dict) -> str | None:
     """BlackSwan v2: алерт (НЕ закрытие) при >=5 позициях в минусе И общем uPnL хуже порога.
 
     Порог задан константами BLACKSWAN_MIN_RED_POSITIONS (5) и
@@ -1096,15 +1099,15 @@ def emergency_close_all(reason: str, positions: dict = None) -> dict:
         {'closed': int, 'failed': int, 'orders_cancelled': int,
          'positions_left': int, 'orders_left': int, 'message': str}
     """
-    from .api import bybit, fetch_positions, fetch_orders, cancel_all_orders
-    from .alerts import log_event, add_alert
+    from .alerts import add_alert, log_event
+    from .api import bybit, cancel_all_orders, fetch_orders, fetch_positions
 
     # 1. Сначала снимаем ВСЕ открытые ордера — иначе они переживут закрытие
     orders_cancelled = 0
     try:
         ok, orders_cancelled = cancel_all_orders()
         if not ok:
-            log_event(f'⚠️ kill switch: cancel-all вернул ошибку, продолжаю закрытие')
+            log_event('⚠️ kill switch: cancel-all вернул ошибку, продолжаю закрытие')
     except Exception as e:
         log_event(f'⚠️ kill switch: cancel-all exception: {e}')
 

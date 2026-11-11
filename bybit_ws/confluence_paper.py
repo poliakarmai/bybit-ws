@@ -15,7 +15,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict
+
 from .file_utils import safe_json_write
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
@@ -43,7 +43,7 @@ def track_signal(
     entry_price: float,
     mark_price: float,
     confluence: int,
-    score: Optional[int] = None,
+    score: int | None = None,
 ):
     """Записать сигнал с известным конфлюенсом.
 
@@ -161,7 +161,7 @@ def get_confluence_stats(days: int = 30) -> dict:
         if s["ts"] >= cutoff and s["status"] in ("tp", "sl", "closed")
     ]
 
-    stats: Dict[int, dict] = {}
+    stats: dict[int, dict] = {}
     for s in closed:
         c = s["confluence"]
         if c not in stats:

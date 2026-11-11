@@ -15,7 +15,7 @@ import tempfile
 
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws.state_db import StateDB  # noqa: E402
+from bybit_ws.state_db import StateDB
 
 
 def _row(db, trade_id):

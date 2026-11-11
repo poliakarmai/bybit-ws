@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Прокси: отдаёт dashboard.html и проксирует RPC к bybit-ws."""
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import urllib.request, os, json
+import json
+import os
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 RPC = 'http://127.0.0.1:8766'
 WEB = os.path.dirname(os.path.abspath(__file__))

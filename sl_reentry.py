@@ -4,14 +4,16 @@ v2: режимы simple (DESIGN.md: один re-entry на Lower BB) и ladder (
 Конфигурируемые параметры (фикс код-ревью Manus AI).
 """
 
-import json, os, time
+import json
+import os
+import time
 from datetime import datetime
 
+from .alerts import _is_duplicate, add_alert, log_event
 from .api import bybit, get_bb_data
-from .alerts import log_event, add_alert, _is_duplicate
 from .config import Config
-from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
+from .position_sizing import margin_for_strategy
 
 SL_REENTRY_FILE = os.path.expanduser('~/.local/share/bybit-ws/sl_reentry.json')
 

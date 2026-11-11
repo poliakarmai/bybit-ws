@@ -1,5 +1,7 @@
 """Запись сделок в trade_history для самообучения монитора."""
-import sqlite3, time, os
+import os
+import sqlite3
+import time
 from pathlib import Path
 
 DB = Path(os.environ.get('BYBIT_DATA_DIR', os.path.expanduser('~/.local/share/bybit-ws'))) / 'state.db'

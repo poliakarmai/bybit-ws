@@ -30,21 +30,21 @@ Endpoints:
 При ошибке: {"error": "...", "detail": "...", "api_version": "v1", "status": код}.
 """
 
+import asyncio
+import hmac
 import json
 import os
-import hmac
-import time
-import asyncio
 import threading
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from pathlib import Path
-from collections import defaultdict
-from statistics import mean, stdev
+import time
 import urllib.request
+from collections import defaultdict
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from statistics import mean, stdev
 
+from .alerts import add_alert
 from .api import bybit as _bybit_api
 from .state_db import db as _db
-from .alerts import add_alert
 
 # ══════════════════════════════════════════════════
 # WebSocket-сервер (aiohttp) для real-time дашборда
@@ -1103,23 +1103,23 @@ class RPCHandler(BaseHTTPRequestHandler):
             longs = sum(1 for p in positions.values() if p.get('side') == 'Buy')
             shorts = sum(1 for p in positions.values() if p.get('side') == 'Sell')
             total_upnl = sum(float(p.get('upnl', 0)) for p in positions.values())
-            lines.append(f'# HELP bybit_ws_active_positions Current open positions')
-            lines.append(f'# TYPE bybit_ws_active_positions gauge')
+            lines.append('# HELP bybit_ws_active_positions Current open positions')
+            lines.append('# TYPE bybit_ws_active_positions gauge')
             lines.append(f'bybit_ws_active_positions{{side="long"}} {longs}')
             lines.append(f'bybit_ws_active_positions{{side="short"}} {shorts}')
-            lines.append(f'# HELP bybit_ws_unrealized_pnl Unrealized PnL')
-            lines.append(f'# TYPE bybit_ws_unrealized_pnl gauge')
+            lines.append('# HELP bybit_ws_unrealized_pnl Unrealized PnL')
+            lines.append('# TYPE bybit_ws_unrealized_pnl gauge')
             lines.append(f'bybit_ws_unrealized_pnl {total_upnl:.2f}')
 
         # Health
-        lines.append(f'# HELP bybit_ws_uptime_seconds Monitor uptime')
-        lines.append(f'# TYPE bybit_ws_uptime_seconds gauge')
+        lines.append('# HELP bybit_ws_uptime_seconds Monitor uptime')
+        lines.append('# TYPE bybit_ws_uptime_seconds gauge')
         lines.append(f'bybit_ws_uptime_seconds {int(time.time() - rpc_state["started_at"])}')
-        lines.append(f'# HELP bybit_ws_cycle_duration_seconds Last cycle duration')
-        lines.append(f'# TYPE bybit_ws_cycle_duration_seconds gauge')
+        lines.append('# HELP bybit_ws_cycle_duration_seconds Last cycle duration')
+        lines.append('# TYPE bybit_ws_cycle_duration_seconds gauge')
         lines.append(f'bybit_ws_cycle_duration_seconds {rpc_state["cycle_duration"]:.3f}')
-        lines.append(f'# HELP bybit_ws_cycle_count Total cycles')
-        lines.append(f'# TYPE bybit_ws_cycle_count counter')
+        lines.append('# HELP bybit_ws_cycle_count Total cycles')
+        lines.append('# TYPE bybit_ws_cycle_count counter')
         lines.append(f'bybit_ws_cycle_count {rpc_state["cycle_count"]}')
 
         # ── Entry Judge (LLM-вето): счётчики «с запуска» ──
@@ -1172,8 +1172,8 @@ class RPCHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
         daily_pnl = metrics.get(today_key, {}).get("pnl_total", 0) if today_key else 0
-        lines.append(f'# HELP bybit_ws_daily_pnl Daily realized PnL')
-        lines.append(f'# TYPE bybit_ws_daily_pnl gauge')
+        lines.append('# HELP bybit_ws_daily_pnl Daily realized PnL')
+        lines.append('# TYPE bybit_ws_daily_pnl gauge')
         lines.append(f'bybit_ws_daily_pnl {daily_pnl:.2f}')
 
         self.send_response(200)
@@ -1311,8 +1311,8 @@ class RPCHandler(BaseHTTPRequestHandler):
         только запрошенные тикеры, и порог BB% не применяется (запросили конкретный
         тикер — отдаём его состояние даже вне зоны входа, score при этом честный).
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
         import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         mode = body.get('mode', 'long')
         if mode not in ('long', 'short'):
@@ -2040,8 +2040,8 @@ class RPCHandler(BaseHTTPRequestHandler):
     def _handle_emergency_close(self):
         """Emergency close: MARKET close ALL positions. Use: POST /emergency_close"""
         try:
-            from .risk_manager import emergency_close_all
             from .api import fetch_positions
+            from .risk_manager import emergency_close_all
             positions = fetch_positions()
             if not positions:
                 _json_response(self, {"status": "ok", "closed": 0, "message": "No open positions"})

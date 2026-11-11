@@ -13,7 +13,8 @@ import sys
 import time
 from pathlib import Path
 
-from backtest import fetch_klines, calc_bb, walk_forward
+from backtest import fetch_klines
+
 try:
     from .file_utils import safe_json_write
 except ImportError:  # standalone

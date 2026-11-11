@@ -269,7 +269,7 @@ def check_correlation(positions):
         with open(tmp, 'w') as f:
             json.dump(result, f, indent=2, default=str)
         os.replace(tmp, CORRELATION_SNAPSHOT)
-    except (IOError, OSError):
+    except OSError:
         pass
 
     return result
@@ -282,7 +282,7 @@ def load_correlation_snapshot():
     try:
         with open(CORRELATION_SNAPSHOT) as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return None
 
 

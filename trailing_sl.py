@@ -1,9 +1,10 @@
 """Trailing SL для разогнанных позиций."""
 # DEPRECATED: superseded by unified_sl.manage_sl(). Kept only for legacy tests. Do NOT add new callers.
 import os
+
 from . import TRAIL_SL_PERCENT
-from .api import get_bb_data, place_stop_loss
 from .alerts import log_event
+from .api import get_bb_data, place_stop_loss
 from .manual_positions import is_manual_position
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
@@ -13,7 +14,9 @@ def _get_bb_ws(symbol, interval='W'):
     """Получить BB: сначала WS-кеш, fallback на REST."""
     if _WS_BB_ENABLED:
         try:
-            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            from .ws_client import get_bb as ws_get_bb
+            from .ws_client import is_connected as ws_alive
+            from .ws_client import is_stale as ws_stale
             if ws_alive() and not ws_stale(300):
                 bb = ws_get_bb(symbol, interval)
                 if bb and bb.get('lower', 0) > 0:

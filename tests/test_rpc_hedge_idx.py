@@ -12,7 +12,7 @@ os.environ['BYBIT_LOG_SILENT'] = '1'
 # bybit_ws -> bybit-ws symlink в /home/openclaw (как в test_tp_min_qty.py).
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws.rpc import _hedge_idx  # noqa: E402
+from bybit_ws.rpc import _hedge_idx
 
 
 def test_hedge_idx_sell_is_two():

@@ -12,7 +12,7 @@ import sys
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws.position_sizing import suggest_qty  # noqa: E402
+from bybit_ws.position_sizing import suggest_qty
 
 
 def test_qty_above_lot_step_is_computed_normally():

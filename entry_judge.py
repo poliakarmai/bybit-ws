@@ -10,7 +10,6 @@ import json
 import os
 import subprocess
 import time
-from typing import Optional
 
 JUDGE_SCRIPT = os.path.expanduser("~/.hermes/scripts/cross-model-judge.py")
 JUDGE_TIMEOUT = 20  # секунд: прямой DeepSeek отвечает ~2-4с, 5с резало живые вызовы (17.10)
@@ -62,8 +61,8 @@ def judge_entry(
     score: int,
     bb_pos: float,
     entry_price: float,
-    sl_price: Optional[float] = None,
-    tp_price: Optional[float] = None,
+    sl_price: float | None = None,
+    tp_price: float | None = None,
     funding_rate: float = 0.0,
     bb_lower: float = 0.0,
     bb_upper: float = 0.0,

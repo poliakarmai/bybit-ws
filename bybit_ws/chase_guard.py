@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 
 def is_chasing(closes: Sequence[float] | None, pct: float = 3.0, lookback: int = 5) -> bool:

@@ -11,8 +11,8 @@
 - _get_regime_tp_levels: инвариант 3 множителя >0
 """
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parent
 

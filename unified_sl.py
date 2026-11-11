@@ -5,9 +5,9 @@ Consolidates: auto_sl, trailing_sl, simple_trailing_sl, tight_trailing_sl, break
 Priority: tight_trail > simple_trail > hard_trail > breakeven > auto_sl > default_fix
 """
 import time
-from .api import place_stop_loss, get_bb_data, round_price_safe
-from .alerts import log_event
+
 from . import TRAIL_SL_PERCENT
+from .api import get_bb_data, place_stop_loss, round_price_safe
 
 # Throttle: не чаще чем раз в N секунд на позицию (по имени символа).
 # Храним ВРЕМЯ РАЗРЕШЕНИЯ, а не время последней попытки: слот занимается

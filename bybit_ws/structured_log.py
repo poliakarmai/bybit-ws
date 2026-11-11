@@ -16,10 +16,9 @@ Structured logging module — JSON-логи для Grafana Loki / grep-friendly.
 import json
 import logging
 import os
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger('bybit.structured')
 
@@ -29,7 +28,7 @@ JSON_LOG = LOG_DIR / 'events.jsonl'
 _MAX_JSON_SIZE = 50 * 1024 * 1024  # 50 MB rotation
 
 
-def _write_json(entry: Dict[str, Any]):
+def _write_json(entry: dict[str, Any]):
     """Записать JSON-строку в events.jsonl."""
     if not STRUCTURED_ENABLED:
         return

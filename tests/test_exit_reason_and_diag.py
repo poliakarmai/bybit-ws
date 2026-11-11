@@ -11,7 +11,6 @@ import pytest
 import bybit_ws.main_async as ma
 from bybit_ws.state_db import StateDB
 
-
 # ── (а) механизм выхода по цене против SL/TP ───────────────────────────
 
 def test_exit_at_tp_level_is_tp():

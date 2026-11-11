@@ -8,11 +8,9 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bybit_ws import position_sizing as ps  # noqa: E402
+from bybit_ws import position_sizing as ps
 
 
 def test_check_correlation_shadow_no_file():

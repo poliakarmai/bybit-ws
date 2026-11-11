@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Smoke-тесты GridSignal Scanner v4.1 — RSI, BB, edge cases (без API)."""
-import sys, os, math, random
+import math
+import os
+import random
+import sys
 
 sys.path.insert(0, os.path.expanduser('~/.local/bin'))
-from gridsignal_scanner import calc_rsi, calc_bb, score_coin, score_short, score_scalp
+from gridsignal_scanner import calc_bb, calc_rsi, score_coin, score_scalp, score_short
 
 FAILS = 0
 CHECKS = 0

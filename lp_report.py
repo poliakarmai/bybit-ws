@@ -22,7 +22,7 @@ import os
 import sqlite3
 import statistics
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 DB = os.path.expanduser("~/.local/share/bybit-ws/state.db")
 RPC = "http://127.0.0.1:8766/balance"
@@ -161,7 +161,7 @@ def report(days: int | None, nav: float | None) -> str:
     # daily PnL
     daily: dict[str, tuple[float, int]] = {}  # date -> (pnl, count)
     for r in rows:
-        d = datetime.fromtimestamp(r[6], tz=timezone.utc).strftime("%Y-%m-%d")
+        d = datetime.fromtimestamp(r[6], tz=UTC).strftime("%Y-%m-%d")
         p, c = daily.get(d, (0.0, 0))
         daily[d] = (p + r[5], c + 1)
 
@@ -170,7 +170,7 @@ def report(days: int | None, nav: float | None) -> str:
     sharpe = _sharpe(dvals)
     sortino = _sortino(dvals)
     # Sortino 90d: only last 90 days
-    cutoff_90 = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%d')
+    cutoff_90 = (datetime.now(UTC) - timedelta(days=90)).strftime('%Y-%m-%d')
     daily_90 = [v[0] for k, v in daily.items() if k >= cutoff_90]
     sortino_90 = _sortino(daily_90) if daily_90 else 0.0
     annual_ret = statistics.mean(dvals) * 365 if dvals else 0.0
@@ -184,7 +184,7 @@ def report(days: int | None, nav: float | None) -> str:
     O = []
     O.append("# LP-отчёт — bybit-ws")
     O.append(f"Период: {'весь' if not days else f'последние {days} дней'} · "
-             f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+             f"{datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}")
     if nav:
         O.append(f"**NAV (equity): ${nav:,.2f}**")
     O.append("")

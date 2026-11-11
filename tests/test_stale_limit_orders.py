@@ -14,7 +14,7 @@ import sys
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws import cleanup as cl  # noqa: E402
+from bybit_ws import cleanup as cl
 
 
 def _order(sym, created_ts, status='New'):
@@ -51,7 +51,8 @@ def test_non_limit_entry_ignored(tmp_path, monkeypatch):
 
 
 if __name__ == '__main__':
-    import tempfile, pathlib
+    import pathlib
+    import tempfile
     class MP:  # мини-подстановка monkeypatch для запуска без pytest
         def __init__(s): s.dir = tempfile.mkdtemp()
         def setattr(s, obj, name, val): setattr(obj, name, val)

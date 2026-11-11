@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
 from .file_utils import safe_json_write
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"

@@ -3,9 +3,16 @@
 v5: замена subprocess(BYBIT_CLI) на httpx (код-ревью 14.06.2026).
 Ускорение 10-50x, устранение command injection, переиспользование соединений.
 """
-import hashlib, hmac, json, os, time, uuid
+import hashlib
+import hmac
+import json
+import os
+import time
+import uuid
+
 import httpx
-from .alerts import log_event, add_alert
+
+from .alerts import add_alert, log_event
 
 # === Credentials (читаются один раз при импорте) ===
 _API_KEY = None
@@ -189,13 +196,13 @@ def bybit(method, path, body=None, retries=None):
 
             # 10003 = API key invalid — не ретраить, ключ мёртв
             if result.get('retCode') == 10003:
-                log_event(f'bybit: API key invalid (10003) — проверь ключ в админке')
+                log_event('bybit: API key invalid (10003) — проверь ключ в админке')
                 _cb_record(False)
                 return None
 
             # 10004 = sign not match — логируем, но ретраим (может быть рассинхрон времени)
             if result.get('retCode') == 10004:
-                log_event(f'bybit: sign not match (10004) — возможен рассинхрон времени')
+                log_event('bybit: sign not match (10004) — возможен рассинхрон времени')
                 if attempt < retries:
                     time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                     continue
@@ -325,7 +332,7 @@ def fetch_orders():
     orders = {}
     cursor = ''
     while True:
-        path = f'/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
+        path = '/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
         if cursor:
             path += f'&cursor={cursor}'
         data = bybit('GET', path)
@@ -376,7 +383,7 @@ def fetch_open_orders() -> list[dict]:
     all_orders = []
     cursor = ''
     while True:
-        path = f'/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
+        path = '/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
         if cursor:
             path += f'&cursor={cursor}'
         data = bybit('GET', path)
@@ -407,7 +414,7 @@ def get_tick_size(sym: str):
         lst = (data or {}).get('result', {}).get('list') or []
         if lst:
             tick = float(lst[0]['priceFilter']['tickSize'])
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log_event(f'⚠️ get_tick_size({sym}): {e}')
     if tick:
         _TICK_CACHE[sym] = (tick, time.time())
@@ -422,7 +429,7 @@ def round_price_safe(sym: str, price: float, is_long: bool) -> float:
     превращал в 0.0014 при mark 0.001364 → «StopLoss should lower than base_price»,
     70 отказов, позиция висела без стопа.
     """
-    from decimal import Decimal, ROUND_DOWN, ROUND_UP
+    from decimal import ROUND_DOWN, ROUND_UP, Decimal
     tick = get_tick_size(sym)
     if not tick or price <= 0:
         return price
@@ -731,6 +738,7 @@ def fetch_atr(symbol, interval='D', period=14):
 
 import asyncio
 
+
 async def bybit_async(method, path, body=None, retries=None):
     """Async-версия bybit() через run_in_executor.
 
@@ -745,7 +753,7 @@ async def bybit_async(method, path, body=None, retries=None):
             loop.run_in_executor(None, bybit, method, path, body, retries),
             timeout=30.0
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log_event(f'bybit-async executor timeout: {method} {path[:60]}')
         return None
     except concurrent.futures.CancelledError:
@@ -787,7 +795,7 @@ async def fetch_orders_async():
     orders = {}
     cursor = ''
     while True:
-        path = f'/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
+        path = '/v5/order/realtime?category=linear&settleCoin=USDT&limit=50'
         if cursor:
             path += f'&cursor={cursor}'
         data = await bybit_async('GET', path)

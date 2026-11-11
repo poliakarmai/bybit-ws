@@ -25,7 +25,7 @@ os.environ['BYBIT_LOG_SILENT'] = '1'
 # bybit_ws -> bybit-ws symlink в /home/openclaw.
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.fixture()
@@ -116,7 +116,6 @@ def test_place_stop_loss_none_sets_error_backoff(usl, monkeypatch):
 
     def fake_place_stop_loss(sym, idx, side, size, price):
         calls.append((sym, idx, side, size, price))
-        return None  # API error
 
     monkeypatch.setattr(usl, 'place_stop_loss', fake_place_stop_loss)
 

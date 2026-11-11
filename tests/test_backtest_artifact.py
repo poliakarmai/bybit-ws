@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bybit_ws.experiments import backtest_runner, engine  # noqa: E402
+from bybit_ws.experiments import backtest_runner, engine
 
 REQUIRED_MANIFEST = {"engine_version", "params", "params_hash", "data_range", "git_commit",
                      "timestamp", "data_hash", "config_hash", "fees_model", "funding_model"}

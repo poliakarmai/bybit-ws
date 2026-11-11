@@ -13,9 +13,8 @@ Usage:
     # train on augmented instead of real_data
 """
 
-import random
 import math
-from typing import Optional
+import random
 
 
 def _generate_pump(closes: list, factor: float = 1.5) -> list:
@@ -167,7 +166,6 @@ def augment_training_data(all_data: list, n_scenarios: int = 4) -> list:
 
 if __name__ == '__main__':
     # Smoke test
-    import json
     test_data = [{
         'symbol': 'TESTUSDT',
         'closes': [100.0 * (1 + 0.001 * i + random.gauss(0, 0.01)) for i in range(200)],

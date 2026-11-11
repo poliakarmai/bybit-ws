@@ -11,9 +11,8 @@ ensemble.py — Ансамбль ML-моделей (Фаза 5.6).
 
 import json
 import os
-import time
 from pathlib import Path
-from typing import Optional
+
 try:
     from .file_utils import safe_json_write
 except ImportError:  # standalone
@@ -151,7 +150,7 @@ def _rl_score(state_dict: dict) -> tuple[float, str]:
         return 0.0, f'RL: error ({e})'
 
 
-def ensemble_should_enter(signal_data: dict, market_state: Optional[dict] = None) -> tuple[bool, float, dict]:
+def ensemble_should_enter(signal_data: dict, market_state: dict | None = None) -> tuple[bool, float, dict]:
     """
     Ансамбль: взвешенное голосование RF + LSTM + RL.
 

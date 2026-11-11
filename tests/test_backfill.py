@@ -9,7 +9,7 @@ import tempfile
 sys.path.insert(0, '/home/openclaw')
 sys.path.insert(0, '/home/openclaw/bybit-ws')
 
-from bybit_ws.state_db import StateDB  # noqa: E402
+from bybit_ws.state_db import StateDB
 
 
 def test_backfill_update_only_empty():

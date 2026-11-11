@@ -1,10 +1,10 @@
 """Atomic file writes with filelock — защита от race condition при параллельных записях."""
-import os
 import json
+import os
 import tempfile
 from contextlib import contextmanager
-from filelock import FileLock
 
+from filelock import FileLock
 
 LOCK_DIR = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'locks')
 os.makedirs(LOCK_DIR, exist_ok=True)

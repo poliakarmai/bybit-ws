@@ -26,10 +26,9 @@ from pathlib import Path
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
 
-from bybit_ws.main_async import _clean_pump_state  # noqa: E402
-from bybit_ws.state_db import StateDB  # noqa: E402
+from bybit_ws.main_async import _clean_pump_state
+from bybit_ws.state_db import StateDB
 
 
 def _make_data_dir(tmp_path, symbols):

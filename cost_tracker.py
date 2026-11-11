@@ -4,10 +4,14 @@
 Дёргает Bybit API /v5/position/closed-pnl, дедуплицирует по orderId,
 пишет новые записи в ~/.hermes/data/costs.db.
 """
-import json, os, sqlite3, time
+import json
+import os
+import sqlite3
+import time
 from datetime import datetime
-from .api import bybit
+
 from . import EVENTS_LOG
+from .api import bybit
 from .file_utils import safe_json_write
 
 COSTS_DB = os.path.expanduser('~/.hermes/data/costs.db')

@@ -7,14 +7,24 @@
 
 PERM_SKIP с time-decay: через 24ч сбрасывается автоматически.
 """
+import json
+import math
+import os
 import time
-from . import TP_FAIL_COUNT, TP_FAIL_BACKOFF, TP_FAIL_DELAYS, TP_MAX_FAILS, TP_PERM_SKIP, TP_PERM_SKIP_SIZES, TP_SKIP_FILE
-from .api import get_bb_data
-from .alerts import log_event
-from .manual_positions import is_manual_position, is_auto_sltp
-from .file_utils import safe_json_write
 
-import json, os, math
+from . import (
+    TP_FAIL_BACKOFF,
+    TP_FAIL_COUNT,
+    TP_FAIL_DELAYS,
+    TP_MAX_FAILS,
+    TP_PERM_SKIP,
+    TP_PERM_SKIP_SIZES,
+    TP_SKIP_FILE,
+)
+from .alerts import log_event
+from .api import get_bb_data
+from .file_utils import safe_json_write
+from .manual_positions import is_auto_sltp, is_manual_position
 
 # ── ATR-adaptive split thresholds ──
 ATR_HIGH_THRESHOLD = 0.05    # >5% ATR/price → high vol
@@ -275,7 +285,11 @@ def auto_take_profit(positions, orders, skip_syms=None):
                     tp_levels, regime = _get_regime_tp_levels()
                     # ── self-learn: canary/bandit/symbol tp_mult применяется к ATR-множителю (default 1.0 = без изменений) ──
                     try:
-                        from .journal.self_learn import get_canary_param, get_symbol_params, get_bandit_best_params
+                        from .journal.self_learn import (
+                            get_bandit_best_params,
+                            get_canary_param,
+                            get_symbol_params,
+                        )
                         _tp_mult = get_canary_param('tp_mult', 1.0, symbol=sym)
                         _bp = get_bandit_best_params(regime)
                         if _bp and 'tp_mult' in _bp:

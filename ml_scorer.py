@@ -11,15 +11,14 @@ import hashlib
 import hmac
 import json
 import os
-import joblib
-import numpy as np
 import pickle  # только для train() — сохранение, загрузка через joblib+HMAC
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Optional
 
+import joblib
 import numpy as np
+
 try:
     from .file_utils import safe_json_write
 except ImportError:  # standalone
@@ -209,7 +208,7 @@ def train():
     return model
 
 
-def predict(signal_data: dict) -> Optional[float]:
+def predict(signal_data: dict) -> float | None:
     """
     Предсказывает вероятность TP для нового сигнала.
     Возвращает ML-вес от 0 до 1, или None если модель не обучена.
@@ -273,7 +272,7 @@ def ml_gate_pass(signal_data: dict) -> tuple[bool, float | None]:
 DSPY_ENABLED = os.getenv('BYBIT_DSPY_ENABLED', '0') == '1'
 
 
-def dspy_scorer(signal_data: dict) -> Optional[float]:
+def dspy_scorer(signal_data: dict) -> float | None:
     """
     DSPy-скоринг: возвращает score 0-100 или None.
     Вызывается параллельно с RF, результат усредняется.
@@ -297,7 +296,7 @@ def dspy_scorer(signal_data: dict) -> Optional[float]:
         return None
 
 
-def dspy_gate(signal_data: dict) -> tuple[bool, Optional[float]]:
+def dspy_gate(signal_data: dict) -> tuple[bool, float | None]:
     """
     DSPy-гейт: проверяет, стоит ли входить в сигнал.
     Возвращает (passed, dspy_score).

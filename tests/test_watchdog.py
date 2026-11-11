@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from watchdog import build_report, reason_key, should_alert, tail_lines  # noqa: E402
+from watchdog import build_report, reason_key, should_alert, tail_lines
 
 NOW = datetime(2026, 10, 31, 9, 0, 0)
 DEPOSIT = "💸 Депозит $-5.6 < $30.0 — входы заблокированы"

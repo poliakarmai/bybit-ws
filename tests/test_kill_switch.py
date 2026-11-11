@@ -11,7 +11,7 @@ import sys
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +21,7 @@ def _fresh_modules(monkeypatch):
     Переимпортируем api/risk_manager и патчим ОБА места: атрибут пакета и sys.modules.
     """
     import importlib
+
     import bybit_ws
     # выкидываем кеш пакета и sys.modules, чтобы получить настоящие модули
     for k in list(sys.modules):

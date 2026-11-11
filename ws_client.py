@@ -26,14 +26,10 @@ Feature flags:
 import hashlib
 import hmac
 import json
-import logging
+import math
 import os
 import threading
 import time
-import math
-from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 
 try:
     import websocket  # pip install websocket-client
@@ -41,7 +37,6 @@ except ImportError:
     websocket = None
 
 from .alerts import log_event
-from .config import Config
 
 # ═══════════════════════════════════════════════════════════
 # Feature flags
@@ -54,15 +49,15 @@ _WS_FULL_ENABLED = os.environ.get('BYBIT_WS_FULL_ENABLED', '0') == '1'
 # ═══════════════════════════════════════════════════════════
 
 _cache_lock = threading.Lock()
-_price_cache: Dict[str, float] = {}          # symbol → last price
-_ticker_cache: Dict[str, dict] = {}          # symbol → {price, change24h, volume24h, ...}
-_kline_cache: Dict[str, Dict[str, list]] = {}  # symbol → {interval: [candles]}
-_bb_cache: Dict[str, Dict[str, dict]] = {}     # symbol → {interval: bb_data}
+_price_cache: dict[str, float] = {}          # symbol → last price
+_ticker_cache: dict[str, dict] = {}          # symbol → {price, change24h, volume24h, ...}
+_kline_cache: dict[str, dict[str, list]] = {}  # symbol → {interval: [candles]}
+_bb_cache: dict[str, dict[str, dict]] = {}     # symbol → {interval: bb_data}
 
 # Новые кеши (Фаза 6.3 — полный WebSocket)
-_orderbook_cache: Dict[str, dict] = {}       # symbol → {bid, ask, bidSize, askSize, ts}
-_position_cache: Dict[str, dict] = {}        # symbol → {entry, mark, upnl, size, side, liq, leverage, ...}
-_execution_cache: List[dict] = []             # список последних fill-уведомлений (до 100)
+_orderbook_cache: dict[str, dict] = {}       # symbol → {bid, ask, bidSize, askSize, ts}
+_position_cache: dict[str, dict] = {}        # symbol → {entry, mark, upnl, size, side, liq, leverage, ...}
+_execution_cache: list[dict] = []             # список последних fill-уведомлений (до 100)
 _wallet_cache: dict = {}                      # {coin: {walletBalance, availableBalance, ...}}
 
 _connected = False
@@ -92,7 +87,7 @@ BB_PERIOD = 20
 BB_STD = 2.0
 KLINE_LIMIT = 100
 
-def _calc_sma(values: List[float], period: int) -> List[float]:
+def _calc_sma(values: list[float], period: int) -> list[float]:
     """Простое скользящее среднее."""
     if len(values) < period:
         return []
@@ -102,7 +97,7 @@ def _calc_sma(values: List[float], period: int) -> List[float]:
     return sma
 
 
-def _calc_bb(closes: List[float]) -> Optional[dict]:
+def _calc_bb(closes: list[float]) -> dict | None:
     """Bollinger Bands (SMA-20, 2σ) из списка closes."""
     if len(closes) < BB_PERIOD:
         return None
@@ -145,7 +140,7 @@ def _calc_bb(closes: List[float]) -> Optional[dict]:
 # HMAC-аутентификация для приватного WebSocket
 # ═══════════════════════════════════════════════════════════
 
-def _load_api_credentials() -> Tuple[Optional[str], Optional[str]]:
+def _load_api_credentials() -> tuple[str | None, str | None]:
     """Загрузить API ключи (как в api.py)."""
     api_key = os.environ.get('BYBIT_API_KEY')
     api_secret = os.environ.get('BYBIT_API_SECRET')
@@ -166,7 +161,7 @@ def _load_api_credentials() -> Tuple[Optional[str], Optional[str]]:
     return api_key, api_secret
 
 
-def _ws_auth_message() -> Optional[dict]:
+def _ws_auth_message() -> dict | None:
     """Создать auth-сообщение для приватного WebSocket Bybit v5."""
     api_key, api_secret = _load_api_credentials()
     if not api_key or not api_secret:
@@ -627,13 +622,13 @@ def is_private_stale(max_age_sec: float = 120) -> bool:
 
 # ─── Цены / тикеры ───
 
-def get_price(symbol: str) -> Optional[float]:
+def get_price(symbol: str) -> float | None:
     """Текущая цена из WS-кеша (tickers)."""
     with _cache_lock:
         return _price_cache.get(symbol)
 
 
-def get_ticker(symbol: str) -> Optional[dict]:
+def get_ticker(symbol: str) -> dict | None:
     """Тикер из WS-кеша."""
     with _cache_lock:
         return _ticker_cache.get(symbol)
@@ -641,19 +636,19 @@ def get_ticker(symbol: str) -> Optional[dict]:
 
 # ─── BB / свечи ───
 
-def get_bb(symbol: str, interval: str = 'D') -> Optional[dict]:
+def get_bb(symbol: str, interval: str = 'D') -> dict | None:
     """BB-данные из WS-кеша."""
     with _cache_lock:
         return _bb_cache.get(symbol, {}).get(interval)
 
 
-def get_kline(symbol: str, interval: str = 'D') -> Optional[List]:
+def get_kline(symbol: str, interval: str = 'D') -> list | None:
     """Кешированные свечи."""
     with _cache_lock:
         return _kline_cache.get(symbol, {}).get(interval)
 
 
-def get_all_prices() -> Dict[str, float]:
+def get_all_prices() -> dict[str, float]:
     """Все цены (копия)."""
     with _cache_lock:
         return dict(_price_cache)
@@ -661,13 +656,13 @@ def get_all_prices() -> Dict[str, float]:
 
 # ─── Orderbook (Фаза 6.3) ───
 
-def get_orderbook(symbol: str) -> Optional[dict]:
+def get_orderbook(symbol: str) -> dict | None:
     """Лучшие bid/ask из WS-кеша (depth 1)."""
     with _cache_lock:
         return _orderbook_cache.get(symbol)
 
 
-def get_bid_ask(symbol: str) -> Tuple[Optional[float], Optional[float]]:
+def get_bid_ask(symbol: str) -> tuple[float | None, float | None]:
     """Возвращает (bid, ask) для символа."""
     ob = get_orderbook(symbol)
     if ob:
@@ -677,7 +672,7 @@ def get_bid_ask(symbol: str) -> Tuple[Optional[float], Optional[float]]:
 
 # ─── Позиции (Фаза 6.3 — real-time из WS вместо REST) ───
 
-def get_position_data(symbol: Optional[str] = None) -> Optional[dict]:
+def get_position_data(symbol: str | None = None) -> dict | None:
     """
     Позиции из приватного WS-кеша.
     - symbol=None → все позиции {symbol: data}
@@ -696,13 +691,13 @@ def get_all_positions() -> dict:
 
 # ─── Исполнения (Фаза 6.3) ───
 
-def get_executions(limit: int = 20) -> List[dict]:
+def get_executions(limit: int = 20) -> list[dict]:
     """Последние fill-уведомления."""
     with _cache_lock:
         return list(_execution_cache[-limit:])
 
 
-def get_executions_for_symbol(symbol: str, limit: int = 10) -> List[dict]:
+def get_executions_for_symbol(symbol: str, limit: int = 10) -> list[dict]:
     """Fill-уведомления для конкретного символа."""
     with _cache_lock:
         return [e for e in _execution_cache if e.get('symbol') == symbol][-limit:]
@@ -710,19 +705,19 @@ def get_executions_for_symbol(symbol: str, limit: int = 10) -> List[dict]:
 
 # ─── Кошелёк (Фаза 6.3) ───
 
-def get_wallet(coin: str = 'USDT') -> Optional[dict]:
+def get_wallet(coin: str = 'USDT') -> dict | None:
     """Баланс кошелька из WS-кеша."""
     with _cache_lock:
         return _wallet_cache.get(coin)
 
 
-def get_wallet_balance(coin: str = 'USDT') -> Optional[float]:
+def get_wallet_balance(coin: str = 'USDT') -> float | None:
     """Доступный баланс кошелька."""
     w = get_wallet(coin)
     return w.get('availableBalance') if w else None
 
 
-def get_wallet_equity(coin: str = 'USDT') -> Optional[float]:
+def get_wallet_equity(coin: str = 'USDT') -> float | None:
     """Equity кошелька."""
     w = get_wallet(coin)
     return w.get('equity') if w else None

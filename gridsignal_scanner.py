@@ -10,11 +10,10 @@ v4.0: SHORT-режим, честный Multi-TF (D/5/3), RSI(14) метрика.
 """
 
 import json
-import subprocess
 import math
-from typing import Optional
-from bybit_ws.api import bybit
+import subprocess
 
+from bybit_ws.api import bybit
 
 # ═══════════════════════════════════════════════════════════════
 # TIER MAP
@@ -77,7 +76,7 @@ def get_top_tickers(limit: int = 50) -> list:
     return out
 
 
-def get_candles(symbol: str, interval: str = 'D', limit: int = 30) -> Optional[list]:
+def get_candles(symbol: str, interval: str = 'D', limit: int = 30) -> list | None:
     """Получить свечи (от старых к новым)."""
     result = bybit('GET',
                    f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}')
@@ -110,7 +109,7 @@ def calc_bb(candles: list):
     }
 
 
-def calc_rsi(candles: list, period: int = 14) -> Optional[float]:
+def calc_rsi(candles: list, period: int = 14) -> float | None:
     """Рассчитать RSI(period) на закрытиях (Wilder smoothing)."""
     closes = [float(c[4]) for c in candles]
     if len(closes) < period + 1:
@@ -167,7 +166,7 @@ def count_up_days(candles: list) -> int:
     return count
 
 
-def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]:
+def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> dict | None:
     """Полный 9-метричный LONG скоринг монеты. v4.0: +RSI, +честный TF."""
     if symbol in BANNED_SYMBOLS:
         return None
@@ -199,7 +198,7 @@ def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]
     else:        bb_score = 1
 
     # ── Объём (вес ×2, макс 10) ──
-    turnover = float((ticker.get('turnover24h') or 0))
+    turnover = float(ticker.get('turnover24h') or 0)
     if turnover < 1_000_000:
         return None
     if turnover > 500_000_000:    vol_score = 10
@@ -243,8 +242,7 @@ def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]
     # ── Волатильность / ширина BB (вес ×1, макс 5) ──
     w = bb['width']
     if 3 <= w <= 8:    vola_score = 5
-    elif 1 <= w < 3:   vola_score = 3
-    elif 8 < w <= 15:  vola_score = 3
+    elif 1 <= w < 3 or 8 < w <= 15:   vola_score = 3
     else:              vola_score = 1
 
     # ── Качество отскока (вес ×1, макс 5) ──
@@ -327,7 +325,7 @@ def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]
     }
 
 
-def score_short(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]:
+def score_short(symbol: str, ticker: dict, interval: str = 'D') -> dict | None:
     """9-метричный SHORT скоринг. Инвертированная логика: ищем перегретые монеты."""
     if symbol in BANNED_SYMBOLS:
         return None
@@ -359,7 +357,7 @@ def score_short(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict
     else:           bb_score = 2
 
     # ── Объём (вес ×2, макс 10) ──
-    turnover = float((ticker.get('turnover24h') or 0))
+    turnover = float(ticker.get('turnover24h') or 0)
     if turnover < 1_000_000:
         return None
     if turnover > 500_000_000:    vol_score = 10
@@ -482,7 +480,7 @@ ONE_WAY_X10 = {'XRPUSDT', 'ONDOUSDT', 'WLFIUSDT', 'ENJUSDT', 'ESPORTSUSDT',
 BANNED_SYMBOLS = {'BLESSUSDT'}
 
 
-def score_scalp(symbol: str, ticker: dict, interval: str = '5') -> Optional[dict]:
+def score_scalp(symbol: str, ticker: dict, interval: str = '5') -> dict | None:
     """BB Scalping M5 x10: касание полосы + RSI-фильтр."""
     if symbol in BANNED_SYMBOLS or symbol not in X10_TIERS:
         return None
@@ -528,7 +526,7 @@ def score_scalp(symbol: str, ticker: dict, interval: str = '5') -> Optional[dict
         'middle_bb': bb['middle'],
         'bb_pos': round(bb['pos'], 1),
         'bb_width': round(bb['width'], 1),
-        'turnover': float((ticker.get('turnover24h') or 0)),
+        'turnover': float(ticker.get('turnover24h') or 0),
         'tier': TIER_MAP.get(symbol, 'C'),
         'rsi': round(rsi_val, 1) if rsi_val else None,
         'mode': f'SCALP_{direction}',
@@ -540,7 +538,7 @@ def score_scalp(symbol: str, ticker: dict, interval: str = '5') -> Optional[dict
     }
 
 
-def score_mean_revert(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]:
+def score_mean_revert(symbol: str, ticker: dict, interval: str = 'D') -> dict | None:
     """Mean Reversion Extreme x10: BB% < 5% (LONG) или > 95% (SHORT)."""
     if symbol in BANNED_SYMBOLS or symbol not in X10_TIERS:
         return None
@@ -583,7 +581,7 @@ def score_mean_revert(symbol: str, ticker: dict, interval: str = 'D') -> Optiona
         'middle_bb': bb['middle'],
         'bb_pos': round(bb_pos, 1),
         'bb_width': round(bb['width'], 1),
-        'turnover': float((ticker.get('turnover24h') or 0)),
+        'turnover': float(ticker.get('turnover24h') or 0),
         'tier': TIER_MAP.get(symbol, 'C'),
         'mode': f'MEAN_{direction}',
         'interval': 'D',
@@ -594,7 +592,7 @@ def score_mean_revert(symbol: str, ticker: dict, interval: str = 'D') -> Optiona
     }
 
 
-def score_funding_momentum(symbol: str, ticker: dict, interval: str = 'D') -> Optional[dict]:
+def score_funding_momentum(symbol: str, ticker: dict, interval: str = 'D') -> dict | None:
     """Funding Rate Momentum x10: экстремальный фондинг + BB-фильтр + тренд."""
     if symbol in BANNED_SYMBOLS or symbol not in X10_TIERS:
         return None
@@ -649,7 +647,7 @@ def score_funding_momentum(symbol: str, ticker: dict, interval: str = 'D') -> Op
         'middle_bb': bb['middle'],
         'bb_pos': round(bb_pos, 1),
         'bb_width': round(bb['width'], 1),
-        'turnover': float((ticker.get('turnover24h') or 0)),
+        'turnover': float(ticker.get('turnover24h') or 0),
         'funding': funding,
         'tier': TIER_MAP.get(symbol, 'C'),
         'mode': f'FUNDING_{direction}',

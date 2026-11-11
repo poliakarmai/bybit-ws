@@ -21,13 +21,13 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from bybit_ws.experiments import engine  # noqa: E402
-from bybit_ws.experiments.store import ExperimentStore  # noqa: E402
+from bybit_ws.experiments import engine
+from bybit_ws.experiments.store import ExperimentStore
 
 
 def load_params(path: str | None) -> dict:
@@ -66,7 +66,7 @@ def run_one(symbol: str, days: int, interval: str, end_date: str | None,
         data_range=data_range,
         commit=engine.git_commit(),
         kline_hash=engine.data_hash(klines),
-        timestamp_iso=datetime.now(timezone.utc).isoformat(),
+        timestamp_iso=datetime.now(UTC).isoformat(),
         cfg_hash=engine.config_hash(),
     )
     return {

@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from bybit_ws.experiments import engine  # noqa: E402
+from bybit_ws.experiments import engine
 
 SYMBOLS = ["STXUSDT", "DOTUSDT", "ONDOUSDT", "SOLUSDT", "ETHUSDT", "BTCUSDT"]
 REGIME_SYMBOL = "BTCUSDT"
@@ -166,7 +166,7 @@ def main() -> None:
         wr = 100 * b["wins"] / b["n"] if b["n"] else 0.0
         pf = b["gross_win"] / b["gross_loss"] if b["gross_loss"] > 0 else (
             float("inf") if b["gross_win"] > 0 else 0.0)
-        print(f"{str(side):<8}{regime:<10}{b['n']:>5}{b['pnl']:>10.2f}{wr:>8.1f}"
+        print(f"{side!s:<8}{regime:<10}{b['n']:>5}{b['pnl']:>10.2f}{wr:>8.1f}"
               f"{_fmt(pf) if not isinstance(pf, float) or pf == float('inf') else f'{pf:.2f}':>8}")
 
     gated = gate(all_trades, regime_at, GATE_RULES)

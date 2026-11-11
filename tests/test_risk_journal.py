@@ -12,7 +12,7 @@ import sys
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
+import pytest
 
 
 class _Cfg:

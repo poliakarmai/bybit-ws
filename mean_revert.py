@@ -15,10 +15,10 @@ import math
 import os
 import time
 
+from .alerts import _is_duplicate, log_event
 from .api import bybit
-from .alerts import log_event, _is_duplicate
-from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
+from .position_sizing import margin_for_strategy
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 MEAN_STATE_FILE = os.path.join(DATA_DIR, 'mean_revert_state.json')

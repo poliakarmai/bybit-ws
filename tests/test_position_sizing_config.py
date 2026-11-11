@@ -9,8 +9,8 @@ import sys
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws import config as cfg_mod  # noqa: E402
-from bybit_ws import position_sizing as ps  # noqa: E402
+from bybit_ws import config as cfg_mod
+from bybit_ws import position_sizing as ps
 
 _KEYS = [
     'enabled',

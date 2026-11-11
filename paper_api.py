@@ -7,9 +7,9 @@
     px.place_order('BTCUSDT', 'Buy', 'Market', 0.01)  # симулирует ордер
 """
 import os
-import time
-import sqlite3
 import random
+import sqlite3
+import time
 from pathlib import Path
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"

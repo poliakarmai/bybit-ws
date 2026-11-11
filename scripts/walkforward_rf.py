@@ -4,11 +4,14 @@
 Проверяет out-of-sample F1 с 30-дневным gap.
 Если OOS F1 < 0.65 — рекомендует отключить BYBIT_ML_ENABLED.
 """
-import os, sys, sqlite3, time
+import sqlite3
+import sys
+import time
 from pathlib import Path
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import f1_score, classification_report
+
 import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import f1_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from file_utils import safe_json_write

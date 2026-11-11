@@ -6,7 +6,6 @@ Time-Based Exit — закрытие позиций застрявших без 
 Особенно важно при лимите 12 позиций.
 """
 import time
-from typing import Optional
 
 # Конфиг
 TIME_EXIT_HOURS = 6  # максимум часов в позиции без движения
@@ -126,8 +125,8 @@ def apply_time_exits(exits: list) -> dict:
     if not exits:
         return {'closed': 0, 'failed': 0}
 
-    from .api import bybit
     from .alerts import log_event
+    from .api import bybit
 
     result = {'closed': 0, 'failed': 0}
 

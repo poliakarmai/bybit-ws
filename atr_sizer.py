@@ -17,8 +17,8 @@ import math
 import os
 import time
 
+from .alerts import _is_duplicate, log_event
 from .api import bybit
-from .alerts import log_event, _is_duplicate
 from .file_utils import safe_json_write
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')

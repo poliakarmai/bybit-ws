@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, '/home/openclaw')
 sys.path.insert(0, '/home/openclaw/bybit-ws')
 
-from bybit_ws import fee_stats as fs  # noqa: E402
+from bybit_ws import fee_stats as fs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws import lstm_world_model as wm  # noqa: E402
+from bybit_ws import lstm_world_model as wm
 
 
 def test_scaler_arrays_from_json_lists():

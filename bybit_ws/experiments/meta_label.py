@@ -26,7 +26,6 @@ import argparse
 import math
 import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 from scipy.optimize import minimize
@@ -35,7 +34,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from bybit_ws.experiments import engine
 from bybit_ws.experiments.triple_barrier import label_trade
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Feature builder
@@ -165,12 +163,12 @@ class LogisticRegression:
     """
 
     def __init__(self):
-        self.w: Optional[np.ndarray] = None
-        self._mean: Optional[np.ndarray] = None
-        self._std: Optional[np.ndarray] = None
+        self.w: np.ndarray | None = None
+        self._mean: np.ndarray | None = None
+        self._std: np.ndarray | None = None
 
     def fit(self, X: np.ndarray, y: np.ndarray, l2: float = 1e-3,
-            max_iter: int = 200) -> "LogisticRegression":
+            max_iter: int = 200) -> LogisticRegression:
         """Fit model.  X: (N, F), y: (N,) in {0, 1}."""
         X = np.asarray(X, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64).ravel()
@@ -445,7 +443,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Sanity checks ──
     print(f"\n{'='*70}")
-    print(f"  Synthetic sanity check")
+    print("  Synthetic sanity check")
     print(f"{'='*70}")
     _sanity_check()
 

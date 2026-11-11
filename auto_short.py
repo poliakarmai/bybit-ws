@@ -44,10 +44,17 @@ import math
 import os
 import time
 
-from .api import bybit, account_wallet, get_bb_data, fetch_orders, set_leverage, verify_leverage
-from .alerts import log_event, add_alert
-from .config import Config
 from . import DATA_DIR, learn_position_idx, position_idx
+from .alerts import add_alert, log_event
+from .api import (
+    account_wallet,
+    bybit,
+    fetch_orders,
+    get_bb_data,
+    set_leverage,
+    verify_leverage,
+)
+from .config import Config
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -66,7 +73,9 @@ def _get_bb_ws(symbol, interval='D'):
         return _c[1]
     if _WS_BB_ENABLED:
         try:
-            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            from .ws_client import get_bb as ws_get_bb
+            from .ws_client import is_connected as ws_alive
+            from .ws_client import is_stale as ws_stale
             if ws_alive() and not ws_stale(300):
                 bb = ws_get_bb(symbol, interval)
                 if bb and bb.get('upper', 0) > 0:
@@ -78,8 +87,8 @@ def _get_bb_ws(symbol, interval='D'):
     if bb and bb.get('upper', 0) > 0:
         _BB_CACHE[_key] = (_now, bb)
     return bb
-from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
+from .position_sizing import margin_for_strategy
 from .state_db import db  # SQLite dual-write
 
 SHORT_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/short_positions.json')
@@ -285,8 +294,7 @@ def short_score_coin(sym: str, bb_data: dict, ticker: dict, is_junk: bool) -> di
 
     # 5. BB Width / Volatility (0-5)
     if 3 <= bb_width <= 8:     vola_score = 5
-    elif 1 <= bb_width < 3:    vola_score = 3
-    elif 8 < bb_width <= 15:   vola_score = 3
+    elif 1 <= bb_width < 3 or 8 < bb_width <= 15:    vola_score = 3
     else:                      vola_score = 1
 
     # 6. Quality score (0-5) — позиция × ширина, инвертировано
@@ -689,7 +697,10 @@ def check_auto_short(positions):
 
             # ── Canary: маркируем SHORT-вход для матчинга при закрытии ──
             try:
-                from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
+                from bybit_ws.journal.self_learn import (
+                    mark_canary_entry,
+                    should_use_canary,
+                )
                 if should_use_canary():
                     mark_canary_entry(sym, 'sell', time.time())
             except Exception as e:
@@ -706,6 +717,7 @@ def check_auto_short(positions):
             # ── Телеметрия входа (17.09.2026): диагностика для trade_history при закрытии ──
             try:
                 from bybit_ws.state_db import db as sync_db
+
                 from .auto_entry import _calc_rsi as _calc_rsi_tel
                 sync_db.save_entry_diagnostic(
                     sym, 'Sell',
@@ -972,7 +984,9 @@ def check_short_time_sl(positions: dict) -> list[str]:
     Фаза 9: ключевая причина avg_loss=$12.58 — позиции гниют.
     """
     import time as _time
-    from .alerts import log_event as _log, add_alert as _alert
+
+    from .alerts import add_alert as _alert
+    from .alerts import log_event as _log
     from .api import place_order as _close_order
 
     SHORT_TIME_SL_HOURS = 6  # закрыть если >6ч в убытке (04.10: 12→6ч)

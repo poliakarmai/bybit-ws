@@ -12,9 +12,12 @@ Architecture:
 Used by: main_async.py, auto_entry.py, auto_short.py, auto_sl.py, auto_tp.py
 """
 
-import os, json, time, hmac, hashlib
+import hashlib
+import hmac
+import json
+import os
+import time
 from abc import ABC, abstractmethod
-from typing import Optional
 
 import httpx
 
@@ -96,9 +99,11 @@ class BybitAdapter(ExchangeAdapter):
     def _import_bybit(self):
         """Import bybit helper — works both as package and standalone."""
         try:
-            from .api import bybit as b, fetch_positions as fp
+            from .api import bybit as b
+            from .api import fetch_positions as fp
         except ImportError:
-            from api import bybit as b, fetch_positions as fp
+            from api import bybit as b
+            from api import fetch_positions as fp
         return b, fp
 
     def get_tickers(self) -> list[dict]:
@@ -469,7 +474,7 @@ def get_exchange(name: str = None) -> ExchangeAdapter:
 
 
 # Global instance (lazy)
-_exchange: Optional[ExchangeAdapter] = None
+_exchange: ExchangeAdapter | None = None
 
 def exchange() -> ExchangeAdapter:
     """Get the configured exchange adapter (singleton)."""

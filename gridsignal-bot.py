@@ -7,11 +7,39 @@ v4.0: SHORT-сигналы, Multi-TF (D/5/3/W/M), RSI(14), батчевый chec
 Бесплатная версия: до 2 /scan в сутки на пользователя.
 """
 
-import os, sys, json, time, asyncio, re, sqlite3, subprocess, urllib.parse, urllib.request, urllib.error
-from datetime import datetime, timezone
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler
-from telegram import InlineQueryResultArticle, InputTextMessageContent, InlineQueryResultsButton
+import asyncio
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import UTC, datetime
+
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InlineQueryResultArticle,
+    InlineQueryResultsButton,
+    InputTextMessageContent,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    Update,
+)
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    InlineQueryHandler,
+    MessageHandler,
+    PreCheckoutQueryHandler,
+    filters,
+)
 
 SCANNER_SCRIPT = os.path.expanduser('~/.local/bin/gridsignal_scanner.py')
 DB_PATH = os.path.expanduser('~/.local/share/gridsignal-bot/users.db')
@@ -291,7 +319,7 @@ def update_scan_count(conn, user_id: int):
 
 def reset_daily_counts(conn):
     """Сброс счётчиков сканов. Сбрасывает если последний скан был не сегодня."""
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     conn.execute("UPDATE users SET scans_today=0 WHERE last_scan_ts < ?", (today_start,))
     conn.commit()
 
@@ -989,8 +1017,8 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif mode == 'rotation':
         scanning_text = scanning_text.replace('сканирую', 'проверяю ротации').replace('Scanning', 'Checking rotations')
         status_msg = await update.message.reply_text(f"{scanning_text}...")
-        from funding_rotation import check_funding_rotation
         from api import fetch_positions
+        from funding_rotation import check_funding_rotation
         pos = await asyncio.to_thread(fetch_positions)
         rotations = await asyncio.to_thread(check_funding_rotation, pos or {})
         if not rotations:
@@ -1136,7 +1164,7 @@ async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(f"⭐ Stars ({PRO_PRICE_STARS})", callback_data="pro_buy")],
-            [InlineKeyboardButton(f"💎 TON (~400₽)", callback_data="pro_buy_ton")]
+            [InlineKeyboardButton("💎 TON (~400₽)", callback_data="pro_buy_ton")]
         ])
         await update.message.reply_text(
             "🔔 **GridSignal** — Bollinger Grid сигналы\n\n"
@@ -1700,7 +1728,9 @@ async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Индекс страха на основе BB позиций топ-10 монет."""
-    import subprocess, json, re
+    import json
+    import re
+    import subprocess
 
     await update.message.reply_text("😱 Сканирую настроение рынка...")
     conn_tmp = init_db(); log_event(conn_tmp, update.effective_user.id, 'fear', update); conn_tmp.close()
@@ -2022,7 +2052,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"⭐ Средний score сигналов: {avg_score:.1f}/10")
         if my_alerts > 0:
             lines.append(f"🔔 Активных алертов: {my_alerts}")
-        lines.append(f"\n⚡ /scan — новый сигнал" if lang == 'ru' else f"\n⚡ /scan — new signal")
+        lines.append("\n⚡ /scan — новый сигнал" if lang == 'ru' else "\n⚡ /scan — new signal")
         await update.message.reply_text("\n".join(lines))
         return
     now = time.time()
@@ -2195,9 +2225,10 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         import matplotlib
         matplotlib.use('Agg')
+        import tempfile
+
         import mplfinance as mpf
         import pandas as pd
-        import tempfile
 
         r = await asyncio.to_thread(
             subprocess.run,
@@ -2478,7 +2509,8 @@ async def cmd_dex_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _do_dex_search(update: Update, query: str):
     """Выполнить поиск через DexScreener API и показать результат"""
-    import urllib.request, urllib.error
+    import urllib.error
+    import urllib.request
     msg = await update.message.reply_text(f"🔍 Ищу `{query}`...")
 
     def _fetch(url: str):
@@ -2636,6 +2668,7 @@ def main():
     # Глобальный обработчик ошибок — сетевые сбои Telegram API не роняют бот в стэк
     async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         import traceback
+
         import httpx
         from telegram.error import NetworkError, TimedOut
         err = context.error

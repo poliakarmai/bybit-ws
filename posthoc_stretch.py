@@ -17,8 +17,8 @@ import sqlite3
 import statistics
 import sys
 import time
-from collections import Counter
 import urllib.request
+from collections import Counter
 
 DB = "/home/openclaw/.local/share/bybit-ws/state.db"
 CACHE = os.path.expanduser("~/.cache/bybit-ws-daily-kline.json")

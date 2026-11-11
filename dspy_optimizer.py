@@ -19,10 +19,10 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 import dspy
 import numpy as np
+
 try:
     from .file_utils import safe_json_write
 except ImportError:  # standalone
@@ -92,7 +92,7 @@ def _load_trade_history() -> list[dict]:
     return [dict(zip(cols, r)) for r in rows]
 
 
-def _trade_to_features(trade: dict) -> Optional[dict]:
+def _trade_to_features(trade: dict) -> dict | None:
     """
     Преобразует одну сделку в словарь признаков для DSPy.
 
@@ -237,10 +237,10 @@ class TradeSignalModule(dspy.Module):
 
 def train_dspy(
     lm_model: str = 'openai/gpt-4o-mini',
-    api_key: Optional[str] = None,
-    api_base: Optional[str] = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
     optimize: bool = True,
-) -> Optional[dspy.Module]:
+) -> dspy.Module | None:
     """
     Обучить и оптимизировать DSPy-модель на исторических данных.
 
@@ -253,7 +253,6 @@ def train_dspy(
     Returns:
         Оптимизированный модуль или None при ошибке.
     """
-    import sqlite3
 
     try:
         log_event('🚀 DSPy: загрузка trade_history...')
@@ -418,7 +417,7 @@ def _save_program(
     # Сохраняем метаданные
     safe_json_write(str(DSPY_FEATURES_PATH), {
             'feature_keys': feature_keys,
-            'n_samples': int(len(X)),
+            'n_samples': len(X),
             'n_profit': n_profit,
             'n_loss': n_loss,
             'profit_ratio': round(n_profit / max(1, len(X)), 3),
@@ -429,7 +428,7 @@ def _save_program(
         }, indent=2, ensure_ascii=False)
 # ── Инференс ──────────────────────────────────────────────────────────────────
 
-def predict(signal_data: dict) -> Optional[float]:
+def predict(signal_data: dict) -> float | None:
     """
     Предсказать score (0-100) для нового сигнала через DSPy.
 
@@ -485,7 +484,7 @@ def predict(signal_data: dict) -> Optional[float]:
         return None
 
 
-def dspy_gate_pass(signal_data: dict) -> tuple[bool, Optional[float]]:
+def dspy_gate_pass(signal_data: dict) -> tuple[bool, float | None]:
     """
     DSPy-гейт: проверяет, стоит ли входить в сигнал.
 

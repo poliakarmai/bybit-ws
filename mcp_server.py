@@ -22,12 +22,11 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from pathlib import Path
 
-from mcp.server import Server, NotificationOptions
+from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 from bybit_ws.alerts import log_event
 

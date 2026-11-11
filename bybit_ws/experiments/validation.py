@@ -34,13 +34,11 @@ import random
 import sys
 from pathlib import Path
 from statistics import mean, stdev
-from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from bybit_ws.experiments import engine  # noqa: E402
-from bybit_ws.experiments.parallel_sandbox import DEFAULT_VARIANTS  # noqa: E402
-
+from bybit_ws.experiments import engine
+from bybit_ws.experiments.parallel_sandbox import DEFAULT_VARIANTS
 
 # ── нормальные функции (Abramowitz & Stegun) ──────────────────
 
@@ -173,7 +171,7 @@ def deflated_sharpe_ratio(
 def probability_of_backtest_overfitting(
     returns_matrix: list[list[float]],
     n_blocks: int = 16,
-) -> Optional[float]:
+) -> float | None:
     """PBO via Combinatorially Symmetric Cross-Validation (CSCV).
 
     Bailey, Borwein, Lopez de Prado, Zhu (2017). Для каждого сплита
@@ -424,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     if pbo_val is not None:
         print(f"   PBO:             {pbo_val:.4f}")
     else:
-        print(f"   PBO:             N/A (мало данных или <2 стратегий)")
+        print("   PBO:             N/A (мало данных или <2 стратегий)")
 
     # ── VERDICT ────────────────────────────────────────────────
     dsr_ok = dsr_res["dsr"] >= 0.95

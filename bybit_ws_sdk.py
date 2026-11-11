@@ -23,8 +23,9 @@ Usage:
     positions = m.positions()
 """
 
+from typing import Any
+
 import requests
-from typing import Optional, Dict, Any
 
 
 class Monitor:
@@ -34,12 +35,12 @@ class Monitor:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
     
-    def _get(self, path: str) -> Dict[str, Any]:
+    def _get(self, path: str) -> dict[str, Any]:
         r = requests.get(f"{self.base_url}{path}", timeout=self.timeout)
         r.raise_for_status()
         return r.json()
     
-    def _post(self, path: str, data: dict) -> Dict[str, Any]:
+    def _post(self, path: str, data: dict) -> dict[str, Any]:
         r = requests.post(f"{self.base_url}{path}", json=data, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
@@ -69,7 +70,7 @@ class Monitor:
         return self._post("/scan", {"mode": mode, "limit": limit})
     
     def enter(self, symbol: str, side: str, qty: float,
-              sl: Optional[float] = None, tp: Optional[float] = None) -> dict:
+              sl: float | None = None, tp: float | None = None) -> dict:
         """Войти в позицию рынком."""
         data = {"symbol": symbol, "side": side, "qty": qty}
         if sl: data["sl"] = sl

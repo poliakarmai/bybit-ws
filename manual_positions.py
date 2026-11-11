@@ -11,9 +11,10 @@
 Все опасные модули проверяют is_manual_position() перед вмешательством.
 """
 
-import os
 import json
+import os
 import time
+
 from .alerts import log_event
 
 PUMP_STATE_FILE = os.path.join(os.path.expanduser('~/.local/share/bybit-ws'), 'pumps.json')

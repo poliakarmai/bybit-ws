@@ -2,19 +2,15 @@
 
 import asyncio
 import json
-import os
 import sqlite3
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import mcp_server as _mcp  # type: ignore[import-not-found]  # noqa: E402
+import mcp_server as _mcp  # type: ignore[import-not-found]
 
 
 def _run(coro):

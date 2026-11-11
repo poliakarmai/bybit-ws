@@ -5,15 +5,14 @@
 Этот conftest подменяет _pytest.python.PyModule._getobj чтобы пропустить __init__.py.
 """
 
-import re
-import types
-import sys
-from pathlib import Path
-
 # Тесты не должны писать в боевые артефакты: events.log (alerts.log_event) и
 # risk_decisions (risk_manager._log_decision) молчат при этом флаге. Ставим до
 # импорта bybit_ws — тогда покрыты все тесты, а не только те, что ставят сами.
 import os
+import re
+import types
+from pathlib import Path
+
 os.environ.setdefault('BYBIT_LOG_SILENT', '1')
 
 # Скриптовые smoke-тесты (test_ml_smoke.py, test_scanner_smoke.py, ...) вызывают sys.exit()
@@ -21,7 +20,7 @@ os.environ.setdefault('BYBIT_LOG_SILENT', '1')
 # Запускать их вручную: python3 test_ml_smoke.py. Список вычисляется, а не хардкодится.
 collect_ignore = [
     p.name for p in Path(__file__).parent.glob("test_*.py")
-    if re.search(r"^sys\.exit\(", p.read_text(errors="ignore"), re.M)
+    if re.search(r"^sys\.exit\(", p.read_text(errors="ignore"), re.MULTILINE)
 ]
 
 

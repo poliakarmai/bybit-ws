@@ -12,9 +12,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import bybit_ws.config as cfg_mod  # noqa: E402
-import bybit_ws.position_sizing as ps  # noqa: E402
-import bybit_ws.unified_sl as usl  # noqa: E402
+import bybit_ws.config as cfg_mod
+import bybit_ws.position_sizing as ps
+import bybit_ws.unified_sl as usl
 
 
 def _atr(value):

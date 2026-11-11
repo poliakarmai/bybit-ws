@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bybit_ws import lstm_regime as L  # noqa: E402
+from bybit_ws import lstm_regime as L
 
 # _calc_features требует n >= 20 истории на бар, поэтому индексы 0..18 — None.
 WARMUP = 20

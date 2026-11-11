@@ -18,8 +18,8 @@ import types
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws import risk_manager as rm  # noqa: E402
-from bybit_ws import state_db as sdb  # noqa: E402
+from bybit_ws import risk_manager as rm
+from bybit_ws import state_db as sdb
 
 PROD_DB_PATH = sdb.DB_PATH
 

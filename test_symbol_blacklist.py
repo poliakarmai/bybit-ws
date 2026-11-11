@@ -9,10 +9,7 @@
 - два разных символа независимы
 """
 
-import json
 import time
-
-import pytest
 
 from bybit_ws.symbol_blacklist import (
     add_to_blacklist,

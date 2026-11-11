@@ -22,7 +22,7 @@ os.environ['BYBIT_LOG_SILENT'] = '1'
 
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws import auto_tp  # noqa: E402
+from bybit_ws import auto_tp
 
 # BB из живого прогона 18.10 19:18 (cur ниже middle → LONG-ветка активна).
 BB = {'lower': 0.1677498558425005, 'middle': 0.20070000000000002,

@@ -6,7 +6,6 @@ LONG только если imbalance > 0.55, SHORT только если < 0.45.
 Отсекает 40-60% ложных входов на пробоях BB.
 """
 import time
-from typing import Optional, Tuple
 
 IMBALANCE_LONG_THRESHOLD = 0.55
 IMBALANCE_SHORT_THRESHOLD = 0.45
@@ -18,7 +17,7 @@ _cache: dict = {}
 _CACHE_TTL = 5
 
 
-def get_orderbook_imbalance(symbol: str) -> Optional[float]:
+def get_orderbook_imbalance(symbol: str) -> float | None:
     """Получить bid/(bid+ask) imbalance для символа.
 
     Returns:
@@ -63,7 +62,7 @@ def get_orderbook_imbalance(symbol: str) -> Optional[float]:
         return None
 
 
-def should_enter_by_imbalance(symbol: str, side: str) -> Tuple[bool, str]:
+def should_enter_by_imbalance(symbol: str, side: str) -> tuple[bool, str]:
     """Проверить, стоит ли входить по стакану.
 
     Args:

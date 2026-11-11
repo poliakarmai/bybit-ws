@@ -11,8 +11,11 @@ import types
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')  # bybit_ws -> ~/bybit-ws
 
-from bybit_ws import api, rpc  # noqa: E402
-from bybit_ws import auto_entry  # noqa: E402
+from bybit_ws import (
+    api,
+    auto_entry,
+    rpc,
+)
 
 
 class _Recorder:

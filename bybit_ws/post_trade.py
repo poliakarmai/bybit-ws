@@ -6,10 +6,10 @@ Post-Trade Analysis Loop — кластерный анализ win rate (28.06.2
 Кластер <40% win rate за 30 дней → автоблок.
 """
 import json
-import os
 import time
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
+
 from .file_utils import safe_json_write
 
 DATA_DIR = Path.home() / '.local' / 'share' / 'bybit-ws'

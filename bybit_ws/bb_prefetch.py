@@ -5,6 +5,7 @@ BB Pre-Fetcher — batch-загрузка BB для всех символов (2
 Кеширует результат на 5 минут — auto_entry/auto_short используют кеш.
 """
 import time
+
 from .api import bybit
 
 # Кеш: symbol → {upper, middle, lower, ts}

@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 sys.path.insert(0, '/home/openclaw')
-from bybit_ws.state_db import StateDB  # noqa: E402
+from bybit_ws.state_db import StateDB
+
 
 def _iter_window(start: int, end: int, fetch=None):
     """Все записи transaction-log за [start, end). Одна реализация пагинации на проект —
@@ -75,7 +76,7 @@ def main():
     ap.add_argument('--from', dest='start', required=True, help='YYYY-MM-DD')
     ap.add_argument('--to', dest='end', required=True, help='YYYY-MM-DD (не включая)')
     a = ap.parse_args()
-    ts = lambda s: int(datetime.strptime(s, '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp())
+    ts = lambda s: int(datetime.strptime(s, '%Y-%m-%d').replace(tzinfo=UTC).timestamp())
     start, end = ts(a.start), ts(a.end)
 
     db = StateDB()
@@ -101,8 +102,8 @@ def main():
     print(f'Σ cashFlow TRADE (биржа)          = ${cf_trade:.2f}')
     print(f'сверка: closedPnl + funding = ${pnl + total:.2f}  vs  '
           f'cashFlow TRADE = ${cf_trade:.2f}  → разница ${pnl + total - cf_trade:+.2f}')
-    print(f'        fees<0 (комиссия закрытия) уже внутри closedPnl; комиссия открытия '
-          f'не в closedPnl и не в funding_log (видна только в TRADE-записях).')
+    print('        fees<0 (комиссия закрытия) уже внутри closedPnl; комиссия открытия '
+          'не в closedPnl и не в funding_log (видна только в TRADE-записях).')
     if n_ext < n_pnl:
         print(f'        ⚠ не сходится по существу: fees/external_id заполнены лишь у {n_ext} '
               f'из {n_pnl} строк — это Задача 2 (backfill_from_bybit.py).')

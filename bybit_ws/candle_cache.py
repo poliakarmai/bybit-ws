@@ -23,7 +23,7 @@ TTL-кэш для kline-свечей Bybit — Фаза SHORT-оптимизац
 
 import threading
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 # Глобальное состояние модуля
 _cache: dict = {}
@@ -47,9 +47,9 @@ def _inc_miss() -> None:
 def get_candles(
     symbol: str,
     interval: str,
-    fetcher: Callable[[str, str], Optional[list]],
+    fetcher: Callable[[str, str], list | None],
     ttl: float = 300.0,
-) -> Optional[list]:
+) -> list | None:
     """Получить свечи для (symbol, interval) с TTL-кэшированием.
 
     Args:
@@ -94,8 +94,8 @@ def get_candles(
 
 
 def invalidate(
-    symbol: Optional[str] = None,
-    interval: Optional[str] = None,
+    symbol: str | None = None,
+    interval: str | None = None,
 ) -> None:
     """Инвалидировать записи кэша.
 
@@ -122,7 +122,7 @@ def invalidate(
 
         # Один из аргументов задан — фильтруем
         keys_to_delete = []
-        for key in _cache.keys():
+        for key in _cache:
             sym, itv = key
             if symbol is not None and sym != symbol:
                 continue

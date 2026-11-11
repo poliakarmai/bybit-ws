@@ -5,17 +5,25 @@ v2: двухуровневая дедупликация:
   2. Normalized hash: сообщение без цифр — защита от BB%-дрифта
 """
 
+import hashlib
 import json
 import os
 import re
-import hashlib
 import subprocess
 import time
 from datetime import datetime
-from .constants import ALERTS, EVENTS_LOG, ALERTS_LOG, HERMES_BIN, ALERT_DEDUP_FILE, ALERT_DEDUP_TTL
-from .constants import safe_run
-from .state_db import db  # SQLite-дедупликация (persistent)
+
+from .constants import (
+    ALERT_DEDUP_FILE,
+    ALERT_DEDUP_TTL,
+    ALERTS,
+    ALERTS_LOG,
+    EVENTS_LOG,
+    HERMES_BIN,
+    safe_run,
+)
 from .file_utils import safe_json_write
+from .state_db import db  # SQLite-дедупликация (persistent)
 
 # Минимальный интервал между алертами одного типа на один символ
 CATEGORY_COOLDOWN = {

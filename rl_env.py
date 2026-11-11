@@ -13,11 +13,8 @@ Actions: SKIP=0, ENTER_LONG=1, WAIT=2
 Reward: PnL сделки (TP+, SL−), 0 за SKIP, -0.01 за WAIT
 """
 
-import math
-import os
 import random
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 

@@ -28,8 +28,6 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime
-from typing import Optional
 
 import httpx
 
@@ -132,7 +130,7 @@ def _is_push_duplicate(msg: str, priority: str) -> bool:
 
 # ── HTTP-сессия (переиспользование) ──────────────────────────────────────────
 
-_http_session: Optional[httpx.Client] = None
+_http_session: httpx.Client | None = None
 
 
 def _get_http() -> httpx.Client:
@@ -289,7 +287,7 @@ def send_push(
         telegram_msg = f"{prefix} {msg}" if prefix else msg
 
         send_telegram_alert(telegram_msg, level=level)
-        print(f"[push] ntfy failed, sent via Telegram fallback", flush=True)
+        print("[push] ntfy failed, sent via Telegram fallback", flush=True)
         return True
     except Exception as e:
         print(f"[push] Telegram fallback also failed: {e}", flush=True)

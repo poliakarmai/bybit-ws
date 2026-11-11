@@ -102,8 +102,7 @@ def test_time_exit_profit_no_exit():
 
 def test_short_time_sl_ms(monkeypatch):
     """check_short_time_sl with openTime in ms, SHORT in loss >6h → triggers."""
-    import bybit_ws.alerts as alerts
-    import bybit_ws.api as api
+    from bybit_ws import alerts, api
     from bybit_ws.auto_short import check_short_time_sl
 
     open_ms = int((time.time() - 7 * 3600) * 1000)

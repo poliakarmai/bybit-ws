@@ -4,14 +4,12 @@
 `margin_for_strategy` реально возвращает 0 при замке.
 """
 
-import sys
 import time
-from pathlib import Path
 
 import pytest
 
-import bybit_ws.position_sizing as ps  # noqa: E402
-import bybit_ws.protections as pr  # noqa: E402
+import bybit_ws.position_sizing as ps
+import bybit_ws.protections as pr
 
 CFG = dict(pr._DEFAULTS)
 

@@ -10,10 +10,13 @@ SL = entry ± k × ATR(14), где k зависит от волатильнос�
 Fallback на BB-based если ATR недоступен.
 """
 # DEPRECATED: superseded by unified_sl.manage_sl(). Kept only for legacy tests. Do NOT add new callers.
-import os, json, time
+import json
+import os
+import time
+
+from .alerts import log_event
 from .api import bybit, fetch_positions, get_bb_data
 from .config import Config
-from .alerts import log_event
 from .manual_positions import is_manual_position
 
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -110,7 +113,9 @@ def _get_bb_ws(symbol, interval='D'):
     """BB: сначала WS-кеш, fallback на REST."""
     if _WS_BB_ENABLED:
         try:
-            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            from .ws_client import get_bb as ws_get_bb
+            from .ws_client import is_connected as ws_alive
+            from .ws_client import is_stale as ws_stale
             if ws_alive() and not ws_stale(300):
                 bb = ws_get_bb(symbol, interval)
                 if bb and bb.get('lower', 0) > 0:
@@ -243,12 +248,12 @@ def check_and_fix_sl(positions=None):
                 min_sl = round(entry * 0.5, 4)
                 if sl_price < min_sl:
                     sl_price = min_sl
-                    sl_desc += f' (capped -50%)'
+                    sl_desc += ' (capped -50%)'
             else:
                 max_sl = round(entry * 1.5, 4)
                 if sl_price > max_sl:
                     sl_price = max_sl
-                    sl_desc += f' (capped +50%)'
+                    sl_desc += ' (capped +50%)'
 
             # ── SL floor: не ближе 5% от входа (v9.1) ──
             if side == 'Buy':
@@ -266,11 +271,11 @@ def check_and_fix_sl(positions=None):
             if side == 'Buy' and sl_price >= mark:
                 # ATR/BB SL выше рынка → позиция в минусе → аварийный SL
                 sl_price = round(mark * 0.95, 4)
-                sl_desc = f'аварийный SL (mark×0.95, ATR SL был бы выше рынка)'
+                sl_desc = 'аварийный SL (mark×0.95, ATR SL был бы выше рынка)'
             elif side == 'Sell' and sl_price <= mark:
                 # ATR/BB SL ниже рынка для SHORT → позиция в минусе → аварийный SL
                 sl_price = round(mark * 1.05, 4)
-                sl_desc = f'аварийный SL (mark×1.05, ATR SL был бы ниже рынка)'
+                sl_desc = 'аварийный SL (mark×1.05, ATR SL был бы ниже рынка)'
         else:
             # ── Fallback: BB-based SL ──
             if side == 'Buy':

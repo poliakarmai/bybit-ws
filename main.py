@@ -1,9 +1,19 @@
 # DEPRECATED: use main_async.py for production (asyncio, цикл 30с)
 # Этот файл оставлен для совместимости и будет удалён в следующей версии
 import sys; sys.exit('Use main_async.py — синхронный main.py удалён. См. bybit-ws-full.md раздел 6.1')
-from . import (DATA_DIR, EVENTS_LOG, ALERTS, ALERTS_LOG, POSITIONS_SNAPSHOT, ORDERS_SNAPSHOT,
-               ORDERS_METADATA, BYBIT_CLI, SHUTDOWN_REQUESTED,
-               COVERAGE_CHECK_INTERVAL, TRAIL_CHECK_INTERVAL)
+from . import (
+    ALERTS,
+    ALERTS_LOG,
+    BYBIT_CLI,
+    COVERAGE_CHECK_INTERVAL,
+    DATA_DIR,
+    EVENTS_LOG,
+    ORDERS_METADATA,
+    ORDERS_SNAPSHOT,
+    POSITIONS_SNAPSHOT,
+    SHUTDOWN_REQUESTED,
+    TRAIL_CHECK_INTERVAL,
+)
 from .config import Config
 
 # Health-check: файл с timestamp последнего успешного цикла
@@ -30,46 +40,67 @@ def _timed_call(fn, *args, timeout=HEAVY_CHECK_TIMEOUT):
         log_event(f'_timed_call {fn.__name__} error: {result[0]}')
         return [], f'{fn.__name__}({result[0]})'
     return result[0] if result else [], None
-from .api import fetch_positions, fetch_orders, bybit
-from .snapshot import load_json, save_json, check_position_changes, check_order_changes
-from .alerts import log_event, add_alert, get_alerts, send_telegram_alert, _is_duplicate
-from .auto_tp import auto_take_profit, apply_auto_tp
-from .trailing_sl import trailing_sl, trailing_sl_x10, apply_trailing_sl
-from .junk_trail import trailing_junk_tp
-from .funding_rotation import check_funding_rotation
-from .overbought import check_overbought, rotate_watchlist
-from .pump_detect import check_pumps, check_weekly_pumps
-from .file_utils import safe_json_write, locked_open
-from .auto_entry import auto_entry_scan, record_sl_hit
-from .health import (check_liquidation, check_bb_squeeze, check_funding_flip,
-                      check_daily_drawdown, check_funding_pump)
-from .correlation import check_correlation
-from .rsi import check_rsi_divergence
-from .squeeze import check_squeeze
-from .auto_sl import check_and_fix_sl, check_breakeven_sl
-from .dca import check_dca
-from .cleanup import check_expired_orders, apply_cancel_expired, clean_stale_orders
-from .reporting import (should_send_summary, send_summary, check_profit_triggers,
-                         log_trade, check_strategy_compliance, check_coverage_summary,
-                         check_daily_pnl_alert)
-from .metrics import record_alert, record_auto_entry
-from .recycle import handle_tp_recycle, apply_recycle
-from .cost_tracker import check_cycle as cost_tracker_check
-from .funding_tracker import check_cycle as funding_tracker_check
-from .margin_alerts import check_margin_utilization, get_margin_stats
-from .rpc import start_rpc_server, update_health as rpc_update_health, rpc_state
-from .sl_reentry import notify_sl_hit, check_sl_reentry
-from .state_db import db  # SQLite trade_history
-from .auto_short import check_auto_short, check_junk_dca
-from .regime import check_regime
-from .correlation import check_correlation, load_correlation_snapshot, tighten_correlation_sl
-from .bb_scalp import check_scalp_signals, execute_scalp
-from .mean_revert import check_mean_revert, execute_mean_revert
-from .funding_entry import check_funding_signals, execute_funding_entry
+from .alerts import _is_duplicate, add_alert, get_alerts, log_event, send_telegram_alert
+from .api import bybit, fetch_orders, fetch_positions
 from .atr_sizer import check_position_risk, validate_entry
-from .x10_limits import record_x10_trade, x10_entry_allowed, track_x10_entry, get_x10_strategy, clear_x10_position
+from .auto_entry import auto_entry_scan, record_sl_hit
+from .auto_short import check_auto_short, check_junk_dca
+from .auto_sl import check_and_fix_sl, check_breakeven_sl
+from .auto_tp import apply_auto_tp, auto_take_profit
+from .bb_scalp import check_scalp_signals, execute_scalp
+from .cleanup import apply_cancel_expired, check_expired_orders, clean_stale_orders
+from .correlation import (
+    check_correlation,
+    load_correlation_snapshot,
+    tighten_correlation_sl,
+)
+from .cost_tracker import check_cycle as cost_tracker_check
+from .dca import check_dca
+from .file_utils import locked_open, safe_json_write
+from .funding_entry import check_funding_signals, execute_funding_entry
+from .funding_rotation import check_funding_rotation
+from .funding_tracker import check_cycle as funding_tracker_check
+from .health import (
+    check_bb_squeeze,
+    check_daily_drawdown,
+    check_funding_flip,
+    check_funding_pump,
+    check_liquidation,
+)
+from .junk_trail import trailing_junk_tp
 from .manual_positions import is_manual_position
+from .margin_alerts import check_margin_utilization, get_margin_stats
+from .mean_revert import check_mean_revert, execute_mean_revert
+from .metrics import record_alert, record_auto_entry
+from .overbought import check_overbought, rotate_watchlist
 from .partial_tp import check_partial_tp  # Phase 3
+from .pump_detect import check_pumps, check_weekly_pumps
+from .recycle import apply_recycle, handle_tp_recycle
+from .regime import check_regime
+from .reporting import (
+    check_coverage_summary,
+    check_daily_pnl_alert,
+    check_profit_triggers,
+    check_strategy_compliance,
+    log_trade,
+    send_summary,
+    should_send_summary,
+)
+from .rpc import rpc_state, start_rpc_server
+from .rpc import update_health as rpc_update_health
+from .rsi import check_rsi_divergence
+from .sl_reentry import check_sl_reentry, notify_sl_hit
+from .snapshot import check_order_changes, check_position_changes, load_json, save_json
+from .squeeze import check_squeeze
+from .state_db import db  # SQLite trade_history
+from .trailing_sl import apply_trailing_sl, trailing_sl, trailing_sl_x10
+from .x10_limits import (
+    clear_x10_position,
+    get_x10_strategy,
+    record_x10_trade,
+    track_x10_entry,
+    x10_entry_allowed,
+)
 
 # Дедупликация STOP-алертов: кулдаун 5 минут на символ
 # Предотвращает спам от hedge SL orderId race (orderId меняется каждый цикл)
@@ -104,7 +135,6 @@ def _check_risk_limits(positions: dict, risk_cfg) -> tuple[bool, list]:
             daily_loss = float(m.get('daily_pnl', 0))  # negative = loss
     except Exception as e:
         log_event(f'⚠️ _check_risk_limits error: {e}')
-        pass
     max_loss = risk_cfg.get('max_daily_loss', 50)
     if daily_loss < -max_loss:
         alerts.append(f'🚨 Дневной убыток превышен: -${abs(daily_loss):.0f} > -${max_loss}')
@@ -122,7 +152,8 @@ def _check_risk_limits(positions: dict, risk_cfg) -> tuple[bool, list]:
 
 def _close_instant(symbol: str, position: dict) -> bool:
     """Мгновенно закрыть позицию рынком. Возвращает True если ордер отправлен успешно."""
-    import subprocess, json
+    import json
+    import subprocess
     side = position.get('side', 'Buy')
     close_side = 'Sell' if side == 'Buy' else 'Buy'
     qty = str(int(float(position.get('size', 0))))
@@ -474,11 +505,11 @@ def main_loop():
     RPC_PORT = cfg.rpc.port
     RPC_BIND = cfg.rpc.bind
 
-    print(f"🔄 Bybit WS Monitor v2.6 запущен")
+    print("🔄 Bybit WS Monitor v2.6 запущен")
     print(f"   Лог: {EVENTS_LOG}")
     print(f"   Алерты: {ALERTS_LOG}")
     print(f"   Проверка каждые {CYCLE_SECONDS} секунд")
-    print(f"   Нажми Ctrl+C для остановки")
+    print("   Нажми Ctrl+C для остановки")
 
     # Инициализация watchlist-ротации
     rotate_watchlist()
@@ -545,7 +576,7 @@ def main_loop():
                     save_json(POSITIONS_SNAPSHOT, old_positions)
                 if old_orders:
                     save_json(ORDERS_SNAPSHOT, old_orders)
-                log_event(f'Монитор остановлен (graceful)')
+                log_event('Монитор остановлен (graceful)')
                 try:
                     rpc_server.shutdown()
                 except Exception as e:
@@ -902,7 +933,7 @@ def main_loop():
                     # Rate-limit: dedup по STOP (10 мин кулдаун) — лёгкая проверка без API
                     if not _is_duplicate(f'Correlation {int(longs/len(new_positions)*100)}% LONG', 'STOP'):
                         log_event(f'🛑 Корреляция {longs/len(new_positions)*100:.0f}% LONG — авто-вход заблокирован')
-                        log_event(f'🔄 SHORT-кандидаты проверяются в основном блоке (каждые 10 циклов)')
+                        log_event('🔄 SHORT-кандидаты проверяются в основном блоке (каждые 10 циклов)')
 
             # Авто-вход каждые 60 циклов (30 мин)
             if cycle_count % 60 == 0 and new_positions is not None:

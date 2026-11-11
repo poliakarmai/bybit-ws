@@ -9,7 +9,6 @@
 Запуск:
     cd /home/openclaw/bybit-ws && python3 -m pytest tests/test_observability.py -q
 """
-import json
 import os
 import sys
 import tempfile
@@ -17,9 +16,8 @@ import time
 
 sys.path.insert(0, '/home/openclaw')
 
-import bybit_ws.entry_judge as ej  # noqa: E402
-from bybit_ws.state_db import StateDB  # noqa: E402
-
+import bybit_ws.entry_judge as ej
+from bybit_ws.state_db import StateDB
 
 # ── 1. Снимок входа в trade_history ──────────────────────────────────────
 
@@ -102,7 +100,8 @@ def test_stats_breaker_and_fallback(monkeypatch, tmp_path):
 def test_metrics_endpoint_exposes_judge_series():
     """/metrics обязан печатать серии судьи — иначе счётчики некуда читать."""
     import inspect
-    import bybit_ws.rpc as rpc
+
+    from bybit_ws import rpc
     src = inspect.getsource(rpc)
     for series in ('bybit_ws_judge_calls',
                    'bybit_ws_judge_verdicts_total',

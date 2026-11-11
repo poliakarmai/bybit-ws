@@ -20,12 +20,10 @@ import argparse
 import sys
 from pathlib import Path
 from statistics import mean
-from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from bybit_ws.experiments import engine
-
 
 # ---------------------------------------------------------------------------
 # Function 1: label a single trade against the OHLCV path
@@ -36,7 +34,7 @@ def label_trade(
     entry_time_ms: int,
     side: str,
     sl: float,
-    tp: Optional[float],
+    tp: float | None,
     vertical_bars: int,
     klines: list[dict],
 ) -> dict:
@@ -317,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
             r = t.get("reason", "?")
             reason_counts[r] = reason_counts.get(r, 0) + 1
 
-        print(f"\n  Cross-check: actual exit reasons from engine:")
+        print("\n  Cross-check: actual exit reasons from engine:")
         for r, cnt in sorted(reason_counts.items()):
             print(f"    {r:<6}: {cnt}")
 
@@ -327,11 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         for t in labelled:
             actual = t.get("reason", "")
             tb_hit = t["hit"]
-            if actual == "TP" and tb_hit == "tp":
-                agree += 1
-            elif actual == "SL" and tb_hit == "sl":
-                agree += 1
-            elif actual == "EOD" and tb_hit == "time":
+            if actual == "TP" and tb_hit == "tp" or actual == "SL" and tb_hit == "sl" or actual == "EOD" and tb_hit == "time":
                 agree += 1
             else:
                 disagree += 1
@@ -341,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
               f"disagree: {disagree}")
 
         # ---- Sample: first 5 labelled trades ----
-        print(f"\n  First 5 labelled trades:")
+        print("\n  First 5 labelled trades:")
         print(f"  {'side':<5} {'entry':>10} {'tb_exit':>10} {'label':>6} "
               f"{'hit':<5} {'tb_pnl%':>10} {'actual':<6}")
         print(f"  {'─'*60}")
@@ -353,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- Synthetic sanity checks ----
     print(f"\n{'='*90}")
-    print(f"  Synthetic sanity checks")
+    print("  Synthetic sanity checks")
     print(f"{'='*90}")
     _run_sanity_checks()
 
@@ -377,12 +371,12 @@ def _run_sanity_checks():
         entry_price=100.0, entry_time_ms=1000, side="Buy",
         sl=95.0, tp=110.0, vertical_bars=2, klines=klines_1,
     )
-    print(f"\n  Case 1 (LONG, SL in first bar):")
+    print("\n  Case 1 (LONG, SL in first bar):")
     print(f"    label={r1['label']}, hit='{r1['hit']}', "
           f"exit_price={r1['exit_price']}, pnl_pct={r1['pnl_pct']}")
     assert r1["label"] == -1, f"Expected -1, got {r1['label']}"
     assert r1["hit"] == "sl", f"Expected 'sl', got {r1['hit']}"
-    print(f"    ✅ PASS")
+    print("    ✅ PASS")
 
     # Case 2: LONG, entry=100, sl=95, tp=110, vertical_bars=2
     # No barrier touched in 2 bars → label=0, hit='time'
@@ -398,14 +392,14 @@ def _run_sanity_checks():
         entry_price=100.0, entry_time_ms=1000, side="Buy",
         sl=95.0, tp=110.0, vertical_bars=2, klines=klines_2,
     )
-    print(f"\n  Case 2 (LONG, no barrier in 2 bars → time):")
+    print("\n  Case 2 (LONG, no barrier in 2 bars → time):")
     print(f"    label={r2['label']}, hit='{r2['hit']}', "
           f"exit_price={r2['exit_price']}, pnl_pct={r2['pnl_pct']}")
     assert r2["label"] == 0, f"Expected 0, got {r2['label']}"
     assert r2["hit"] == "time", f"Expected 'time', got {r2['hit']}"
     # exit_price should be close of klines[i0 + vertical_bars - 1] = klines[0+2-1] = klines[1].close = 102.0
     assert r2["exit_price"] == 102.0, f"Expected 102.0, got {r2['exit_price']}"
-    print(f"    ✅ PASS")
+    print("    ✅ PASS")
 
 
 if __name__ == "__main__":

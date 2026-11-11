@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 
 sys.path.insert(0, '/home/openclaw')
-from bybit_ws.api import bybit  # noqa: E402
-from bybit_ws.state_db import StateDB  # noqa: E402
+from bybit_ws.api import bybit
+from bybit_ws.state_db import StateDB
 
 WINDOW_DAYS = 7
 MAX_PAGES = 50  # ponytail: 5000 сделок на окно; при переполнении — сузить окно
@@ -53,7 +53,7 @@ def main():
     ap.add_argument('--from', dest='start', required=True, help='YYYY-MM-DD')
     ap.add_argument('--to', dest='end', required=True, help='YYYY-MM-DD (не включая)')
     a = ap.parse_args()
-    ts = lambda s: int(datetime.strptime(s, '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp())
+    ts = lambda s: int(datetime.strptime(s, '%Y-%m-%d').replace(tzinfo=UTC).timestamp())
     start, end = ts(a.start), ts(a.end)
 
     db = StateDB()

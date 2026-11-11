@@ -27,13 +27,13 @@ class _NoDB:
 def _install_stubs():
     """Заглушки bybit_ws.api и bybit_ws.state_db — без сети и без боевого state.db."""
     api_stub = types.ModuleType('bybit_ws.api')
-    setattr(api_stub, 'bybit', lambda *a, **k: {'retCode': 0, 'result': {'list': []}})
-    setattr(api_stub, 'bybit_async', None)
-    setattr(api_stub, 'fetch_atr', lambda *a, **k: 0.0)
+    api_stub.bybit = lambda *a, **k: {'retCode': 0, 'result': {'list': []}}
+    api_stub.bybit_async = None
+    api_stub.fetch_atr = lambda *a, **k: 0.0
     sys.modules['bybit_ws.api'] = api_stub
 
     db_stub = types.ModuleType('bybit_ws.state_db')
-    setattr(db_stub, 'db', _NoDB())
+    db_stub.db = _NoDB()
     sys.modules['bybit_ws.state_db'] = db_stub
 
 

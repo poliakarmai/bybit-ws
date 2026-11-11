@@ -11,17 +11,16 @@ Multi-Timeframe Confirmation (v1.0) — Фаза 4.3.1
 """
 
 import math
-from typing import Optional, List, Tuple
 
 from .api import bybit
 
 # Конфигурация
 CONFLUENCE_MIN_TFS = 2       # минимум ТФ для одобрения (2/3)
-TF_LIST: Tuple[str, ...] = ('D', 'W', 'M')
+TF_LIST: tuple[str, ...] = ('D', 'W', 'M')
 TF_LABELS = {'D': 'day', 'W': 'week', 'M': 'month'}
 
 
-def _fetch_candles(symbol: str, interval: str = 'D', limit: int = 30) -> Optional[list]:
+def _fetch_candles(symbol: str, interval: str = 'D', limit: int = 30) -> list | None:
     """Получить свечи (от старых к новым) через REST API."""
     r = bybit('GET', f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}')
     if not r or r.get('retCode') != 0:
@@ -35,7 +34,7 @@ def _fetch_candles(symbol: str, interval: str = 'D', limit: int = 30) -> Optiona
     return None
 
 
-def _calc_bb(candles: list) -> Optional[dict]:
+def _calc_bb(candles: list) -> dict | None:
     """Рассчитать Bollinger Bands (20, 2)."""
     closes = [float(c[4]) for c in candles[-20:]]
     if len(closes) < 20:
@@ -53,7 +52,7 @@ def _calc_bb(candles: list) -> Optional[dict]:
     }
 
 
-def _bb_signal(bb: Optional[dict], direction: str) -> Optional[dict]:
+def _bb_signal(bb: dict | None, direction: str) -> dict | None:
     """Определить, есть ли сигнал на одном ТФ по BB-полосам.
 
     Returns dict с деталями или None если данных недостаточно.
@@ -89,7 +88,7 @@ def _bb_signal(bb: Optional[dict], direction: str) -> Optional[dict]:
     }
 
 
-def check_confluence(symbol: str, direction: str = 'LONG') -> Optional[dict]:
+def check_confluence(symbol: str, direction: str = 'LONG') -> dict | None:
     """Проверить D/W/M конфлюенс для торгового сигнала.
 
     Args:
@@ -100,7 +99,7 @@ def check_confluence(symbol: str, direction: str = 'LONG') -> Optional[dict]:
         dict с результатами или None если не удалось получить данные D-ТФ
     """
     tf_results = {}
-    approved_tfs: List[str] = []
+    approved_tfs: list[str] = []
 
     from .candle_cache import get_candles as _get_candles_cached
     for tf in TF_LIST:

@@ -19,10 +19,10 @@ WAL-режим: читатели не блокируют писателей.
     data = db.get_short_state(sym)
 """
 
+import json
 import os
 import sqlite3
 import threading
-import json
 import time
 from datetime import datetime
 
@@ -698,6 +698,7 @@ db = StateDB()
 # ═══════════════════════════════════════════════════════════
 
 import asyncio
+
 
 class AsyncStateDB:
     """Async-обёртка над SQLite через aiosqlite."""

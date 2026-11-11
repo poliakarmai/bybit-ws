@@ -1,8 +1,10 @@
 """Метрики успешности."""
 import json
 from datetime import datetime
+
 from . import METRICS_FILE
 from .file_utils import safe_json_write
+
 
 def _today_key():
     return datetime.now().strftime('%Y-%m-%d')

@@ -9,14 +9,14 @@
 Данные: positionIM из fetch_positions(), лимит: risk.max_total_margin из конфига.
 """
 
-import os
 import json
+import os
 import time
 from datetime import datetime
-from . import DATA_DIR, EVENTS_LOG
-from .file_utils import safe_json_write
-from .config import Config
 
+from . import DATA_DIR, EVENTS_LOG
+from .config import Config
+from .file_utils import safe_json_write
 
 # ── Дедупликация предупреждений (не чаще раза в 15 мин на уровень) ──────────
 _MARGIN_ALERT_FILE = os.path.join(DATA_DIR, 'margin_alert_state.json')
@@ -39,7 +39,7 @@ def _load_alert_state() -> dict:
         try:
             with open(_MARGIN_ALERT_FILE) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             pass
     return {}
 
@@ -48,7 +48,7 @@ def _save_alert_state(state: dict):
     """Сохранить состояние дедупликации."""
     try:
         safe_json_write(_MARGIN_ALERT_FILE, state)
-    except IOError:
+    except OSError:
         pass
 
 
@@ -279,8 +279,9 @@ def check_margin_utilization_detailed(positions: dict) -> dict:
 
 # ── CLI (для ручного запуска и тестирования) ─────────────────────────────────
 if __name__ == '__main__':
-    from .api import fetch_positions
     import sys
+
+    from .api import fetch_positions
 
     print('🔍 Margin Utilization Check')
     print('=' * 50)

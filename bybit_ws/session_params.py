@@ -10,7 +10,7 @@ Asia night (21:00-02:00 UTC) — флэт, mean-reversion отлично:
 Weekend — пониженная волатильность:
   BB period ↑, max positions меньше
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # UTC times
 NY_OPEN_START = 14, 30  # (hour, minute)
@@ -34,7 +34,7 @@ def get_session() -> str:
     Returns:
         'ny_open', 'asia', 'weekend', 'normal'
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if now.weekday() >= 5:
         return 'weekend'
 

@@ -23,13 +23,12 @@ API:
 import json
 import os
 import time
-from typing import Optional
 
 # DATA_DIR читаем только внутри функций (на уровне модуля — запрещено,
 # иначе тесты на tmp_path сломаются из-за side-effect-импорта).
 
 
-def _blacklist_path(path: Optional[str] = None) -> str:
+def _blacklist_path(path: str | None = None) -> str:
     """Путь к JSON-файлу blacklist. Если path задан — вернуть его, иначе DATA_DIR/blacklist.json."""
     if path is not None:
         return path
@@ -37,7 +36,7 @@ def _blacklist_path(path: Optional[str] = None) -> str:
     return os.path.join(DATA_DIR, 'symbol_blacklist.json')
 
 
-def load_blacklist(path: Optional[str] = None) -> dict:
+def load_blacklist(path: str | None = None) -> dict:
     """Прочитать JSON, вернуть dict {sym: {reason, added_at}}.
 
     При отсутствии файла или битом JSON — вернуть {} (НЕ бросать исключение,
@@ -61,12 +60,12 @@ def load_blacklist(path: Optional[str] = None) -> dict:
         return {}
 
 
-def is_blacklisted(sym: str, path: Optional[str] = None) -> bool:
+def is_blacklisted(sym: str, path: str | None = None) -> bool:
     """Есть ли sym в blacklist."""
     return sym in load_blacklist(path)
 
 
-def _save_blacklist(data: dict, path: Optional[str] = None) -> None:
+def _save_blacklist(data: dict, path: str | None = None) -> None:
     """Атомарно сохранить dict в JSON-файл (write через временный файл + rename)."""
     fp = _blacklist_path(path)
     try:
@@ -80,7 +79,7 @@ def _save_blacklist(data: dict, path: Optional[str] = None) -> None:
         log_event(f'⚠️ symbol_blacklist: не удалось записать {fp}: {e}')
 
 
-def add_to_blacklist(sym: str, reason: str = '', path: Optional[str] = None) -> None:
+def add_to_blacklist(sym: str, reason: str = '', path: str | None = None) -> None:
     """Добавить sym в blacklist. Read-modify-write + лог."""
     data = load_blacklist(path)
     data[sym] = {'reason': reason, 'added_at': time.time()}
@@ -89,7 +88,7 @@ def add_to_blacklist(sym: str, reason: str = '', path: Optional[str] = None) -> 
     log_event(f'🚫 symbol_blacklist: добавлен {sym} (reason={reason!r})')
 
 
-def remove_from_blacklist(sym: str, path: Optional[str] = None) -> None:
+def remove_from_blacklist(sym: str, path: str | None = None) -> None:
     """Удалить sym из blacklist. Если нет — тихо (идемпотентно)."""
     data = load_blacklist(path)
     if sym not in data:
@@ -100,6 +99,6 @@ def remove_from_blacklist(sym: str, path: Optional[str] = None) -> None:
     log_event(f'✅ symbol_blacklist: удалён {sym}')
 
 
-def list_blacklist(path: Optional[str] = None) -> dict:
+def list_blacklist(path: str | None = None) -> dict:
     """Вернуть весь dict blacklist (синоним load_blacklist)."""
     return load_blacklist(path)

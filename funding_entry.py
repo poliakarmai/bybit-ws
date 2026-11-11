@@ -13,10 +13,10 @@ import math
 import os
 import time
 
+from .alerts import _is_duplicate, log_event
 from .api import bybit
-from .alerts import log_event, _is_duplicate
-from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
+from .position_sizing import margin_for_strategy
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 FUNDING_STATE_FILE = os.path.join(DATA_DIR, 'funding_entry_state.json')
@@ -228,7 +228,7 @@ def execute_funding_entry(entry_info):
                 try:
                     from .alerts import add_alert
                     add_alert('SL', f'⛔ {sym}: FUNDING-позиция без SL/TP ({ret_msg})')
-                except Exception as e:  # noqa: BLE001 — алерт не должен ломать вход
+                except Exception as e:
                     log_event(f'⚠️ FUNDING {sym}: add_alert упал — {e}')
             return True
         else:

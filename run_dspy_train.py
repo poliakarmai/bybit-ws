@@ -32,7 +32,7 @@ def main():
     os.environ['OPENAI_API_KEY'] = api_key
     os.environ['OPENAI_BASE_URL'] = 'https://api.deepseek.com/v1'
 
-    print(f'[DSPy] Starting training with DeepSeek (deepseek-chat)...', flush=True)
+    print('[DSPy] Starting training with DeepSeek (deepseek-chat)...', flush=True)
     result = subprocess.run(
         [sys.executable, 'dspy_optimizer.py', '--train',
          '--model', 'openai/deepseek-chat'],

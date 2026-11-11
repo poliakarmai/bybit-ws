@@ -20,9 +20,9 @@ import time
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
+import pytest
 
-from bybit_ws import funding_rotation as fr  # noqa: E402
+from bybit_ws import funding_rotation as fr
 
 
 @pytest.fixture

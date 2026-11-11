@@ -11,8 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import bybit_ws.margin_alerts as ma  # noqa: E402
-import bybit_ws.position_sizing as ps  # noqa: E402
+import bybit_ws.margin_alerts as ma
 
 
 def _pos(size, mark):

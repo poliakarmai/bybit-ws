@@ -11,7 +11,6 @@ DB: ~/.local/share/bybit-ws/paper_state.db (отдельно от state.db)
 """
 import logging
 import os
-from typing import Dict, Optional
 
 logger = logging.getLogger('bybit.paper')
 
@@ -44,7 +43,7 @@ def paper_positions_snapshot():
     return px.fetch_positions(), px.fetch_orders()
 
 
-def paper_update_mark_prices(price_map: Dict[str, float]):
+def paper_update_mark_prices(price_map: dict[str, float]):
     """Обновить mark-цены для paper-позиций."""
     px = get_paper_exchange()
     if px:

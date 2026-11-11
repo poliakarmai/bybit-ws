@@ -5,6 +5,7 @@ Bollinger Grid Strategy — симуляция для backtesting (28.06.2026).
 Использует те же правила что и авто-монитор: SL=-7% от lower, TP=ATR-based.
 """
 import math
+
 from .__init__ import Trade as BTTrade
 
 

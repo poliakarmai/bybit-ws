@@ -7,12 +7,12 @@
 """
 
 import sys
+
 # Добавляем корень репо в sys.path, чтобы bybit_ws/ резолвился как пакет
 sys.path.insert(0, '/home/openclaw/bybit-ws')
 
-import pytest
 
-from bybit_ws.trade_limits import allow_by_daily_count, allow_after_sl_streak
+from bybit_ws.trade_limits import allow_after_sl_streak, allow_by_daily_count
 
 
 class TestAllowByDailyCount:

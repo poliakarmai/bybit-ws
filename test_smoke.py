@@ -4,9 +4,11 @@
 Запуск: cd /home/openclaw && python3 bybit_ws/test_smoke.py
 (требуется symlink bybit_ws → bybit-ws в /home/openclaw)
 """
-import sys, os, tempfile
+import os
+import sys
+import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Не писать фикстуры (entry=$100 и пр.) в боевой events.log — он SSOT.
 os.environ['BYBIT_LOG_SILENT'] = '1'
@@ -14,10 +16,10 @@ os.environ['BYBIT_LOG_SILENT'] = '1'
 # symlink bybit_ws → bybit-ws в /home/openclaw
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws.trailing_sl import trailing_sl, tight_trailing_sl
 from bybit_ws.auto_sl import _get_tiers
 from bybit_ws.manual_positions import is_manual_position
 from bybit_ws.state_db import StateDB
+from bybit_ws.trailing_sl import tight_trailing_sl, trailing_sl
 
 PASS = FAIL = 0
 

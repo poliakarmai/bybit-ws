@@ -4,7 +4,10 @@
 Это классический разворотный сигнал.
 """
 
-import os, time, json
+import json
+import os
+import time
+
 from . import DATA_DIR
 from .api import bybit, get_bb_data
 from .file_utils import safe_json_write

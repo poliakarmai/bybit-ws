@@ -5,7 +5,10 @@
 Запуск: cd /home/openclaw && python3 bybit_ws/test_ws_client.py
 """
 
-import sys, os, time, unittest
+import os
+import sys
+import time
+import unittest
 
 # Добавляем путь к bybit_ws
 sys.path.insert(0, os.path.expanduser('~/bybit-ws'))
@@ -119,10 +122,10 @@ class TestWSFallbackToREST(unittest.TestCase):
 
     def test_get_bb_ws_function_exists_in_all_modules(self):
         """_get_bb_ws есть во всех 4 модулях."""
-        from bybit_ws.trailing_sl import _get_bb_ws as f1
-        from bybit_ws.auto_sl import _get_bb_ws as f2
         from bybit_ws.auto_entry import _get_bb_ws as f3
         from bybit_ws.auto_short import _get_bb_ws as f4
+        from bybit_ws.auto_sl import _get_bb_ws as f2
+        from bybit_ws.trailing_sl import _get_bb_ws as f1
 
         for name, fn in [('trailing_sl', f1), ('auto_sl', f2),
                           ('auto_entry', f3), ('auto_short', f4)]:
@@ -207,7 +210,7 @@ class TestFullWSFeatures(unittest.TestCase):
 
     def test_orderbook_data_structure(self):
         """Проверка структуры orderbook при ручном заполнении кеша."""
-        from bybit_ws.ws_client import _orderbook_cache, _cache_lock
+        from bybit_ws.ws_client import _cache_lock, _orderbook_cache
         with _cache_lock:
             _orderbook_cache['TESTUSDT'] = {
                 'bid': 100.0,
@@ -219,7 +222,7 @@ class TestFullWSFeatures(unittest.TestCase):
                 'ts': time.time(),
             }
 
-        from bybit_ws.ws_client import get_orderbook, get_bid_ask
+        from bybit_ws.ws_client import get_bid_ask, get_orderbook
         try:
             ob = get_orderbook('TESTUSDT')
             self.assertIsNotNone(ob)
@@ -235,7 +238,7 @@ class TestFullWSFeatures(unittest.TestCase):
 
     def test_wallet_data_structure(self):
         """Проверка структуры wallet при ручном заполнении."""
-        from bybit_ws.ws_client import _wallet_cache, _cache_lock
+        from bybit_ws.ws_client import _cache_lock, _wallet_cache
         with _cache_lock:
             _wallet_cache['USDT'] = {
                 'coin': 'USDT',
@@ -264,7 +267,7 @@ class TestFullWSFeatures(unittest.TestCase):
 
     def test_position_data_structure(self):
         """Проверка структуры позиций при ручном заполнении."""
-        from bybit_ws.ws_client import _position_cache, _cache_lock
+        from bybit_ws.ws_client import _cache_lock, _position_cache
         with _cache_lock:
             _position_cache['BTCUSDT'] = {
                 'symbol': 'BTCUSDT',
@@ -283,7 +286,7 @@ class TestFullWSFeatures(unittest.TestCase):
                 'ts': time.time(),
             }
 
-        from bybit_ws.ws_client import get_position_data, get_all_positions
+        from bybit_ws.ws_client import get_all_positions, get_position_data
         try:
             p = get_position_data('BTCUSDT')
             self.assertIsNotNone(p)
@@ -299,7 +302,7 @@ class TestFullWSFeatures(unittest.TestCase):
 
     def test_execution_data_structure(self):
         """Проверка структуры execution при ручном заполнении."""
-        from bybit_ws.ws_client import _execution_cache, _cache_lock
+        from bybit_ws.ws_client import _cache_lock, _execution_cache
         with _cache_lock:
             _execution_cache.clear()
             _execution_cache.append({
@@ -350,6 +353,7 @@ class TestWSFullIntegration(unittest.TestCase):
         try:
             # Перезагружаем флаг (читается при импорте модуля)
             import importlib
+
             import bybit_ws.ws_client as wsc
             importlib.reload(wsc)
             self.assertTrue(wsc.is_full_enabled())

@@ -9,14 +9,13 @@ column 1)»: predict_regime писал кеш через open('w'), что ус�
 'Expecting value' в events.log каждые 30 секунд.
 """
 import json
+import sys
 import threading
 from pathlib import Path
 
-import sys
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from file_utils import safe_json_write  # noqa: E402
+from file_utils import safe_json_write
 
 PAYLOAD = {"regime": "TRENDING_DOWN", "confidence": 42, "timestamp": "2026-10-28T12:00:00"}
 
@@ -30,7 +29,7 @@ def _spy_reads(path, write_fn, iterations):
         while not stop.is_set():
             try:
                 json.loads(path.read_text())
-            except Exception as exc:  # noqa: BLE001 — ловим ровно этот класс
+            except Exception as exc:
                 errors.append(exc)
 
     t = threading.Thread(target=reader, daemon=True)

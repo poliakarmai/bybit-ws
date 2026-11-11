@@ -15,7 +15,7 @@ import threading
 os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.fixture()
@@ -50,7 +50,7 @@ def test_concurrent_writes_serialized(sdb):
                     'SELECT symbol FROM trade_history WHERE id=?', (trade_id,)).fetchone()
                 assert row and row[0] == sym, f'{tag}: id {trade_id} -> {row}'
                 sdb.set_kv(f'{tag}:{i}', i)
-        except Exception as e:  # noqa: BLE001 — нужен любой сбой потока
+        except Exception as e:
             errors.append(e)
 
     threads = [threading.Thread(target=writer, args=(t,)) for t in ('AAA', 'BBB')]

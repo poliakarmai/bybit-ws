@@ -1,12 +1,12 @@
 """Сводки, трейд-журнал, аудит стратегии."""
 import os
-from . import safe_run
 from datetime import datetime, timedelta
-from . import DATA_DIR, BYBIT_CLI
-from .snapshot import load_json, save_json
+
+from . import DATA_DIR
 from .alerts import log_event, send_telegram_alert
-from .manual_positions import is_manual_position
 from .file_utils import locked_open, safe_json_append
+from .manual_positions import is_manual_position
+from .snapshot import load_json, save_json
 
 TRADE_LOG = os.path.join(DATA_DIR, 'trades.md')
 TRADE_JSONL = os.path.join(DATA_DIR, 'trades.jsonl')
@@ -214,6 +214,7 @@ def check_daily_pnl_alert():
     """Проверить дневной PnL: алерт если сегодня — худший день за 7 дней."""
     try:
         import json
+
         from . import METRICS_FILE
         if not os.path.exists(METRICS_FILE):
             return None

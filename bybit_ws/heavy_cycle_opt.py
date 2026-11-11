@@ -11,12 +11,9 @@ heavy_cycle_opt.py — Оптимизированный тяжёлый цикл 
 import asyncio
 import os
 import time
-from functools import partial
-from datetime import datetime
 
-from .alerts import log_event, add_alert, send_telegram_alert
+from .alerts import add_alert, log_event, send_telegram_alert
 from .push_notifier import send_critical_alert, send_high_alert
-
 
 # ── Кеш для fetch_open_orders ──
 _open_orders_cache = {'data': None, 'ts': 0.0, 'ttl': 60.0}
@@ -229,7 +226,7 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
     # ── Auto-TP (использует единый fetch_open_orders) ──
     real_orders = results.get('fetch_orders') or orders or {}
     try:
-        from .auto_tp import auto_take_profit, apply_auto_tp
+        from .auto_tp import apply_auto_tp, auto_take_profit
         tp_actions = auto_take_profit(positions or {}, real_orders)
         if tp_actions:
             apply_auto_tp(tp_actions)
@@ -286,9 +283,10 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
     # ФАЗА 3: Auto-Entry (после корреляций — нужны их данные)
     # ═══════════════════════════════════════════════════
     try:
+        import re
+
         from .auto_entry import auto_entry_scan
         from .risk_manager import check as risk_check
-        import re
 
         entries = await loop.run_in_executor(None, auto_entry_scan, positions or {})
         entry_msgs = entries[0] if isinstance(entries, tuple) else entries
@@ -340,7 +338,7 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
                             f'({b["trades"]} сделок, PnL=${b["pnl"]:.2f})'
                         )
             except Exception:
-                log_event(f'⚠️ post_trade log error')
+                log_event('⚠️ post_trade log error')
 
         adjustments_raw = daily_tasks[1]
         if not isinstance(adjustments_raw, Exception) and adjustments_raw:
@@ -353,7 +351,7 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
                         f'{adj.get("old", "?")} → {adj.get("new", "?")}'
                     )
             except Exception:
-                log_event(f'⚠️ self_learn log error')
+                log_event('⚠️ self_learn log error')
 
     elapsed = time.time() - t0
     log_event(f'⚡ heavy cycle #{cycle_count} done in {elapsed:.2f}s [optimized]')

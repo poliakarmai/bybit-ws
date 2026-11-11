@@ -7,8 +7,9 @@ Returns: Sharpe, Sortino, Calmar, Max DD, Win Rate, Profit Factor.
 import math
 import random
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
 
 
 @dataclass
@@ -175,14 +176,11 @@ class BacktestEngine:
         max_dd = 0.0
         max_dd_pct = 0.0
         for eq in equity_curve:
-            if eq > peak:
-                peak = eq
+            peak = max(peak, eq)
             dd = peak - eq
             dd_pct = dd / peak if peak > 0 else 0
-            if dd > max_dd:
-                max_dd = dd
-            if dd_pct > max_dd_pct:
-                max_dd_pct = dd_pct
+            max_dd = max(max_dd, dd)
+            max_dd_pct = max(max_dd_pct, dd_pct)
 
         # Calmar
         annual_return = (equity / self.initial_capital - 1) * (365 / max(total_trades, 1))

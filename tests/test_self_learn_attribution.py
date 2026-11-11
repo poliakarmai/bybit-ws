@@ -8,9 +8,8 @@
 3. CANARY_ENABLED=False: canary-параметры не применяются к live.
 """
 import os
-import pathlib
-import time
 import sys
+import time
 
 os.environ["BYBIT_LOG_SILENT"] = "1"
 sys.path.insert(0, "/home/openclaw")
@@ -66,7 +65,7 @@ def test_trade_closed_credits_recorded_arm(tmp_assignments, monkeypatch):
     monkeypatch.setattr(sl, "load_ensemble", lambda: fake)
     monkeypatch.setattr(sl, "save_ensemble", lambda ens: None)
     monkeypatch.setattr(sl, "get_regime_drift_detector", lambda: type("D", (), {"update": lambda *a, **k: None})())
-    monkeypatch.setattr(sl, "_load_symbol_profiles", lambda: {})
+    monkeypatch.setattr(sl, "_load_symbol_profiles", dict)
     monkeypatch.setattr(sl, "_save_symbol_profiles", lambda p: None)
 
     sl.record_arm_assignment("SOLUSDT", "buy", time.time() - 3600, "TRENDING_UP", 2)
@@ -82,7 +81,7 @@ def test_trade_closed_without_assignment_is_noop(tmp_assignments, monkeypatch):
     monkeypatch.setattr(sl, "load_ensemble", lambda: fake)
     monkeypatch.setattr(sl, "save_ensemble", lambda ens: None)
     monkeypatch.setattr(sl, "get_regime_drift_detector", lambda: type("D", (), {"update": lambda *a, **k: None})())
-    monkeypatch.setattr(sl, "_load_symbol_profiles", lambda: {})
+    monkeypatch.setattr(sl, "_load_symbol_profiles", dict)
     monkeypatch.setattr(sl, "_save_symbol_profiles", lambda p: None)
 
     # SHORT и ручные входы руки не назначают — posterior не должен меняться

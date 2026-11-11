@@ -26,7 +26,7 @@ os.environ['BYBIT_LOG_SILENT'] = '1'
 # bybit_ws -> bybit-ws symlink в /home/openclaw.
 sys.path.insert(0, '/home/openclaw')
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.fixture(scope='module')

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Модульные тесты: health.py, auto_sl.py, pump_detect.py"""
-import sys, os, json, time, tempfile, shutil
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
 from pathlib import Path
 
 # Добавляем bybit-ws в путь

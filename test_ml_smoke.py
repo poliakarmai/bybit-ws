@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Smoke-тесты ML-конвейера: ensemble + rl_agent."""
-import os, sys
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 FAILS = 0
@@ -34,8 +36,9 @@ except Exception as e:
 # ── 2. RL agent smoke ──
 print('🤖 RL agent smoke tests')
 try:
-    from rl_agent import should_enter, predict, _dict_to_features
     import numpy as np
+
+    from rl_agent import _dict_to_features, predict, should_enter
 
     state = {'bb_pct': 15.0, 'bb_width': 10.0, 'rsi': 30.0, 'atr_pct': 2.5,
              'vol_ratio': 1.2, 'funding': 0.0001, 'mtf_confluence': 3,
@@ -62,9 +65,10 @@ except Exception as e:
 # ── 3. HMAC smoke ──
 print('🔐 HMAC smoke tests')
 try:
-    from ml_scorer import _sign_file, _verify_file
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
+
+    from ml_scorer import _sign_file, _verify_file
 
     with tempfile.NamedTemporaryFile(suffix='.test', delete=False) as f:
         f.write(b'test model data')

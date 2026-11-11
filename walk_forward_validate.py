@@ -4,18 +4,20 @@ Walk-forward validation для ML Gate (RandomForest).
 Проверяет out-of-sample F1 с time-series split'ом.
 Запуск: python3 walk_forward_validate.py
 """
-import json, os, sys, time
+import sys
 from pathlib import Path
+
 import numpy as np
 
 DATA_DIR=Path.home()/'.local'/'share'/'bybit-ws'
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:
-    from ml_scorer import _extract_features, MODEL_PATH, _load_signals
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.model_selection import TimeSeriesSplit
     from sklearn.metrics import f1_score, precision_score, recall_score
+    from sklearn.model_selection import TimeSeriesSplit
+
+    from ml_scorer import MODEL_PATH, _extract_features, _load_signals
 except ImportError as e:
     print(f'❌ Зависимости не установлены: {e}')
     sys.exit(1)

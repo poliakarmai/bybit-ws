@@ -4,6 +4,7 @@
 import ast
 from pathlib import Path
 
+
 def get_func_returns(filepath, func_name):
     """Parse a .py file and check if a function returns a tuple."""
     try:
@@ -107,11 +108,11 @@ def main():
                 break
     
     if guard_issues:
-        print(f"\n=== GUARD ISSUES (for-цикл без isinstance после run_in_thread) ===")
+        print("\n=== GUARD ISSUES (for-цикл без isinstance после run_in_thread) ===")
         for gi in guard_issues:
             print(gi)
     
-    print(f"\n=== BUGS (функция возвращает tuple — двойная распаковка!) ===")
+    print("\n=== BUGS (функция возвращает tuple — двойная распаковка!) ===")
     if issues:
         for i in issues:
             print(f"  🔴 L{i['line']}: {i['targets']} = run_in_thread({i['func']}) → returns TUPLE")

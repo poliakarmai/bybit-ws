@@ -11,7 +11,6 @@ v2.7: + секция использования маржи (из positions.json)
 import json
 import os
 import sys
-
 from datetime import datetime
 
 HOME = os.path.expanduser("~")
@@ -99,7 +98,7 @@ def load_positions_snapshot(path: str) -> dict:
     try:
         with open(path) as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
@@ -154,7 +153,7 @@ def load_correlation_snapshot(path: str):
     try:
         with open(path) as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return None
 
 
@@ -434,11 +433,11 @@ def render_svg(rows: list[dict], trades_count: int, unique_trades: int) -> str:
         f'<rect width="100%" height="100%" fill="{BG}" rx="8"/>',
         # Заголовок
         f'<text x="{SVG_W // 2}" y="{PAD_TOP + 30}" text-anchor="middle" fill="{WHITE}" font-size="18" font-weight="bold">',
-        f'📊 Винрейт по символам (Bybit WS)',
-        f'</text>',
+        '📊 Винрейт по символам (Bybit WS)',
+        '</text>',
         f'<text x="{SVG_W // 2}" y="{PAD_TOP + 48}" text-anchor="middle" fill="{TEXT_HEADER}" font-size="11">',
         f'Сделок: {trades_count} (уникальных: {unique_trades}) • {datetime.now().strftime("%Y-%m-%d %H:%M")}',
-        f'</text>',
+        '</text>',
         # Шапка таблицы
         f'<rect x="{PAD_X}" y="{HEADER_Y}" width="{TOTAL_W}" height="{HEADER_H}" fill="{HEADER_BG}" rx="4"/>',
     ]
@@ -682,7 +681,7 @@ def load_regime(path: str) -> dict:
     try:
         with open(path) as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return {"regime": "UNKNOWN", "confidence": 0, "details": {}}
 
 
@@ -853,7 +852,7 @@ def generate_dashboard():
     # ── Сборка итогового SVG ──
     svg_parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{SVG_W}" height="{final_svg_h}" font-family="monospace">',
-        f'<rect width="100%" height="100%" fill="#1a1a2e" rx="8"/>',
+        '<rect width="100%" height="100%" fill="#1a1a2e" rx="8"/>',
     ]
 
     # Вставляем рыночный режим (самый верх)

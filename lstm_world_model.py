@@ -15,14 +15,13 @@ Loss: L_regime + λ · L_world
 """
 import json
 import math
-import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
+
 try:
     from .file_utils import safe_json_write
 except ImportError:  # standalone
@@ -30,8 +29,7 @@ except ImportError:  # standalone
 
 try:
     import torch
-    import torch.nn as nn
-    import torch.optim as optim
+    from torch import nn, optim
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False

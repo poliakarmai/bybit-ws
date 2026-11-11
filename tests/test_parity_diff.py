@@ -1,18 +1,13 @@
 """Тесты для parity-скрипта scripts_parity.py (live vs backtest)."""
 
-import json
-import os
 import sqlite3
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import scripts_parity as sp  # type: ignore[import-not-found]  # noqa: E402
-
+import scripts_parity as sp  # type: ignore[import-not-found]
 
 # ── load_live_entries ──────────────────────────────────────────────
 

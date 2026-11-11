@@ -5,7 +5,6 @@
 различения НЕ годится: Bybit отдаёт CreateByUser и нашим API-ордерам.
 """
 
-import pytest
 
 import bybit_ws.manual_positions as mp
 

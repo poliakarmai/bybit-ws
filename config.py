@@ -502,6 +502,7 @@ def _lazy_config():
 
 # Make `config` a module-level attribute that lazily resolves
 import sys as _sys
+
 _module = _sys.modules[__name__]
 
 

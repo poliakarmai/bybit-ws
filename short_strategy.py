@@ -13,8 +13,8 @@ Usage:
   python3 short_strategy.py --backtest SYM   # Бэктест на символе
 """
 
-import json, os, time, hashlib
-from typing import Optional
+import json
+import os
 
 # ── 7.1: SHORT Scanner ──
 
@@ -181,9 +181,9 @@ def train_short_ml_gate(training_data: list[dict] = None) -> dict:
     Returns {accuracy, f1, feature_importance}
     """
     try:
+        import numpy as np
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.model_selection import cross_val_score
-        import numpy as np
     except ImportError:
         return {'error': 'scikit-learn not installed'}
     
@@ -259,7 +259,7 @@ def _load_short_training_data() -> list[dict]:
              'entry_ts': r[5], 'winner': (r[4] or 0) > 0}
             for r in rows
         ]
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -280,7 +280,7 @@ def _load_long_training_data() -> list[dict]:
              'entry_ts': r[5], 'winner': (r[4] or 0) > 0}
             for r in rows
         ]
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -296,9 +296,9 @@ def train_long_ml_gate(training_data: list[dict] = None) -> dict:
     - score (auto_entry score)
     """
     try:
+        import numpy as np
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.model_selection import cross_val_score
-        import numpy as np
     except ImportError:
         return {'error': 'scikit-learn not installed'}
     
@@ -380,7 +380,6 @@ def backtest_short(symbol: str, days: int = 90) -> dict:
     
     Returns {trades, win_rate, total_pnl, avg_pnl, max_drawdown}
     """
-    from .api import get_bb_data
     
     try:
         klines = _get_historical_klines(symbol, days)

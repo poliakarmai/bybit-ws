@@ -1,7 +1,7 @@
 """Test counterfactual PnL logging for rejected Entry Judge signals."""
 import os
 import tempfile
-import pytest
+
 import state_db
 from state_db import StateDB
 

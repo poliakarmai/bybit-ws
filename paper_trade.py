@@ -14,19 +14,17 @@ Paper Trading / Бэктестинг Bollinger Grid на исторически�
 import argparse
 import json
 import math
-import os
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from statistics import mean, stdev
-from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bybit_ws.api import bybit
 from bybit_ws.alerts import log_event
+from bybit_ws.api import bybit
 
 # ── Константы ──
 TAKER_FEE = 0.00055    # 0.055% — выход (SL/TP консервативно считаем taker)
@@ -50,7 +48,7 @@ class PaperExchange:
         self.klines = klines
         self.balance = initial_balance
         self.equity = initial_balance
-        self.position: Optional[dict] = None
+        self.position: dict | None = None
         self.trades: list[dict] = []
         self._commission_paid = 0.0
         # funding_fn(open_ms, close_ms) -> сумма cash_flow за время удержания
@@ -240,8 +238,7 @@ def score_coin(bb_data: dict, volume_24h: float, closes: list[float], side: str 
 
     # 4. BB Width
     if 3 <= bb_width <= 8: vola_score = 5
-    elif 1 <= bb_width < 3: vola_score = 3
-    elif 8 < bb_width <= 15: vola_score = 3
+    elif 1 <= bb_width < 3 or 8 < bb_width <= 15: vola_score = 3
     else: vola_score = 1
 
     # 5. Quality
@@ -414,9 +411,9 @@ def run_backtest(symbol: str, days: int = 30, interval: str = 'D',
     peak = initial_balance
     max_dd = 0.0
     for eq in equity_curve:
-        if eq > peak: peak = eq
+        peak = max(peak, eq)
         dd = (peak - eq) / peak * 100 if peak > 0 else 0
-        if dd > max_dd: max_dd = dd
+        max_dd = max(max_dd, dd)
 
     # Sharpe
     if len(equity_curve) > 2:
@@ -504,7 +501,7 @@ def main():
 
         if result.trades:
             print(f'\n{"─"*60}')
-            print(f'  Последние 5 сделок:')
+            print('  Последние 5 сделок:')
             for t in result.trades[-5:]:
                 emoji = '✅' if t['pnl'] > 0 else '🔴'
                 entry_dt = datetime.fromtimestamp(t['entry_time'] / 1000).strftime('%d.%m')

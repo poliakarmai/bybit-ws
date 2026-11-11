@@ -12,8 +12,8 @@ import pytest
 sys.path.insert(0, '/home/openclaw')
 sys.path.insert(0, '/home/openclaw/bybit-ws')
 
-import reconcile  # noqa: E402
-from bybit_ws.state_db import StateDB  # noqa: E402
+import reconcile
+from bybit_ws.state_db import StateDB
 
 
 # ── фикстура: 2 символа, 3 открытия + 3 закрытия + фандинг ────────────

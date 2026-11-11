@@ -22,9 +22,15 @@ from statistics import mean, stdev
 
 sys.path.insert(0, str(Path.home()))
 sys.path.insert(0, str(Path(__file__).parent))
-from .api import bybit, fetch_positions, fetch_orders, cancel_order, place_order, fetch_funding_total
 from .alerts import log_event
-
+from .api import (
+    bybit,
+    cancel_order,
+    fetch_funding_total,
+    fetch_orders,
+    fetch_positions,
+    place_order,
+)
 
 DATA_DIR = Path.home() / ".local" / "share" / "bybit-ws"
 PARTIAL_TP_STATE = DATA_DIR / "partial_tp_state.json"
@@ -205,7 +211,7 @@ def check_partial_tp(positions=None) -> list[str]:
                 new_orders.append(place_order(
                     sym, "Sell", "Limit", up_qty, bb["upper"], reduce_only=True,
                     position_idx=pos.get("positionIdx", 0)))
-        except Exception as e:  # noqa: BLE001 — сеть/биржа: старые TP важнее падения
+        except Exception as e:
             log_event(f'⚠️ partial_tp {sym}: новые TP не выставлены ({e}) — старые оставлены')
             continue
         if any(not isinstance(o, dict) or o.get("retCode") != 0 for o in new_orders):
@@ -215,7 +221,7 @@ def check_partial_tp(positions=None) -> list[str]:
                 if oid:
                     try:
                         cancel_order(sym, oid)
-                    except Exception as e:  # noqa: BLE001 — уборка не должна маскировать отказ
+                    except Exception as e:
                         log_event(f'⚠️ partial_tp {sym}: не удалось снять новый TP {oid}: {e}')
             log_event(f'⚠️ partial_tp {sym}: биржа не приняла новые TP — старые оставлены')
             continue

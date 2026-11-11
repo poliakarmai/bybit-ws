@@ -13,11 +13,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Optional
 
 EXPERIMENTS_DIR = Path.home() / ".local" / "share" / "bybit-ws" / "experiments"
 DEFAULT_DB = EXPERIMENTS_DIR / "experiments.db"
@@ -59,7 +57,7 @@ class ExperimentStore:
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path) if path else DEFAULT_DB
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
 
     @property
     def conn(self) -> sqlite3.Connection:

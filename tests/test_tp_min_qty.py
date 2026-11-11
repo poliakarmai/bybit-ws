@@ -18,7 +18,7 @@ os.environ['BYBIT_LOG_SILENT'] = '1'
 # bybit_ws -> bybit-ws symlink в /home/openclaw.
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws import auto_tp  # noqa: E402
+from bybit_ws import auto_tp
 
 
 def _mkpos(sym, size, entry=100.0, side='Buy', idx=0):

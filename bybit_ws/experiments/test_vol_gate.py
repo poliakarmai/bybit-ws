@@ -4,7 +4,6 @@ Synthetic klines with a crash + ATR spike pattern that triggers real entries.
 Verifies that atr_ratio_threshold reduces trade count.
 """
 
-import pytest
 from bybit_ws.experiments.engine import simulate
 
 

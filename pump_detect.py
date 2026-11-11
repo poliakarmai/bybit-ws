@@ -17,8 +17,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import DATA_DIR
-from .api import bybit
 from .alerts import log_event
+from .api import bybit
 from .position_sizing import margin_for_strategy
 from .state_db import db  # SQLite dual-write
 

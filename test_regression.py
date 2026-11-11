@@ -5,7 +5,10 @@
 Добавлено: 29.06.2026 — после бага _llm_failures в entry_judge.
 """
 
-import sys, os, subprocess, tempfile, json
+import os
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 PROJECT = Path(__file__).parent
@@ -105,8 +108,9 @@ except Exception as e:
 
 # 3b. funding_entry: проверяем что check_funding_signals не падает с TypeError
 try:
+    from unittest.mock import patch
+
     from bybit_ws.funding_entry import check_funding_signals
-    from unittest.mock import patch, MagicMock
     with patch('bybit_ws.funding_entry.bybit') as mock_bybit:
         # Мокаем kline (BB) + ticker (funding)
         mock_bybit.side_effect = [
@@ -127,8 +131,9 @@ except Exception as e:
 
 # 3c. funding_rotation: проверяем что не падает с 'list' has no 'get'
 try:
-    from bybit_ws.funding_rotation import check_funding_rotation
     from unittest.mock import patch
+
+    from bybit_ws.funding_rotation import check_funding_rotation
     with patch('bybit_ws.funding_rotation.bybit') as mock_bybit:
         mock_bybit.return_value = {
             'retCode': 0,
@@ -146,8 +151,9 @@ except Exception as e:
 
 # 3d. mean_revert: проверяем что не падает с 'list' has no 'strip'
 try:
-    from bybit_ws.mean_revert import check_mean_revert
     from unittest.mock import patch
+
+    from bybit_ws.mean_revert import check_mean_revert
     with patch('bybit_ws.mean_revert.bybit') as mock_bybit:
         mock_bybit.return_value = {
             'result': {'list': [
@@ -166,8 +172,9 @@ except Exception as e:
 
 # 3e. bb_scalp
 try:
-    from bybit_ws.bb_scalp import check_scalp_signals
     from unittest.mock import patch
+
+    from bybit_ws.bb_scalp import check_scalp_signals
     with patch('bybit_ws.bb_scalp._get_kline') as mock_kline:
         # Генерируем 30 свечей: цена падает к lower BB, RSI должен быть < 35
         closes = [100.0] * 30  # плоский рынок — RSI ~50
@@ -201,6 +208,7 @@ print(f"PASS: {PASS}  FAIL: {FAIL}")
 # ── Фаза 8: авто-проверка двойной распаковки run_in_thread ──
 print("\n🔍 scan_unpack: проверка двойной распаковки...")
 import subprocess
+
 result = subprocess.run(
     [sys.executable, str(Path(__file__).parent / 'scan_unpack.py')],
     capture_output=True, text=True, timeout=90  # замер 25.10: скан занимает 19с, 10с не хватало

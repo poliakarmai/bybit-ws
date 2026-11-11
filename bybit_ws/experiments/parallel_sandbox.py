@@ -24,13 +24,13 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from bybit_ws.experiments import engine  # noqa: E402
-from bybit_ws.experiments.store import ExperimentStore, SANDBOX_DB  # noqa: E402
+from bybit_ws.experiments import engine
+from bybit_ws.experiments.store import SANDBOX_DB, ExperimentStore
 
 # Встроенные варианты — чтобы sandbox запускался без файла (для демо/проверки).
 DEFAULT_VARIANTS: list[dict] = [
@@ -117,7 +117,7 @@ def main(argv=None) -> int:
         "n_candles": len(klines),
     }
     commit = engine.git_commit()
-    ts_iso = datetime.now(timezone.utc).isoformat()
+    ts_iso = datetime.now(UTC).isoformat()
 
     store = None if args.no_db else ExperimentStore(args.db or SANDBOX_DB)
     rows = []

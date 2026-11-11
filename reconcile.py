@@ -26,7 +26,8 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 try:
     from .file_utils import safe_json_write
 except ImportError:  # standalone
@@ -233,11 +234,11 @@ def build(days: int, start: int, end: int, ex: dict, db: dict) -> dict:
             'n_db_manual1': b.get('n_m1', 0),
         })
     return {
-        'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'generated_at': datetime.now(UTC).isoformat(timespec='seconds'),
         'days': days,
         'window': {'start': start, 'end': end,
-                   'start_iso': datetime.fromtimestamp(start, timezone.utc).isoformat(timespec='seconds'),
-                   'end_iso': datetime.fromtimestamp(end, timezone.utc).isoformat(timespec='seconds')},
+                   'start_iso': datetime.fromtimestamp(start, UTC).isoformat(timespec='seconds'),
+                   'end_iso': datetime.fromtimestamp(end, UTC).isoformat(timespec='seconds')},
         'exchange': {k: (round(v, 6) if isinstance(v, float) else v)
                      for k, v in ex.items() if k != 'symbols'},
         'db': {'n_trade': db['n_trade'], 'pnl': round(db['pnl'], 6), 'fees': round(db['fees'], 6),
@@ -365,7 +366,7 @@ def main():
     ap.add_argument('--offline', action='store_true',
                     help='без сети: прочитать сохранённый отчёт')
     a = ap.parse_args()
-    out_path = os.path.join(OUT_DIR, f'reconcile-{datetime.now(timezone.utc):%Y-%m-%d}-{a.days}d.json')
+    out_path = os.path.join(OUT_DIR, f'reconcile-{datetime.now(UTC):%Y-%m-%d}-{a.days}d.json')
 
     if a.offline:
         if not os.path.exists(out_path):
@@ -374,7 +375,7 @@ def main():
         print(json.dumps(rep, ensure_ascii=False, indent=1) if a.json else render(rep))
         return
 
-    end = int(datetime.now(timezone.utc).timestamp())
+    end = int(datetime.now(UTC).timestamp())
     start = end - a.days * 86400
     ex = collect(iter_log(start, end))
     db = read_db(start, end)

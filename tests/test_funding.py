@@ -12,9 +12,8 @@ import tempfile
 sys.path.insert(0, '/home/openclaw')
 sys.path.insert(0, '/home/openclaw/bybit-ws')
 
-from bybit_ws.state_db import StateDB  # noqa: E402
-import funding_backfill as fb  # noqa: E402
-
+import funding_backfill as fb
+from bybit_ws.state_db import StateDB
 
 ROW = ('QUSDT', -0.00123456, 0.00005, 1792368000, '106446106_QUSDT_1_0')
 

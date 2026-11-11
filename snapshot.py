@@ -1,6 +1,8 @@
 """Снепшоты и сравнение состояний."""
 import json
+
 from filelock import FileLock
+
 try:
     from .file_utils import safe_json_write
 except ImportError:  # standalone

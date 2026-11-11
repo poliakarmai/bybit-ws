@@ -15,10 +15,19 @@ from pathlib import Path
 
 sys.path.insert(0, '/home/openclaw')
 
-from bybit_ws.experiments.engine import (  # noqa: E402
-    build_manifest, compute_metrics, funding_in_window, load_funding, simulate,
+from bybit_ws.experiments.engine import (
+    build_manifest,
+    compute_metrics,
+    funding_in_window,
+    load_funding,
+    simulate,
 )
-from bybit_ws.paper_trade import MAKER_FEE, SLIPPAGE, TAKER_FEE, PaperExchange  # noqa: E402
+from bybit_ws.paper_trade import (
+    MAKER_FEE,
+    SLIPPAGE,
+    TAKER_FEE,
+    PaperExchange,
+)
 
 HOUR_MS = 3_600_000
 T0 = 1_700_000_000_000

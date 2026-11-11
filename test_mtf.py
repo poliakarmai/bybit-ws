@@ -6,10 +6,11 @@
 - format_confluence() вывод
 """
 
-import pytest
 from bybit_ws.mtf_confirmation import (
-    _bb_signal, check_confluence, format_confluence,
-    CONFLUENCE_MIN_TFS, TF_LIST
+    CONFLUENCE_MIN_TFS,
+    _bb_signal,
+    check_confluence,
+    format_confluence,
 )
 
 

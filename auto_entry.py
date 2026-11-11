@@ -1,13 +1,22 @@
 """Авто-вход по 9-метричному скорингу (v4.0)."""
-import json, os, time
-from decimal import Decimal, ROUND_FLOOR
-from . import BYBIT_CLI, DATA_DIR, MAX_POSITION_VALUE, learn_position_idx, position_idx
-from . import safe_run
-from .api import bybit, account_wallet, get_bb_data, set_leverage, verify_leverage
-from .alerts import log_event, add_alert
+import json
+import os
+import time
+from decimal import ROUND_FLOOR, Decimal
+
+from . import (
+    BYBIT_CLI,
+    DATA_DIR,
+    MAX_POSITION_VALUE,
+    learn_position_idx,
+    position_idx,
+    safe_run,
+)
+from .alerts import add_alert, log_event
+from .api import account_wallet, bybit, get_bb_data, set_leverage, verify_leverage
 from .config import Config
-from .position_sizing import margin_for_strategy
 from .file_utils import safe_json_write
+from .position_sizing import margin_for_strategy
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -21,7 +30,9 @@ def _get_bb_ws(symbol, interval='D'):
     """Получить BB: сначала WS-кеш, fallback на REST."""
     if _WS_BB_ENABLED:
         try:
-            from .ws_client import get_bb as ws_get_bb, is_connected as ws_alive, is_stale as ws_stale
+            from .ws_client import get_bb as ws_get_bb
+            from .ws_client import is_connected as ws_alive
+            from .ws_client import is_stale as ws_stale
             if ws_alive() and not ws_stale(300):
                 bb = ws_get_bb(symbol, interval)
                 if bb and bb.get('lower', 0) > 0:
@@ -85,7 +96,7 @@ def _get_regime_params():
     confidence = 50
 
     try:
-        from .lstm_regime import predict_regime, get_cached_prediction
+        from .lstm_regime import get_cached_prediction, predict_regime
         data = predict_regime()
         if not data:
             data = get_cached_prediction()
@@ -343,8 +354,7 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
 
     # 5. BB Width / Volatility (0-5)
     if 3 <= bb_width <= 8:    vola_score = 5
-    elif 1 <= bb_width < 3:   vola_score = 3
-    elif 8 < bb_width <= 15:  vola_score = 3
+    elif 1 <= bb_width < 3 or 8 < bb_width <= 15:   vola_score = 3
     else:                     vola_score = 1
 
     # 6. Quality score (0-5) — позиция на BB × ширина
@@ -393,7 +403,8 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
 
         if ab_group == 'A':
             # Группа A: ML Gate работает как обычно (RF + опционально DSPy)
-            from .ml_scorer import ml_gate_pass, combined_gate, DSPY_ENABLED as _dspy_en
+            from .ml_scorer import DSPY_ENABLED as _dspy_en
+            from .ml_scorer import combined_gate, ml_gate_pass
             signal_data = {
                 'score': total / 5,
                 'price': cur,
@@ -493,7 +504,7 @@ def _qty_by_step(sym, qty: float):
     try:
         from .auto_tp import _get_qty_limits
         step, min_qty = _get_qty_limits(sym)
-    except Exception:  # noqa: BLE001 — fail-closed: без лимитов символа размер не считаем
+    except Exception:
         return None
     if not step or not min_qty:
         return None
@@ -586,7 +597,10 @@ def auto_entry_scan(positions):
         sym_min_score = _optuna_min_scores.get(sym, min_score)
         try:
             from bybit_ws.journal.self_learn import (
-                get_canary_param, get_symbol_params, get_session_modifier, pick_bandit_params,
+                get_canary_param,
+                get_session_modifier,
+                get_symbol_params,
+                pick_bandit_params,
             )
             sym_min_score = get_canary_param('min_score', sym_min_score, symbol=sym, side='buy')
             # Bandit: Thompson-сэмпл руки на этот скан. Выбранную руку запоминаем —
@@ -941,7 +955,10 @@ def auto_entry_scan(positions):
                 _daily_entries['count'] += 1
                 # ── Canary: маркируем вход для последующего матчинга при закрытии ──
                 try:
-                    from bybit_ws.journal.self_learn import mark_canary_entry, should_use_canary
+                    from bybit_ws.journal.self_learn import (
+                        mark_canary_entry,
+                        should_use_canary,
+                    )
                     if should_use_canary():
                         mark_canary_entry(sym, 'buy', time.time())
                 except Exception:
@@ -956,7 +973,12 @@ def auto_entry_scan(positions):
                     pass
                 # -- Фаза 5.3: A/B-тест стратегий (успешный вход) --
                 try:
-                    from .ab_test import is_ab_enabled, assign_variant, _generate_signal_id, record_paper_entry
+                    from .ab_test import (
+                        _generate_signal_id,
+                        assign_variant,
+                        is_ab_enabled,
+                        record_paper_entry,
+                    )
                     if is_ab_enabled():
                         # id и группа — из full_score_coin: assign_variant() кидал
                         # случайный вариант, не тот, что применил ML-гейт
@@ -979,7 +1001,12 @@ def auto_entry_scan(positions):
                         )
                 # -- Фаза 5.3: A/B-тест стратегий --
                 try:
-                    from .ab_test import is_ab_enabled, assign_variant, _generate_signal_id, record_paper_entry
+                    from .ab_test import (
+                        _generate_signal_id,
+                        assign_variant,
+                        is_ab_enabled,
+                        record_paper_entry,
+                    )
                     if is_ab_enabled():
                         # id и группа — из full_score_coin: assign_variant() кидал
                         # случайный вариант, не тот, что применил ML-гейт

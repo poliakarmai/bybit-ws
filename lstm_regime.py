@@ -25,14 +25,12 @@ lstm_regime.py — LSTM-классификатор рыночного режим
 import hashlib
 import hmac
 import json
-import math
 import os
 import pickle  # только для обратной совместимости, новые модели через json
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -43,8 +41,7 @@ except ImportError:  # standalone: python3 lstm_regime.py --predict
 
 try:
     import torch
-    import torch.nn as nn
-    import torch.optim as optim
+    from torch import nn, optim
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
@@ -228,9 +225,10 @@ def label_distribution(labels: list[int]) -> dict[str, int]:
 
 # ── Макро-признаки (Фаза 5.4) ─────────────────────────────────
 
-def _fetch_btc_dominance() -> Optional[float]:
+def _fetch_btc_dominance() -> float | None:
     """Получить BTC Dominance % через CoinGecko API."""
-    import urllib.request, json
+    import json
+    import urllib.request
     try:
         url = 'https://api.coingecko.com/api/v3/global'
         req = urllib.request.Request(url, headers={'Accept': 'application/json'})
@@ -261,7 +259,7 @@ def _fetch_btc_dominance() -> Optional[float]:
     return None
 
 
-def _fetch_eth_btc_ratio() -> Optional[float]:
+def _fetch_eth_btc_ratio() -> float | None:
     """Получить ETH/BTC соотношение через Bybit API."""
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -283,9 +281,10 @@ def _fetch_eth_btc_ratio() -> Optional[float]:
     return None
 
 
-def _fetch_fear_greed() -> Optional[float]:
+def _fetch_fear_greed() -> float | None:
     """Получить Fear & Greed индекс через alternative.me API (0-100)."""
-    import urllib.request, json
+    import json
+    import urllib.request
     try:
         url = 'https://api.alternative.me/fng/?limit=1'
         req = urllib.request.Request(url, headers={'Accept': 'application/json'})
@@ -588,8 +587,7 @@ def train_model(force=False, candidate=False):
 
         scheduler.step(val_loss)
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        best_val_acc = max(best_val_acc, val_acc)
 
         if (epoch + 1) % 20 == 0:
             print(f"   Epoch {epoch+1:3d}: loss={total_loss/n_batches:.4f} val_acc={val_acc:.3f}")
@@ -627,8 +625,8 @@ def train_model(force=False, candidate=False):
 
     metrics = {
         'val_accuracy': float(best_val_acc),
-        'n_train': int(len(X_train)),
-        'n_val': int(len(X_val)),
+        'n_train': len(X_train),
+        'n_val': len(X_val),
     }
 
     if candidate:
@@ -681,7 +679,7 @@ def _fetch_recent_klines(symbol, days=SEQUENCE_LENGTH + 20):
     return {'symbol': symbol, 'closes': closes, 'highs': highs, 'lows': lows, 'volumes': volumes}
 
 
-def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
+def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> dict | None:
     """
     Предсказать текущий рыночный режим.
     Возвращает dict с классом и вероятностями или None.
@@ -796,7 +794,7 @@ def predict_regime(symbols=('BTCUSDT', 'ETHUSDT')) -> Optional[dict]:
         return None
 
 
-def get_cached_prediction() -> Optional[dict]:
+def get_cached_prediction() -> dict | None:
     """Получить закешированное предсказание (без API-вызовов)."""
     if CACHE_PATH.exists():
         try:

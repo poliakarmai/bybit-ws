@@ -23,15 +23,20 @@ import json
 import math
 import sqlite3
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from statistics import mean, stdev
-from typing import Any, Optional
+from typing import Any
 
 # Пакет bybit_ws/__init__.py при импорте делает read-only GET (детект hedge-режима)
 # и НЕ трогает state.db на запись. Это тот же read-путь, что и у paper_trade.
-from bybit_ws.paper_trade import (  # noqa: E402
-    DEFAULT_SL_PCT, MIN_SCORE, PaperExchange, calc_atr, calc_bb, score_coin,
+from bybit_ws.paper_trade import (
+    DEFAULT_SL_PCT,
+    MIN_SCORE,
+    PaperExchange,
+    calc_atr,
+    calc_bb,
+    score_coin,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]          # /home/openclaw/bybit-ws
@@ -55,7 +60,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
 
 # ── git / время ────────────────────────────────────────────────
 
-def git_commit() -> Optional[str]:
+def git_commit() -> str | None:
     """Текущий HEAD коммита репозитория (для run-манифеста)."""
     try:
         out = subprocess.check_output(
@@ -70,7 +75,7 @@ def git_commit() -> Optional[str]:
 CONFIG_PATH = Path.home() / ".config" / "bybit-ws" / "config.yaml"
 
 
-def config_hash(path: Optional[Path] = None) -> Optional[str]:
+def config_hash(path: Path | None = None) -> str | None:
     """SHA-256 боевого config.yaml — на каком конфиге жил бот в момент прогона.
 
     None, если файла нет (CI/чистый клон): прогон всё равно валиден, но в
@@ -95,7 +100,7 @@ def equity_hash(curve: list[float]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def resolve_end_ms(end_date: Optional[str] = None) -> int:
+def resolve_end_ms(end_date: str | None = None) -> int:
     """Детерминированный end_ms окна данных (миллисекунды UTC).
 
     - end_date задан ('YYYY-MM-DD'): конец этого дня (00:00 следующего дня UTC),
@@ -105,15 +110,15 @@ def resolve_end_ms(end_date: Optional[str] = None) -> int:
     """
     if end_date:
         dt = datetime.strptime(end_date, "%Y-%m-%d")
-        dt = (dt + timedelta(days=1)).replace(tzinfo=timezone.utc)
+        dt = (dt + timedelta(days=1)).replace(tzinfo=UTC)
         return int(dt.timestamp() * 1000)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     floored = now.replace(minute=0, second=0, microsecond=0)
     return int(floored.timestamp() * 1000)
 
 
 def _fmt_ms(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M")
 
 
 # ── данные ─────────────────────────────────────────────────────
@@ -258,7 +263,7 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
     equity_curve = [initial_balance]
 
     warmup = max(50, bb_period + 1)
-    entry_bar: Optional[int] = None
+    entry_bar: int | None = None
     for i in range(warmup, len(klines)):
         k = klines[i]
         exchange.advance(k)
@@ -340,7 +345,7 @@ def simulate(klines: list[dict], symbol: str, initial_balance: float,
 
 # ── метрики ────────────────────────────────────────────────────
 
-def _finite(v: float) -> Optional[float]:
+def _finite(v: float) -> float | None:
     return v if math.isfinite(v) else None
 
 
@@ -374,11 +379,9 @@ def compute_metrics(trades: list[dict], equity_curve: list[float],
     peak = initial_balance
     max_dd = 0.0
     for eq in equity_curve:
-        if eq > peak:
-            peak = eq
+        peak = max(peak, eq)
         dd = (peak - eq) / peak * 100 if peak > 0 else 0.0
-        if dd > max_dd:
-            max_dd = dd
+        max_dd = max(max_dd, dd)
 
     final_equity = equity_curve[-1] if equity_curve else initial_balance
     total_pnl = final_equity - initial_balance
@@ -417,9 +420,9 @@ def compute_metrics(trades: list[dict], equity_curve: list[float],
 
 # ── манифест ───────────────────────────────────────────────────
 
-def build_manifest(params: dict, data_range: dict, commit: Optional[str],
+def build_manifest(params: dict, data_range: dict, commit: str | None,
                    kline_hash: str, timestamp_iso: str,
-                   cfg_hash: Optional[str] = None) -> dict:
+                   cfg_hash: str | None = None) -> dict:
     """Run-манифест: params, data_range, git_commit, data_hash + params_hash, config_hash."""
     return {
         "engine_version": ENGINE_VERSION,

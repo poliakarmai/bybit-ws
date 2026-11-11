@@ -13,8 +13,8 @@ import json
 import os
 import time
 
+from .alerts import add_alert, log_event
 from .api import cancel_order, place_take_profit
-from .alerts import log_event, add_alert
 from .file_utils import safe_json_write
 
 TRAIL_STATE_FILE = os.path.expanduser('~/.local/share/bybit-ws/junk_trail.json')
@@ -93,12 +93,12 @@ def trailing_junk_tp(positions, orders):
         if pnl_pct >= 30 and trail_level < 2:
             # Жёсткая фиксация: 85% прибыли
             new_tp = entry - 0.85 * (entry - mark)
-            reason = f'фиксация 85%'
+            reason = 'фиксация 85%'
             trail_level = 2
         elif pnl_pct >= 15 and trail_level < 1:
             # Первая фиксация: 70% прибыли
             new_tp = entry - 0.70 * (entry - mark)
-            reason = f'фиксация 70%'
+            reason = 'фиксация 70%'
             trail_level = 1
 
         if new_tp is None:

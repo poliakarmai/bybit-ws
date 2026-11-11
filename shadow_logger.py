@@ -11,8 +11,8 @@ import json
 import os
 import time
 
-from .api import bybit
 from .alerts import log_event
+from .api import bybit
 
 DATA_DIR = os.path.expanduser("~/.local/share/bybit-ws")
 LOG_FILE = os.path.join(DATA_DIR, "shadow_candidates.jsonl")

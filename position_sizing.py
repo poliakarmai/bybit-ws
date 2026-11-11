@@ -7,8 +7,12 @@ Position Sizing — динамический расчёт маржи от % де
 Параметры читаются из конфига (position_sizing:) с фоллбеком на хардкод.
 """
 
-import time, math, json, os
+import json
+import math
+import os
+import time
 from pathlib import Path
+
 from .alerts import log_event
 from .api import bybit, fetch_atr
 from .config import get_config
@@ -461,7 +465,7 @@ def update_kelly_stats(symbol: str, win_rate: float, avg_rr: float,
 def load_kelly_stats_from_backtest():
     """Load per-symbol stats from the backtesting module."""
     try:
-        from .backtest import load_trade_history, win_rate, avg_rr_ratio
+        from .backtest import avg_rr_ratio, load_trade_history, win_rate
         trades = load_trade_history()
         by_symbol = {}
         for t in trades:

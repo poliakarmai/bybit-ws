@@ -4,7 +4,10 @@
 это верный признак, что через 5-15 минут будет сильное движение.
 """
 
-import os, time, json
+import json
+import os
+import time
+
 from . import DATA_DIR
 from .api import bybit
 from .file_utils import safe_json_write

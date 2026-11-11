@@ -22,10 +22,10 @@ import os
 import time
 from datetime import datetime
 
+from .alerts import add_alert, log_event
 from .api import bybit
-from .alerts import log_event, add_alert
-from .manual_positions import is_manual_position
 from .file_utils import safe_json_write
+from .manual_positions import is_manual_position
 
 DATA_DIR = os.path.expanduser('~/.local/share/bybit-ws')
 ROTATION_STATE_FILE = os.path.join(DATA_DIR, 'funding_rotation_state.json')

@@ -14,8 +14,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bybit_ws.experiments.sma200_walkforward import (  # noqa: E402
-    bucket, classify_regime, gate, sma,
+from bybit_ws.experiments.sma200_walkforward import (
+    bucket,
+    classify_regime,
+    gate,
+    sma,
 )
 
 
