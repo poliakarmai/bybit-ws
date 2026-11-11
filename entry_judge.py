@@ -153,7 +153,7 @@ Check:
                 return cached
 
         _t0 = time.monotonic()
-        proc = subprocess.run(
+        proc = subprocess.run(  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
             ["python3", JUDGE_SCRIPT, "--mode", "signal", "--json", "-"],
             input=signal_context,
             capture_output=True,

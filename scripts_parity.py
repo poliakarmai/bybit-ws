@@ -71,7 +71,7 @@ def run_backtest(days: int, interval: int) -> list[dict]:
     ]
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
         if result.returncode != 0:
             print(f"⚠️  Backtest runner завершился с ошибкой:\n{result.stderr}")
             return []

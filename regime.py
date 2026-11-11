@@ -268,7 +268,6 @@ def _save_regime_file(result: dict) -> None:
 
 def get_cached_regime() -> dict:
     """Get the most recent regime from cache or file (no API call)."""
-    global _regime_cache
     if _regime_cache["regime"] != "UNKNOWN":
         return {
             "regime": _regime_cache["regime"],

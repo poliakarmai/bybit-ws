@@ -15,7 +15,6 @@ _BB_BATCH_TTL = 300  # 5 минут
 
 def prefetch_bb_for_all(symbols: list[str], interval: str = 'D') -> int:
     """Загрузить BB для списка символов. Возвращает количество успешно загруженных."""
-    global _bb_batch_cache
     now = time.time()
     loaded = 0
 

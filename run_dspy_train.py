@@ -33,7 +33,7 @@ def main():
     os.environ['OPENAI_BASE_URL'] = 'https://api.deepseek.com/v1'
 
     print('[DSPy] Starting training with DeepSeek (deepseek-chat)...', flush=True)
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
         [sys.executable, 'dspy_optimizer.py', '--train',
          '--model', 'openai/deepseek-chat'],
         cwd=os.path.dirname(os.path.abspath(__file__)) or '.',

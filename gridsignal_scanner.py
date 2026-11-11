@@ -43,7 +43,7 @@ BLACKLIST = {'TRUMPUSDT', 'MELANIAUSDT', 'BONKUSDT', 'FLOKIUSDT', 'WIFUSDT'}
 def run_bybit(*args: str) -> dict:
     """Выполнить bybit CLI и вернуть JSON."""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
             ['bybit', *args],
             capture_output=True, text=True, timeout=25
         )

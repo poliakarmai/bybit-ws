@@ -67,7 +67,7 @@ def _rpc(endpoint: str) -> dict:
     """Call bybit-ws RPC endpoint with Bearer auth (GET)."""
     try:
         token = _get_rpc_token()
-        r = subprocess.run(
+        r = subprocess.run(  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
             ["curl", "-s", "--connect-timeout", "5", "--max-time", "10",
              "-H", f"Authorization: Bearer {token}",
              f"{RPC_BASE}/{endpoint}"],
@@ -82,7 +82,7 @@ def _rpc_post(endpoint: str, body: dict) -> dict:
     """Call bybit-ws RPC with POST + JSON body."""
     try:
         token = _get_rpc_token()
-        r = subprocess.run(
+        r = subprocess.run(  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
             ["curl", "-s", "--connect-timeout", "5", "--max-time", "15",
              "-X", "POST",
              "-H", f"Authorization: Bearer {token}",
@@ -100,7 +100,7 @@ def _scanner(mode: str = "long", interval: str = "D", limit: int = 10) -> list:
     """Run gridSignal scanner. Extracts JSON from potentially noisy stdout."""
     try:
         scanner = os.path.expanduser("~/.local/bin/gridsignal_scanner.py")
-        r = subprocess.run(
+        r = subprocess.run(  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
             ["python3", scanner, "--mode", mode, "--tf", interval, "--limit", str(limit)],
             capture_output=True, text=True, timeout=90,
         )
@@ -479,13 +479,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         json.dump(params_arg, pfile)
                     cmd.extend(["--params", params_path])
                 try:
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
                     if r.returncode != 0:
                         text = f"❌ Backtest error:\n{r.stderr or r.stdout or 'unknown error'}"
                     elif not os.path.exists(out_path):
                         text = "❌ Backtest completed but no artifact found"
                     else:
-                        with open(out_path) as af:
+                        with open(out_path) as af:  # noqa: ASYNC230 — мелкий JSON-артефакт, блок <1мс
                             artifact = json.load(af)
                         metrics = artifact.get("metrics", {})
                         manifest = artifact.get("inputs_manifest", {})
@@ -558,7 +558,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         artifact = None
         if artifact_path.exists():
             try:
-                with open(artifact_path) as f:
+                with open(artifact_path) as f:  # noqa: ASYNC230 — мелкий JSON, блок <1мс
                     artifact = json.load(f)
             except Exception:
                 pass

@@ -71,7 +71,7 @@ def fetch_klines(symbol: str, interval: str = 'D', limit: int = 300) -> list[dic
     try:
         if not re.fullmatch(r'^[A-Z0-9]+$', symbol):
             raise ValueError(f'Invalid symbol: {symbol}')
-        r = subprocess.run(
+        r = subprocess.run(  # noqa: PLW1510 — returncode/stdout обрабатывается ниже
             [str(BYBIT_CLI), 'raw', 'GET',
              f'/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}'],
             capture_output=True, text=True, timeout=30,
