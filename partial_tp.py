@@ -172,7 +172,7 @@ def check_partial_tp(positions=None) -> list[str]:
 
         # Фандинг отдельно — чтобы не смешивать с TP-профитом
         funding_total = fetch_funding_total(sym, open_time)
-        tp_only = cum_rpnl - funding_total  # чистый TP-профит без фандинга
+        cum_rpnl - funding_total  # чистый TP-профит без фандинга
 
         # Рассчитываем новый сплит
         new_mid, new_up = calculate_split(entry, mark, bb["sma"], bb["bb_pct"], hours_open)

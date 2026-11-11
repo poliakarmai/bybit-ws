@@ -135,7 +135,7 @@ class BacktestEngine:
         pnl_values = [t.pnl for t in trades]
         total_pnl = sum(pnl_values)
         wins = sum(1 for p in pnl_values if p > 0)
-        losses = sum(1 for p in pnl_values if p < 0)
+        sum(1 for p in pnl_values if p < 0)
         total_trades = len(trades)
 
         win_rate = wins / total_trades if total_trades > 0 else 0.0

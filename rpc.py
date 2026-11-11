@@ -1685,7 +1685,6 @@ class RPCHandler(BaseHTTPRequestHandler):
                 result['sl'] = {'price': _round_price(sl), 'status': 'failed',
                                 'detail': 'позиция не появилась за 3с — SL не поставлен'}
             else:
-                sl_side = 'Sell' if side == 'Buy' else 'Buy'
                 # Use actual positionIdx (hedge-safe)
                 actual_idx = pos.get('positionIdx', 0)
                 sl_result = _api_call('POST', '/v5/position/trading-stop', {
@@ -2000,7 +1999,7 @@ class RPCHandler(BaseHTTPRequestHandler):
 
         try:
             from .api import place_take_profit
-            result = place_take_profit(symbol, idx, side, qty, tp_price)
+            place_take_profit(symbol, idx, side, qty, tp_price)
             _json_response(self, {
                 'success': True,
                 'symbol': symbol,

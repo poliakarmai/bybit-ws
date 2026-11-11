@@ -170,7 +170,7 @@ def train():
     # Проверка минимального размера класса для stratify
     min_class = min(np.bincount(y))
     use_stratify = y if min_class >= 2 else None
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_train, _X_test, y_train, _y_test = train_test_split(
         X, y, test_size=0.2, stratify=use_stratify, random_state=42
     )
     model.fit(X_train, y_train)

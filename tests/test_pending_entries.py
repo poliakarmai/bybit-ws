@@ -66,7 +66,7 @@ def test_entry_timeout_marks_symbol_pending(m, monkeypatch):
     def execute_scalp(info):
         raise AssertionError('не должен вызываться в этом тесте')
 
-    ok, err = asyncio.run(m._maybe_execute(execute_scalp, {'symbol': 'SOLUSDT', 'side': 'Sell'}))
+    _ok, err = asyncio.run(m._maybe_execute(execute_scalp, {'symbol': 'SOLUSDT', 'side': 'Sell'}))
     assert err == 'execute_scalp'
     assert m._PENDING_ENTRIES['SOLUSDT']['side'] == 'Sell'
 

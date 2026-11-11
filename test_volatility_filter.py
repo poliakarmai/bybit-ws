@@ -49,7 +49,7 @@ class TestIsHighVolatilityEnabled:
              patch('bybit_ws.volatility_filter.fetch_atr', return_value=600.0), \
              patch('bybit_ws.volatility_filter._baseline_atr', return_value=400.0):
             from bybit_ws.volatility_filter import is_high_volatility
-            blocked, ratio, reason = is_high_volatility('SOLUSDT')
+            blocked, ratio, _reason = is_high_volatility('SOLUSDT')
             assert blocked is False
             assert ratio == 1.5
 

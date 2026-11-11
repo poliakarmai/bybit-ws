@@ -83,7 +83,7 @@ if HAS_TORCH:
               regime_logits: (batch, num_classes)
               world_pred: (batch, 5) — predicted OHLCV at t+1
             """
-            lstm_out, (hn, cn) = self.lstm(x)
+            lstm_out, (_hn, _cn) = self.lstm(x)
             last_out = lstm_out[:, -1, :]
 
             # Regime head
@@ -106,7 +106,7 @@ def _calc_features(closes, highs, lows, volumes):
     if len(closes) < 5:
         return None
     returns = np.diff(closes) / closes[:-1]
-    avg_range = np.mean([(h - l) / l for h, l in zip(highs[-5:], lows[-5:])]) * 100
+    np.mean([(h - l) / l for h, l in zip(highs[-5:], lows[-5:])]) * 100
     rsi_val = _calc_rsi(closes, 14)
     bb_data = _calc_bb(closes[-20:])
     return [

@@ -63,11 +63,11 @@ def test_vol_gate_reduces_trades():
     symbol = "TESTUSDT"
 
     # Without threshold (baseline)
-    trades_no_gate, equity_no_gate = simulate(klines, symbol, balance, {})
+    trades_no_gate, _equity_no_gate = simulate(klines, symbol, balance, {})
     n_no_gate = len(trades_no_gate)
 
     # With strict threshold (block if ATR > 0.5× baseline)
-    trades_gate, equity_gate = simulate(
+    trades_gate, _equity_gate = simulate(
         klines, symbol, balance, {"atr_ratio_threshold": 0.5}
     )
     n_gate = len(trades_gate)

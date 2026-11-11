@@ -184,10 +184,7 @@ def render_correlation_section(corr_data: dict, base_y: int,
 
     COL_W = [110, 110, 80, 170]
     TOTAL_W = sum(COL_W) + (len(COL_W) - 1) * 2
-    CARD_PAD = 16
 
-    BG = "#1a1a2e"
-    CARD_BG = "#16213e"
     HEADER_BG = "#16213e"
     ROW_EVEN = "#1a1a2e"
     ROW_ODD = "#1f1f3a"
@@ -291,15 +288,12 @@ def render_margin_section(margin_stats: dict, y_offset: int,
     CARD_PAD = 16
     GAP = 12
 
-    BG = "#1a1a2e"
     CARD_BG = "#16213e"
-    TEXT_HEADER = "#a0a0c0"
     TEXT_BODY = "#e0e0f0"
     GREEN = "#4caf50"
     YELLOW = "#ff9800"
     RED = "#f44336"
     WHITE = "#ffffff"
-    ACCENT = "#7c8aff"
 
     util = margin_stats['utilization_pct']
     total = margin_stats['total_margin']
@@ -414,7 +408,6 @@ def render_svg(rows: list[dict], trades_count: int, unique_trades: int) -> str:
     GREEN = "#4caf50"
     RED = "#f44336"
     WHITE = "#ffffff"
-    ACCENT = "#7c8aff"
 
     def _x(col_idx, align="left"):
         """Центр колонки для right-align; левый край для left-align."""
@@ -573,7 +566,6 @@ def render_funding_section(funding_rows: list[dict], base_y: int,
     TOTAL_W = sum(COL_W) + (len(COL_W) - 1) * 2
     PAD_Y = base_y + GAP
 
-    BG = "#1a1a2e"
     HEADER_BG = "#16213e"
     ROW_EVEN = "#1a1a2e"
     ROW_ODD = "#1f1f3a"
@@ -802,7 +794,7 @@ def generate_dashboard():
     SVG_W = TOTAL_W + PAD_X * 2
 
     # Базовая высота winrate-таблицы
-    winrate_h = PAD_TOP + TITLE_H + HEADER_H + len(rows) * ROW_H + 36 + PAD_TOP
+    PAD_TOP + TITLE_H + HEADER_H + len(rows) * ROW_H + 36 + PAD_TOP
     # + FOOTER_H (=36) для итоговой строки
 
     # ── Секция рыночного режима (самая верхняя) ──
@@ -919,7 +911,6 @@ def render_svg_shifted(rows: list[dict], trades_count: int, unique_trades: int,
     HEADER_Y = y_offset + TITLE_H
     BODY_Y = HEADER_Y + HEADER_H
 
-    BG = "#1a1a2e"
     HEADER_BG = "#16213e"
     ROW_EVEN = "#1a1a2e"
     ROW_ODD = "#1f1f3a"

@@ -83,7 +83,6 @@ class TestBatchSize(unittest.TestCase):
 
     def test_batch_size_produces_valid_args(self):
         """Каждый батч содержит ≤10 args (5 tickers + 5 kline.D)."""
-        batch_size = 5
         batch = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'LTCUSDT', 'XRPUSDT']
         args = [f'tickers.{s}' for s in batch] + [f'kline.D.{s}' for s in batch]
         self.assertEqual(len(args), 10)
@@ -92,7 +91,6 @@ class TestBatchSize(unittest.TestCase):
 
     def test_kline_w_subscribed_separately(self):
         """kline.W подписывается отдельным сообщением."""
-        batch_size = 5
         batch = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'LTCUSDT', 'XRPUSDT']
         args_w = [f'kline.W.{s}' for s in batch]
         self.assertEqual(len(args_w), 5)
@@ -100,7 +98,6 @@ class TestBatchSize(unittest.TestCase):
 
     def test_orderbook_args_when_full_enabled(self):
         """При BYBIT_WS_FULL_ENABLED=1: orderbook.1 добавляется во второй батч."""
-        batch_size = 5
         batch = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'LTCUSDT', 'XRPUSDT']
         args_w = [f'kline.W.{s}' for s in batch] + [f'orderbook.1.{s}' for s in batch]
         self.assertEqual(len(args_w), 10)

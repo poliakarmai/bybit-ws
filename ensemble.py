@@ -128,7 +128,7 @@ def _rl_score(state_dict: dict) -> tuple[float, str]:
     """RL-агент: ENTER=1.0, WAIT=0.0, SKIP=0.0."""
     try:
         from .rl_agent import should_enter
-        enter, reason = should_enter(state_dict, 'LONG')
+        _enter, reason = should_enter(state_dict, 'LONG')
 
         if 'ENTER_LONG' in reason:
             score = 1.0

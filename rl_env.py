@@ -46,8 +46,8 @@ def _calc_features(closes, highs, lows, volumes, idx, funding_rate=0.0):
         return None
 
     close = closes[idx]
-    high = highs[idx]
-    low = lows[idx]
+    highs[idx]
+    lows[idx]
     vol = volumes[idx]
 
     if close == 0:
@@ -199,7 +199,7 @@ class TradingEnv(gym.Env):
         """Симулировать LONG-сделку от входа до TP/SL/истечения."""
         entry_day = self.idx
         for day in range(entry_day + 1, min(entry_day + self.max_hold_days + 1, self.n_days)):
-            close = float(self.closes[day])
+            float(self.closes[day])
             high = float(self.highs[day])
             low = float(self.lows[day])
 

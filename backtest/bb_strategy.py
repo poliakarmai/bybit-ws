@@ -47,7 +47,7 @@ def bb_grid_strategy(
             continue
         sma = sum(closes) / len(closes)
         std = math.sqrt(sum((c - sma) ** 2 for c in closes) / len(closes))
-        bb_upper = sma + std_mult * std
+        sma + std_mult * std
         bb_lower = sma - std_mult * std
         bb_mid = sma
 
@@ -89,31 +89,25 @@ def bb_grid_strategy(
             # Check exit conditions
             pos = in_position
             exit_price = None
-            exit_reason = ''
 
             # SL hit
             if low <= pos['sl']:
                 exit_price = pos['sl'] * (1 - slippage)
-                exit_reason = 'SL'
 
             # TP hit (check in order: TP3, TP2, TP1)
             elif high >= pos['tp'][2]:
                 exit_price = pos['tp'][2] * (1 - slippage)
                 pos['tp_splits'] = [0, 0, 1.0]  # all remaining at TP3
-                exit_reason = 'TP3'
             elif high >= pos['tp'][1]:
                 exit_price = pos['tp'][1] * (1 - slippage)
                 pos['tp_splits'] = [0, 1.0, 0]
-                exit_reason = 'TP2'
             elif high >= pos['tp'][0]:
                 exit_price = pos['tp'][0] * (1 - slippage)
-                exit_reason = 'TP1'
 
             # Max holding
             hours_held = (i - pos['entry_idx'])  # assume 1h candles
             if hours_held >= max_holding and not exit_price:
                 exit_price = close * (1 - slippage)
-                exit_reason = 'max_holding'
 
             if exit_price:
                 # Calculate PnL with fees

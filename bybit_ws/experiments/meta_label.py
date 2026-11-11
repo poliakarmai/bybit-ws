@@ -172,7 +172,7 @@ class LogisticRegression:
         """Fit model.  X: (N, F), y: (N,) in {0, 1}."""
         X = np.asarray(X, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64).ravel()
-        n, f = X.shape
+        n, _f = X.shape
 
         # Standardize
         self._mean = X.mean(axis=0)
@@ -300,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\n🔧 Simulate: sl_pct={params['sl_pct']}, rr_ratio={params['rr_ratio']}, "
           f"min_score={params['min_score']}")
-    trades, equity = engine.simulate(klines, args.symbol, args.balance, params)
+    trades, _equity = engine.simulate(klines, args.symbol, args.balance, params)
     print(f"   {len(trades)} сделок от primary signal (BB grid)")
 
     if not trades:

@@ -368,14 +368,13 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     # 7. World Model score (0-5) — предсказание close на t+1 (кешированное)
     world_model_score = 0
     world_predicted_return = None
-    wm_regime = None
     if os.environ.get('BYBIT_WORLD_MODEL', '0') == '1':
         try:
             from .lstm_world_model import get_cached_world_prediction as _get_wm
             wm_cache = _get_wm(sym)
             if wm_cache:
                 world_predicted_return = wm_cache.get('predicted_return_pct')
-                wm_regime = wm_cache.get('regime')
+                wm_cache.get('regime')
                 if world_predicted_return is not None:
                     if world_predicted_return > 0.5:
                         world_model_score = 5
@@ -654,7 +653,7 @@ def auto_entry_scan(positions):
             # Маржа от score с учётом агрессии режима (Фаза 5.4)
             # Volatility filter: block high-vol symbols, scale margin (fail-open)
             from .volatility_filter import is_high_volatility, volatility_scale
-            blocked, ratio, reason = is_high_volatility(sym)
+            blocked, _ratio, reason = is_high_volatility(sym)
             if blocked:
                 log_event(f'🚫 VOL-FILTER {sym}: {reason}')
                 continue
@@ -845,7 +844,7 @@ def auto_entry_scan(positions):
             # Не более MAX_RISK_PER_SYMBOL_PCT от депозита на один тикер
             try:
                 from .risk_manager import check_symbol_concentration
-                conc_ok, conc_reason, conc_pct = check_symbol_concentration(sym, margin, positions)
+                conc_ok, conc_reason, _conc_pct = check_symbol_concentration(sym, margin, positions)
                 if not conc_ok:
                     log_event(f'⚠️ CONC BLOCK {sym}: {conc_reason}')
                     continue

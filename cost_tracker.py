@@ -84,7 +84,7 @@ def fetch_and_log_closed_pnl():
 
         symbol = p.get('symbol', '')
         side = p.get('side', '')
-        qty = float(p.get('qty', 0))
+        float(p.get('qty', 0))
         pnl = float(p.get('closedPnl', 0))
         created_time = datetime.fromtimestamp(
             int(p.get('createdTime', 0)) / 1000

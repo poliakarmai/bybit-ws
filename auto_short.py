@@ -400,7 +400,6 @@ def check_auto_short(positions):
     TIER_AB = _get_tier_ab(cfg)
     BANNED = set(cfg.risk.get('banned_symbols', []))
     BB_SHORT_THRESHOLD = cfg.strategy.short.bb_threshold
-    SHORT_MARGIN = cfg.strategy.short.margin
     SHORT_LEVERAGE = cfg.strategy.short.leverage
     SL_PCT = cfg.strategy.short.sl_tier_ab
     SL_PCT_JUNK = cfg.strategy.short.sl_tier_cd
@@ -550,7 +549,7 @@ def check_auto_short(positions):
             continue
         # Volatility filter: block high-vol symbols, scale margin (fail-open)
         from .volatility_filter import is_high_volatility, volatility_scale
-        blocked, ratio, reason = is_high_volatility(sym)
+        blocked, _ratio, reason = is_high_volatility(sym)
         if blocked:
             log_event(f'🚫 VOL-FILTER {sym}: {reason}')
             continue
@@ -649,7 +648,7 @@ def check_auto_short(positions):
             # ── Symbol concentration check (28.06.2026) ──
             try:
                 from .risk_manager import check_symbol_concentration
-                conc_ok, conc_reason, conc_pct = check_symbol_concentration(sym, short_margin, positions)
+                conc_ok, conc_reason, _conc_pct = check_symbol_concentration(sym, short_margin, positions)
                 if not conc_ok:
                     log_event(f'⚠️ CONC BLOCK SHORT {sym}: {conc_reason}')
                     continue

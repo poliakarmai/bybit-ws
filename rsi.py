@@ -96,8 +96,8 @@ def check_rsi_divergence():
             continue
 
         # Последние два пика
-        p2_idx, p2_high, p2_close = peaks[-1]
-        p1_idx, p1_high, p1_close = peaks[-2]
+        p2_idx, p2_high, _p2_close = peaks[-1]
+        p1_idx, p1_high, _p1_close = peaks[-2]
 
         # Проверка: цена выше, а RSI ниже
         if p2_high <= p1_high:

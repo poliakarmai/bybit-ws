@@ -87,7 +87,7 @@ def test_max_positions_logged(rm, monkeypatch):
 
 def test_stub_position_with_zero_size_not_counted(rm, monkeypatch):
     """Фаза 11 D1: заглушки _note_entry (size=0) — не позиция, лимит не съедают."""
-    rm_, db = rm
+    rm_, _db = rm
     monkeypatch.setattr(rm_, 'get_dynamic_max_positions',
                         lambda: {'max_positions': 1, 'volatility_level': 'high'})
     allowed, reason = rm_.check({'BTCUSDT': {'margin': 0, 'size': 0}},
@@ -109,7 +109,7 @@ def test_daily_loss_logged(rm, monkeypatch):
 def test_concentration_logged(rm, monkeypatch):
     rm_, db = rm
     monkeypatch.setattr(rm_, '_get_wallet_balance', lambda: {'equity': 100.0})
-    allowed, reason, pct = rm_.check_symbol_concentration('BTCUSDT', 50.0, {})
+    allowed, _reason, pct = rm_.check_symbol_concentration('BTCUSDT', 50.0, {})
     assert allowed is False and pct > 0.05
     r = _rows(db)[0]
     assert r['check'] == 'concentration'

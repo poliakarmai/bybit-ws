@@ -240,7 +240,7 @@ def check_daily_pnl_alert():
         
         # Худший день?
         worst_day = min(week_pnls, key=week_pnls.get)
-        worst_pnl = week_pnls[worst_day]
+        week_pnls[worst_day]
         
         if worst_day == today and len(week_pnls) >= 2:
             second_worst = sorted(week_pnls.values())[1]  # второй худший

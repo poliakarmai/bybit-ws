@@ -376,7 +376,7 @@ def train_dspy(
             num_candidates=5,
             init_temperature=0.5,
         )
-        optimized = mipro_optimizer.compile(program, trainset=trainset)
+        mipro_optimizer.compile(program, trainset=trainset)
 
         log_event('✅ DSPy: оптимизация завершена')
     except Exception as e:

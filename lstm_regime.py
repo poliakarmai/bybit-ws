@@ -250,7 +250,7 @@ def _fetch_btc_dominance() -> float | None:
         if resp and resp.get('retCode') == 0:
             tickers = resp['result'].get('list', [])
             if tickers:
-                btc_vol = float(tickers[0].get('turnover24h', 0))
+                float(tickers[0].get('turnover24h', 0))
                 # Грубая оценка: BTC.D ~ 40-60% в нормальных условиях
                 # Используем нейтральное значение при недоступности API
                 return 50.0
@@ -370,7 +370,7 @@ if HAS_TORCH:
 
         def forward(self, x):
             # x: (batch, seq_len, input_size)
-            lstm_out, (hn, cn) = self.lstm(x)
+            lstm_out, (_hn, _cn) = self.lstm(x)
             last_out = lstm_out[:, -1, :]  # последний временной шаг
             out = self.relu(self.fc1(last_out))
             out = self.dropout(out)

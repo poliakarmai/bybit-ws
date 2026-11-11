@@ -89,7 +89,7 @@ def day_features(candles, entry_at):
             break
     if idx is None or idx < 15:  # first TR needs a previous close
         return None
-    o, h, l = float(candles[idx][1]), float(candles[idx][2]), float(candles[idx][3])
+    o, _h, _l = float(candles[idx][1]), float(candles[idx][2]), float(candles[idx][3])
     trs = []
     for i in range(idx - 13, idx + 1):
         pc = float(candles[i - 1][4])

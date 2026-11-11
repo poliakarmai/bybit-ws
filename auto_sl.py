@@ -198,7 +198,7 @@ def check_and_fix_sl(positions=None):
         mark = p['mark']
         side = p['side']
         idx = p['positionIdx']
-        size = p['size']
+        p['size']
         entry = p['entry']
 
         # BE-SL: в плюсе >3% → безубыток с зазором +1%

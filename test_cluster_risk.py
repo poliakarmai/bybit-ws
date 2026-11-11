@@ -60,7 +60,7 @@ class TestOverBudgetShadow:
         with patch('bybit_ws.risk_manager._load_correlation_snapshot',
                    return_value=_snap(OVER_PAIRS)):
             from bybit_ws.risk_manager import check_cluster_risk, cluster_risk
-            ok, reason = check_cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('shadow'))
+            ok, _reason = check_cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('shadow'))
             assert ok is True
             r = cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('shadow'))
             assert r['size_multiplier'] < 1.0
@@ -126,7 +126,7 @@ class TestMissingSnapshot:
     def test_none_snapshot_fails_open(self):
         with patch('bybit_ws.risk_manager._load_correlation_snapshot', return_value=None):
             from bybit_ws.risk_manager import check_cluster_risk
-            ok, reason = check_cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('enforce'))
+            ok, _reason = check_cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('enforce'))
             assert ok is True
 
 
@@ -145,7 +145,7 @@ class TestModeOff:
         with patch('bybit_ws.risk_manager._load_correlation_snapshot',
                    return_value=_snap(OVER_PAIRS)):
             from bybit_ws.risk_manager import check_cluster_risk, cluster_risk
-            ok, reason = check_cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('off'))
+            ok, _reason = check_cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('off'))
             assert ok is True
             r = cluster_risk(OVER_POSITIONS, 'AAAUSDT', 'Buy', _cfg('off'))
             assert r['mode'] == 'off'

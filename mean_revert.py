@@ -106,7 +106,6 @@ def check_mean_revert(positions):
 
         direction = None
         side = None
-        sl_mult = None
 
         # LONG: BB% < 5%
         if bb_pct < BB_EXTREME_LOW:

@@ -273,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
               f"min_score={params['min_score']}")
         print(f"{'='*90}")
 
-        trades, equity = engine.simulate(klines, args.symbol, args.balance, params)
+        trades, _equity = engine.simulate(klines, args.symbol, args.balance, params)
         if not trades:
             print("   Нет сделок для labeling.")
             continue

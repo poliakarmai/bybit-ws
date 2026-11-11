@@ -300,7 +300,7 @@ def score_coin(symbol: str, ticker: dict, interval: str = 'D') -> dict | None:
         if ml_adjusted and ml_adjusted != score:
             ml_score_val = round(ml_adjusted, 1)
             # ML-бонус: мягкая коррекция
-            ml_bonus = ml_adjusted - score
+            ml_adjusted - score
             score = ml_adjusted  # заменяем на ML-скорректированный
     except ImportError:
         pass

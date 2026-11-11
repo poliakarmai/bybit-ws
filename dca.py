@@ -89,7 +89,7 @@ def check_dca(positions=None):
         return alerts
 
     state = _load_state()
-    now = time.time()
+    time.time()
     cfg = Config()
     dca_cfg = _get_dca_config(cfg)
 

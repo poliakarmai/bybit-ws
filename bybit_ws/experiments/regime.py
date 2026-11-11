@@ -77,7 +77,7 @@ class GaussianHMM:
         -------
         log_prob : (T, K)
         """
-        T, D = X.shape
+        T, _D = X.shape
         K = means.shape[0]
         log_prob = np.zeros((T, K))
         for k in range(K):
@@ -159,7 +159,7 @@ class GaussianHMM:
             X = X.reshape(-1, 1)
         T, D = X.shape
         K = self.n_states
-        rng = np.random.RandomState(self.random_state)
+        np.random.RandomState(self.random_state)
 
         # Init: pi uniform
         self.pi = np.full(K, 1.0 / K)

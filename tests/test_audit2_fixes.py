@@ -22,7 +22,7 @@ from bybit_ws import risk_manager as rm
 @pytest.mark.parametrize('wallet', [None, {}, {'equity': 'n/a'}, {'equity': 0}, {'equity': -5}])
 def test_concentration_fail_closed(monkeypatch, wallet):
     monkeypatch.setattr(rm, '_get_wallet_balance', lambda: wallet)
-    allowed, reason, pct = rm.check_symbol_concentration('BTCUSDT', 5.0, {})
+    allowed, reason, _pct = rm.check_symbol_concentration('BTCUSDT', 5.0, {})
     assert allowed is False, f'wallet={wallet!r} должно блокировать вход'
     assert reason
 
@@ -34,7 +34,7 @@ def test_min_lot_allowed_even_below_pct_cap(monkeypatch):
     equity $62.83, 5% = $3.15 < min_margin $5).
     """
     monkeypatch.setattr(rm, '_get_wallet_balance', lambda: {'equity': 62.83})
-    allowed, reason, pct = rm.check_symbol_concentration('BTCUSDT', 5.0, {})
+    allowed, reason, _pct = rm.check_symbol_concentration('BTCUSDT', 5.0, {})
     assert allowed is True, reason
 
     # сверх минимального лота процент снова работает

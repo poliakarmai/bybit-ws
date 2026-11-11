@@ -536,7 +536,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 else:
                     lines = [f"📋 Последние {len(rows)} эксперимент(ов):"]
                     for row in rows:
-                        exp_id, name, hyp, run_id, metrics_json, created = row
+                        exp_id, name, _hyp, run_id, metrics_json, _created = row
                         metrics = json.loads(metrics_json) if metrics_json else {}
                         pnl = metrics.get('total_pnl', 0)
                         wr = metrics.get('win_rate', 0)

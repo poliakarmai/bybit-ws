@@ -206,7 +206,7 @@ def test_api():
     check("retry", 'retries' in code and 'MAX_RETRIES' in code)
     check("429", '429' in code)
     # subprocess только в комментариях — норм (не в исполняемом коде)
-    has_code_subprocess = any('subprocess' in l and not l.strip().startswith('#') and 'subprocess' not in l.split('#')[0] if '#' in l else False for l in code.split('\n') if 'subprocess' in l)
+    any('subprocess' in l and not l.strip().startswith('#') and 'subprocess' not in l.split('#')[0] if '#' in l else False for l in code.split('\n') if 'subprocess' in l)
     check("no subprocess in code", not any('import subprocess' in l for l in code.split('\n')))
 
 

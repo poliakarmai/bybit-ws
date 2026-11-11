@@ -176,7 +176,7 @@ def check_regime(force: bool = False) -> dict:
 
         # Volume ratio (recent surge?)
         btc_vol_ratio = _avg_volume_ratio(btc_klines) if btc_klines else None
-        eth_vol_ratio = _avg_volume_ratio(eth_klines) if eth_klines else None
+        _avg_volume_ratio(eth_klines) if eth_klines else None
 
         # ── Classification ──
         regime = "NEUTRAL"
