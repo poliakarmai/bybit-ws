@@ -62,7 +62,7 @@ for name, imp in IMPORT_TESTS.items():
     if imp is None:
         continue
     try:
-        exec(imp)
+        exec(imp)  # noqa: S102 — тест: динамическая проверка импортов, статические строки
         check(name, True)
     except Exception as e:
         check(name, False, str(e)[:150])

@@ -175,7 +175,7 @@ def test_state_db():
     check("expired: gone", not db.is_cooling_down('exp'))
 
     try: db.vacuum(); check("vacuum: OK", True)
-    except: check("vacuum: OK", False)
+    except Exception: check("vacuum: OK", False)
 
     db.close(); os.unlink(tmp)
 

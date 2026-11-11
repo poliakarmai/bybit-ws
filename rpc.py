@@ -75,7 +75,7 @@ async def _ws_handler(request):
 
 async def _ws_broadcast_async(data):
     """Рассылка JSON-данных всем подключённым клиентам."""
-    global _ws_data
+    global _ws_data, _ws_clients
     _ws_data = data
     dead = set()
     for ws in list(_ws_clients):
