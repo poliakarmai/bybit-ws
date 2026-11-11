@@ -3,5 +3,14 @@
 # BLE001 (blind except) и S110 (try/except/pass) — осознанный контракт живого
 # цикла: падение одной стратегии или телеметрии не должно убивать 30-секундный
 # цикл. Всё остальное линтер проверяет.
+#
+# main.py — deprecation-заглушка (sys.exit на строке 3, весь код ниже не
+# выполняется). gridsignal-bot.py — legacy бот, заменён gridsignal_scanner.py.
+# Оба — мёртвый код, в линт не берём.
+exclude = [
+    "main.py",
+    "gridsignal-bot.py",
+]
+
 [lint]
 ignore = ["BLE001", "S110"]
