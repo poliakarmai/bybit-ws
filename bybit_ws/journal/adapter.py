@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .analyzer import Trade, RoundTrip, analyze, analyze_from_roundtrips
+from .analyzer import RoundTrip, Trade, analyze, analyze_from_roundtrips
 
 logger = logging.getLogger(__name__)
 

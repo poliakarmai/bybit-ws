@@ -10,12 +10,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
@@ -369,7 +368,7 @@ def check_overtrading(trades: list[Trade], rts: list[RoundTrip]) -> BiasReport:
     # Группируем по дням
     daily_counts: dict[str, int] = {}
     for t in trades:
-        day = datetime.fromtimestamp(t.timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.fromtimestamp(t.timestamp, tz=UTC).strftime("%Y-%m-%d")
         daily_counts[day] = daily_counts.get(day, 0) + 1
 
     if len(daily_counts) < 4:
@@ -385,7 +384,7 @@ def check_overtrading(trades: list[Trade], rts: list[RoundTrip]) -> BiasReport:
     busy_pnl = []
     quiet_pnl = []
     for rt in rts:
-        day = datetime.fromtimestamp(rt.sell_ts, tz=timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.fromtimestamp(rt.sell_ts, tz=UTC).strftime("%Y-%m-%d")
         if day in busy_days:
             busy_pnl.append(rt.pnl)
         elif day in quiet_days:
@@ -559,5 +558,5 @@ def _build_result(profile: JournalProfile, rts: list[RoundTrip], trades: list[Tr
         "per_symbol": profile.per_symbol,
         "biases": [b.to_dict() for b in biases],
         "alerts": alerts,
-        "analyzed_at": datetime.now(timezone.utc).isoformat(),
+        "analyzed_at": datetime.now(UTC).isoformat(),
     }

@@ -12,9 +12,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-import bybit_ws as bw  # noqa: E402
-from bybit_ws import auto_tp, unified_sl  # noqa: E402
-from bybit_ws import file_utils  # noqa: E402
+import bybit_ws as bw
+from bybit_ws import (
+    auto_tp,
+    file_utils,
+    unified_sl,
+)
 
 
 def test_safe_json_append_keeps_history(tmp_path):
@@ -120,7 +123,7 @@ def test_partial_tp_keeps_old_tp_when_new_fails(monkeypatch):
     """Сбой при выставлении новых TP не должен оставлять позицию без TP."""
     from bybit_ws import partial_tp as ptp
 
-    monkeypatch.setattr(ptp, "_load_state", lambda: {})
+    monkeypatch.setattr(ptp, "_load_state", dict)
     monkeypatch.setattr(ptp, "_save_state", lambda s: None)
     monkeypatch.setattr(ptp, "get_bb_data", lambda sym: {"sma": 110.0, "upper": 120.0, "bb_pct": 60})
     monkeypatch.setattr(ptp, "calculate_split", lambda *a, **k: (0.9, 0.1))
@@ -160,7 +163,7 @@ def test_partial_tp_cleans_partial_new_orders(monkeypatch):
     """Частичный успех: уже поставленный новый TP снимается, старые остаются."""
     from bybit_ws import partial_tp as ptp
 
-    monkeypatch.setattr(ptp, "_load_state", lambda: {})
+    monkeypatch.setattr(ptp, "_load_state", dict)
     monkeypatch.setattr(ptp, "_save_state", lambda s: None)
     monkeypatch.setattr(ptp, "get_bb_data", lambda sym: {"sma": 110.0, "upper": 120.0, "bb_pct": 60})
     monkeypatch.setattr(ptp, "calculate_split", lambda *a, **k: (0.9, 0.1))
@@ -191,6 +194,7 @@ def test_auto_short_state_does_not_claim_sl_on_reject():
 def test_empty_positions_snapshot_clears_db(monkeypatch):
     """Закрытая позиция должна исчезать из state.db: пустой снимок — тоже факт."""
     import asyncio
+
     from bybit_ws import main_async as ma
 
     saved = []

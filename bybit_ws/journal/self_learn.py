@@ -21,13 +21,12 @@ State files:
 """
 import json
 import logging
-import os
 import random
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from .analyzer import JournalResult
 
@@ -80,7 +79,7 @@ N_EFF_MIN = 20
 # ── Session zones ───────────────────────────────────
 def _session_hour() -> int:
     """Текущий час UTC (0-23)."""
-    return datetime.now(timezone.utc).hour
+    return datetime.now(UTC).hour
 
 SESSION_ZONES = {
     "asia":   (0, 7),    # 00-07 UTC
@@ -1502,11 +1501,9 @@ def composite_score(trades: list) -> dict:
     max_dd = 0
     for r in returns:
         cumulative += r
-        if cumulative > peak:
-            peak = cumulative
+        peak = max(peak, cumulative)
         dd = peak - cumulative
-        if dd > max_dd:
-            max_dd = dd
+        max_dd = max(max_dd, dd)
 
     # Avg hold
     holds = [(t.get("hold_hours", 0) if isinstance(t, dict) else getattr(t, "hold_hours", 0))
@@ -2648,7 +2645,7 @@ def record_arm_assignment(symbol: str, side: str, entry_ts: float,
 
 
 def pop_arm_assignment(symbol: str, side: str, close_ts: float,
-                       max_age_h: float = 72) -> Optional[Tuple[str, int]]:
+                       max_age_h: float = 72) -> tuple[str, int] | None:
     """Забрать назначение руки для закрывшейся сделки → (regime, arm_idx) или None."""
     if not ARM_ASSIGNMENTS.exists():
         return None
@@ -2750,7 +2747,11 @@ def on_trade_closed(symbol: str, side: str, pnl: float, hold_hours: float,
 
     # 3. Update symbol profile (incremental)
     try:
-        from .journal.self_learn import _load_symbol_profiles, _save_symbol_profiles, _profiles_lock
+        from .journal.self_learn import (
+            _load_symbol_profiles,
+            _profiles_lock,
+            _save_symbol_profiles,
+        )
         with _profiles_lock:
             profiles = _load_symbol_profiles()
         if symbol not in profiles:
@@ -2884,8 +2885,8 @@ def weighted_composite_score(trades: list, regime: str = None, decay_rate: float
 # ══════════════════════════════════════════════════════
 
 def select_arm_with_uncertainty(bandit, threshold: float = 0.10) -> tuple:
-    import random as _random
     import math
+    import random as _random
     means = [a["alpha"] / (a["alpha"] + a["beta"]) for a in bandit.arms]
     n = len(means)
     uncertainty = math.sqrt(sum((m - sum(means)/n)**2 for m in means) / n)
