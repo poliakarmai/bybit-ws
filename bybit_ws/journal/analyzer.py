@@ -16,9 +16,39 @@ import math
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
+
+
+# ── Journal contract types (mypy-проверяемый контракт) ─────────────────────
+
+class PerSymbolStats(TypedDict):
+    """Статистика одного символа — ключи читает n_eff-гейт и per-symbol tuning.
+
+    Держать синхронно с self_learn.apply_journal_insights. Несоответствие ключа
+    здесь и в консьюмере = класс бага «продюсер отдаёт X, консьюмер читает Y»
+    (исторический случай 11.11.2026: гейт читал journal["per_symbol"], которого
+    _build_result не отдавал → n_eff всегда 0.0 → self-learn молча блокировался).
+    """
+    total_trades: int
+    win_rate: float
+    total_pnl: float
+    avg_hold_hours: float
+
+
+class JournalResult(TypedDict):
+    """Схема результата _build_result / analyze_from_roundtrips.
+
+    per_symbol — REQUIRED: mypy ловит его отсутствие в _build_result (корень бага).
+    source/total_db_rows/skipped добавляет adapter.load_from_sqlite поверх —
+    их здесь нет намеренно, чтобы контракт продюсера был строгим.
+    """
+    profile: dict[str, Any]
+    per_symbol: dict[str, PerSymbolStats]
+    biases: list[dict[str, Any]]
+    alerts: list[str]
+    analyzed_at: str
 
 
 # ── Data model ──────────────────────────────────────────────────────────────
@@ -61,7 +91,7 @@ class JournalProfile:
     total_pnl: float = 0.0
     max_drawdown: float = 0.0
     top_symbols: list[dict[str, Any]] = field(default_factory=list)
-    per_symbol: dict[str, dict[str, Any]] = field(default_factory=dict)
+    per_symbol: dict[str, PerSymbolStats] = field(default_factory=dict)
     roundtrips_sample: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -251,7 +281,7 @@ def compute_profile_from_roundtrips(rts: list[RoundTrip], total_trades: int | No
         s["pnl"] += rt.pnl
         s["wins"] += 1 if rt.pnl > 0 else 0
         s["hold"] += rt.hold_hours
-    per_symbol = {
+    per_symbol: dict[str, PerSymbolStats] = {
         k: {
             "total_trades": v["trades"],
             "win_rate": round(v["wins"] / v["trades"], 3),
@@ -482,7 +512,7 @@ def check_anchoring(trades: list[Trade]) -> BiasReport:
 
 # ── Full analysis ───────────────────────────────────────────────────────────
 
-def analyze(trades: list[Trade]) -> dict[str, Any]:
+def analyze(trades: list[Trade]) -> JournalResult:
     """Полный анализ торговой истории (legacy: FIFO по сырым entry+close сделкам).
 
     Returns:
@@ -493,7 +523,7 @@ def analyze(trades: list[Trade]) -> dict[str, Any]:
     return _build_result(profile, rts, trades)
 
 
-def analyze_from_roundtrips(rts: list[RoundTrip], trades: list[Trade] | None = None) -> dict[str, Any]:
+def analyze_from_roundtrips(rts: list[RoundTrip], trades: list[Trade] | None = None) -> JournalResult:
     """Полный анализ из уже готовых roundtrips (pnl берётся из БД, без FIFO).
 
     Используется adapter'ом для trade_history, где pnl/hold_hours уже посчитаны
@@ -504,7 +534,7 @@ def analyze_from_roundtrips(rts: list[RoundTrip], trades: list[Trade] | None = N
     return _build_result(profile, rts, trades)
 
 
-def _build_result(profile: JournalProfile, rts: list[RoundTrip], trades: list[Trade]) -> dict[str, Any]:
+def _build_result(profile: JournalProfile, rts: list[RoundTrip], trades: list[Trade]) -> JournalResult:
     """Собирает biases + alerts вокруг готового профиля."""
     biases = [
         check_disposition(rts),

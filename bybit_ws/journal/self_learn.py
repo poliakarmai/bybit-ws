@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from .analyzer import JournalResult
+
 logger = logging.getLogger(__name__)
 
 # ── Paths ──────────────────────────────────────────
@@ -603,7 +605,7 @@ def _log_canary_decision(state: dict, decision: str, detail: str):
 # APPLY JOURNAL INSIGHTS (v4)
 # ══════════════════════════════════════════════════════
 
-async def apply_journal_insights(journal: dict, cfg) -> dict:
+async def apply_journal_insights(journal: JournalResult, cfg) -> dict:
     """v4: per-symbol tuning + exit analysis + session params + streak guard."""
     applied = {}
     profile = journal.get("profile", {})

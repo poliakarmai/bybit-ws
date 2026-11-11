@@ -81,7 +81,7 @@ def load_from_sqlite(db_path: str | Path = DEFAULT_DB) -> dict[str, Any]:
     if not rts:
         return {"error": f"Не удалось загрузить сделки (пропущено: {skipped})"}
 
-    result = analyze_from_roundtrips(rts, entry_trades)
+    result = dict(analyze_from_roundtrips(rts, entry_trades))
     result["source"] = str(db)
     result["total_db_rows"] = len(rows)
     result["skipped"] = skipped
@@ -121,6 +121,6 @@ def load_from_list(records: list[dict[str, Any]]) -> dict[str, Any]:
     if not trades:
         return {"error": "Нет валидных записей"}
 
-    result = analyze(trades)
+    result = dict(analyze(trades))
     result["source"] = "list"
     return result
