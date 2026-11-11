@@ -36,10 +36,21 @@ def parse_calls_and_imports(filepath: Path) -> tuple:
             self.generic_visit(node)
 
         def visit_Call(self, node):
+            # прямой вызов fn(...)
             if isinstance(node.func, ast.Name):
                 calls.add(node.func.id)
             elif isinstance(node.func, ast.Attribute):
                 calls.add(node.func.attr)
+                # ресивер метода: adb.close() → adb тоже «используется»
+                if isinstance(node.func.value, ast.Name):
+                    calls.add(node.func.value.id)
+            # коллбеки как аргументы/keywords: _maybe_execute(fn, ...), Thread(target=fn)
+            for a in node.args:
+                if isinstance(a, ast.Name):
+                    calls.add(a.id)
+            for kw in node.keywords:
+                if isinstance(kw.value, ast.Name):
+                    calls.add(kw.value.id)
             self.generic_visit(node)
 
     CallCollector().visit(tree)
