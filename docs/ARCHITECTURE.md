@@ -366,7 +366,9 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8766/metrics | grep '
 ```bash
 systemctl --user status bybit-ws-async
 journalctl --user -u bybit-ws-async -f
-# SQLite lock: rm state.db-wal state.db-shm (safe)
+# SQLite lock: останови сервис и сделай checkpoint (НЕ rm -wal/-shm — потеряешь WAL-транзакции)
+systemctl --user stop bybit-ws-async
+sqlite3 ~/.local/share/bybit-ws/state.db "PRAGMA wal_checkpoint(TRUNCATE);"
 ```
 
 **Позиции не закрываются:**

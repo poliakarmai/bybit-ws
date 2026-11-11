@@ -270,11 +270,11 @@ bash verify.sh        # exit 0 = всё зелёное; exit 1 = есть FAIL
 ## Аварийные ситуации
 
 ```bash
-# Kill switch — закрыть ВСЕ позиции
-curl -X POST http://127.0.0.1:8766/kill_switch -H "Authorization: Bearer TOKEN"
+# Kill switch — закрыть ВСЕ позиции (нужны оба заголовка: Bearer + X-Emergency-Auth)
+curl -X POST http://127.0.0.1:8766/kill_switch -H "Authorization: Bearer $TOKEN" -H "X-Emergency-Auth: $EMERGENCY_TOKEN"
 
 # Emergency close — без паузы
-curl -X POST http://127.0.0.1:8766/emergency_close -H "Authorization: Bearer TOKEN"
+curl -X POST http://127.0.0.1:8766/emergency_close -H "Authorization: Bearer $TOKEN" -H "X-Emergency-Auth: $EMERGENCY_TOKEN"
 
 # Сбросить LLM Circuit Breaker
 systemctl --user restart bybit-ws-async

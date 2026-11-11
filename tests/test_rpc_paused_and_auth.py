@@ -138,3 +138,10 @@ def test_emergency_auth_requires_matching_header(token, monkeypatch):
 
     missing = {'Authorization': 'Bearer ' + token}
     assert _auth_handler(missing)._check_auth(require_emergency=True) is False
+
+
+def test_emergency_auth_fail_closed_when_token_unset(token, monkeypatch):
+    """EMERGENCY_TOKEN не задан → аварийный эндпоинт отклонён (fail-closed, не fail-open)."""
+    monkeypatch.delenv('EMERGENCY_TOKEN', raising=False)
+    hdr = {'Authorization': 'Bearer ' + token, 'X-Emergency-Auth': 'anything'}
+    assert _auth_handler(hdr)._check_auth(require_emergency=True) is False

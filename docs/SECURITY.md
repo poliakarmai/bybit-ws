@@ -406,10 +406,9 @@ find ~/.config/bybit-cli ~/.config/bybit-ws ~/.local/share/bybit-ws \
 
 ## 6. Сетевая безопасность
 
-> ⚠️ **Открытая дыра на 01.11.2026:** в env сервиса нет `EMERGENCY_TOKEN`, поэтому `/kill_switch`
-> и `/emergency_close` защищены **только** Bearer-токеном (`rpc.py:540`: проверка второго заголовка
-> выполняется лишь при непустой переменной). Пока порт `8766` слушает loopback, это терпимо;
-> но при любом пробросе наружу — ставить токен обязательно.
+> ✅ **Исправлено 11.11.2026:** аварийная авторизация fail-closed — без `EMERGENCY_TOKEN` в env
+> `/kill_switch` и `/emergency_close` отклоняются (`rpc.py:540`). Токен задан в `~/.config/bybit-ws/env`.
+> Проверка: `grep -c '^EMERGENCY_TOKEN=' ~/.config/bybit-ws/env` → `1`.
 
 ### 6.1 RPC — bind только localhost
 

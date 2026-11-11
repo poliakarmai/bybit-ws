@@ -29,7 +29,7 @@
 
 # Установка
 ssh root@your-server
-apt update && apt install -y python3 python3-pip git
+apt update && apt install -y python3 python3-pip git curl sqlite3
 
 # Клонирование
 git clone https://github.com/poliakarmai/bybit-ws.git
@@ -47,6 +47,7 @@ python3 test_smoke.py
 
 ```bash
 # Конфигурация
+mkdir -p ~/.config/bybit-ws
 cp config.example.yaml ~/.config/bybit-ws/config.yaml
 nano ~/.config/bybit-ws/config.yaml
 ```
@@ -68,17 +69,17 @@ strategy:
     enabled: false           # начни только с LONG
 
 position_sizing:
-  long_risk_pct: 0.10        # 10% депозита в риске
+  long_risk_pct: 0.10        # 10% депозита в риске (доля: 0.10 = 10%)
 ```
 
 ```bash
 # Секреты (chmod 600 — обязательно!)
-cat > ~/.config/bybit-ws/.env << 'EOF'
+# RPC-токен генерируется автоматически при первом запуске (state.db → kv_store) — задавать не нужно.
+cat > ~/.config/bybit-ws/env << 'EOF'
 BYBIT_API_KEY=your_testnet_key
 BYBIT_API_SECRET=your_testnet_secret
-RPC_TOKEN=$(openssl rand -hex 16)
 EOF
-chmod 600 ~/.config/bybit-ws/.env
+chmod 600 ~/.config/bybit-ws/env
 ```
 
 ---
@@ -113,6 +114,7 @@ print(r['result']['list'][0]['totalEquity'] if r['retCode']==0 else r)
 mkdir -p ~/.config/systemd/user
 cp deploy/bybit-ws-async.service ~/.config/systemd/user/
 systemctl --user daemon-reload
+loginctl enable-linger $USER        # чтобы бот жил после выхода из SSH
 systemctl --user enable --now bybit-ws-async
 
 # Проверка
@@ -142,7 +144,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8766/metrics
 
 ### Telegram-алерты
 
-Добавь в `.env`:
+Добавь в `~/.config/bybit-ws/env`:
 ```bash
 TG_BOT_TOKEN=123:abc
 TG_CHAT_ID=123456789
@@ -168,7 +170,7 @@ TG_CHAT_ID=123456789
    api:
      base_url: "https://api.bybit.com"  # убрал -testnet
    ```
-4. Обнови `.env` с боевыми ключами
+4. Обнови `~/.config/bybit-ws/env` с боевыми ключами
 5. Перезапусти: `systemctl --user restart bybit-ws-async`
 
 ---
@@ -185,10 +187,10 @@ TG_CHAT_ID=123456789
 - Главное: стабильный пинг к Bybit API (<100ms)
 
 ### Что делать если позиции не открываются?
-1. Проверь: `curl localhost:8766/positions`
+1. Проверь: `TOKEN=$(sqlite3 ~/.local/share/bybit-ws/state.db "SELECT value FROM kv_store WHERE key='rpc_auth_token'")` и затем `curl -H "Authorization: Bearer $TOKEN" localhost:8766/positions`
 2. Проверь логи: `journalctl --user -u bybit-ws-async -n 50`
 3. Убедись что баланс > $30
-4. Проверь Circuit Breaker: `curl localhost:8766/risk`
+4. Проверь Circuit Breaker: `curl -H "Authorization: Bearer $TOKEN" localhost:8766/risk`
 
 ### Можно ли торговать вручную параллельно?
 Да. Движок не мешает ручным сделкам. Но:

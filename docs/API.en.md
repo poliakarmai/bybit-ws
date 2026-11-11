@@ -16,7 +16,7 @@ Rotation: `POST /reset-token`.
 
 **Dashboard:** the server also serves the `GET /dashboard` page only with Bearer. The `?token=<UUID>` parameter is not needed by the server. The page stores it in `localStorage` and then sends it to `/rpc/dash/*`.
 
-**Emergency** endpoints (`/kill_switch`, `/emergency_close`) require **two** headers — `Authorization: Bearer <token>` **and** `X-Emergency-Auth: <EMERGENCY_TOKEN>` — **only if** `EMERGENCY_TOKEN` is set in the service environment. Without that variable the second check is skipped (`rpc.py:540`, `if emergency and not compare_digest(...)`) and Bearer alone is enough. As of 01.11.2026 the variable is absent from `~/.config/bybit-ws/env`: check with `grep -c EMERGENCY_TOKEN ~/.config/bybit-ws/env`.
+**Emergency** endpoints (`/kill_switch`, `/emergency_close`) require **two** headers — `Authorization: Bearer <token>` **and** `X-Emergency-Auth: <EMERGENCY_TOKEN>`. Without `EMERGENCY_TOKEN` in the service env the endpoint is rejected (fail-closed, `rpc.py:540`): check `grep -c '^EMERGENCY_TOKEN=' ~/.config/bybit-ws/env`.
 
 ⚠️ Production: only through nginx/Cloudflare (TLS externally); the server itself listens on `127.0.0.1:8766`.
 

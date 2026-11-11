@@ -25,13 +25,15 @@
 
 **1. Composite Score** — одна цифра (0-1): «насколько хорошо я торгую»
 
-| Метрика | Вес | Текущее значение |
-|---------|-----|-----------------|
-| Win Rate | 30% | 57% (weighted, decay) |
-| Profit Factor | 25% | 0.75 |
-| Sharpe | 20% | -0.045 |
-| Max Drawdown | 15% | $284 |
-| Avg Hold | 10% | 12h |
+| Метрика | Вес |
+|---------|-----|
+| Win Rate | 30% |
+| Profit Factor | 25% |
+| Sharpe | 20% |
+| Max Drawdown | 15% |
+| Avg Hold | 10% |
+
+> Текущие значения — командой, не хранятся в доке (протухают за сутки): `sqlite3 ~/.local/share/bybit-ws/state.db "SELECT count(*), round(100.0*sum(pnl>0)/count(*),1) FROM trade_history WHERE closed_at IS NOT NULL AND strategy='auto' AND manual=0"`.
 
 > Веса адаптивные: в тренде важнее WR, в кризис/чоппи — MaxDD (30-40%).
 > Exponential decay: старые сделки весят меньше (100 дней = 37% веса).
@@ -90,9 +92,9 @@ main_async.py (event-driven: ≥10 сделок И ≥6ч, иначе fallback 2
 | `bybit_ws/journal/analyzer.py` | Профиль + 4 bias-диагностики |
 | `bybit_ws/journal/adapter.py` | SQLite → нормализованные сделки |
 | `canary_state.json` | Состояние canary-эксперимента |
-| `self_learn.jsonl` | Лог всех корректировок (98 записей) |
+| `self_learn.jsonl` | Лог всех корректировок (счётчик: `wc -l ~/.local/share/bybit-ws/self_learn.jsonl`) |
 | `symbol_profiles.json` | Per-symbol статистика (в data-каталоге; создаётся при первом обучении) |
-| `exit_stats.jsonl` | Причины закрытия (86 записей) |
+| `exit_stats.jsonl` | Причины закрытия (счётчик: `wc -l ~/.local/share/bybit-ws/exit_stats.jsonl`) |
 | `parameter_ensemble.json` | Состояние 6 bandits |
 | `params_history/v*.json` | Git-like версии параметров |
 | `global_params_log.json` | Снепшоты для rollback |

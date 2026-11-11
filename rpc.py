@@ -42,7 +42,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from statistics import mean, stdev
 
-from .alerts import add_alert
+from .alerts import add_alert, log_event
 from .api import bybit as _bybit_api
 from .state_db import db as _db
 
@@ -538,7 +538,10 @@ class RPCHandler(BaseHTTPRequestHandler):
             return False
         if require_emergency:
             emergency = os.environ.get('EMERGENCY_TOKEN', '')
-            if emergency and not hmac.compare_digest(
+            if not emergency:
+                log_event('⛔ require_emergency, но EMERGENCY_TOKEN не задан — аварийный эндпоинт отклонён (fail-closed)')
+                return False
+            if not hmac.compare_digest(
                     str(self.headers.get('X-Emergency-Auth', '')).encode('utf-8'),
                     str(emergency).encode('utf-8')):
                 return False
