@@ -404,6 +404,27 @@ _ORDERS_CACHE: dict = {}  # последний успешный снимок о�
 _PENDING_ENTRIES: dict = {}  # symbol -> {side, ts}: вход повис по таймауту, ждёт сверки
 
 
+_ENTRY_SCAN_BUSY = False
+
+
+def _auto_entry_single_flight(positions: dict):
+    """auto_entry_scan с защитой от наложения сканов.
+
+    run_in_thread отпускает цикл по таймауту, а поток живёт дальше; следующий
+    цикл запустил бы второй скан параллельно первому → двойной вход по одному
+    сигналу. Флаг ставится и снимается ВНУТРИ потока, поэтому переживает таймаут.
+    """
+    global _ENTRY_SCAN_BUSY
+    if _ENTRY_SCAN_BUSY:
+        log_event('⏭ ENTRY auto_entry: прошлый скан ещё идёт — пропускаю цикл')
+        return []
+    _ENTRY_SCAN_BUSY = True
+    try:
+        return auto_entry_scan(positions)
+    finally:
+        _ENTRY_SCAN_BUSY = False
+
+
 def _note_entry(positions: dict, sym: str, side: str) -> None:
     """Учесть только что открытый вход в локальном снапшоте.
 
@@ -819,7 +840,10 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
             log_event('⏸ ENTRY auto_entry пропущен: пауза')
             entries = ([], None)
         else:
-            entries = await run_in_thread(auto_entry_scan, positions or {})
+            # 150с: замер 12.11 — скан 18 символов занимает 100-103с (REST funding +
+            # kline + стакан + LLM-судья на каждый). При 90с цикл уходил в таймаут и
+            # пост-обработка (risk_check/алерты) терялась, хотя ордера уже стояли.
+            entries = await run_in_thread(_auto_entry_single_flight, positions or {}, timeout=150)
         for entry in (entries[0] or []):
             # Извлекаем символ из строки входа для проверки риска
             import re

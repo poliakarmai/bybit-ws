@@ -101,6 +101,16 @@ def judge_entry(
     tp_info = f"TP=${tp_price:.4f}" if tp_price else "TP=not set"
     mtf_info = f"MTF confluence: {mtf_confluence}/3" if mtf_confluence else ""
 
+    # Насколько лимитка стоит ниже полосы — это ДИЗАЙН стратегии (вход в пролив),
+    # а не ошибка сигнала. Без этой строки судья блокировал 100% лонгов «entry
+    # below the lower band», хотя bb_pos относится к текущей цене, а не к ордеру.
+    band_gap = ''
+    if bb_lower and entry_price and entry_price < bb_lower:
+        band_gap = (f"Note: entry is a LIMIT order placed "
+                    f"{(1 - entry_price / bb_lower) * 100:.1f}% below BB lower by design "
+                    f"(dip-buy); BB position above refers to the CURRENT price. "
+                    f"Being below the band is expected — do not reject for that alone.\n")
+
     signal_context = f"""Signal: {side} {symbol}
 Entry: ${entry_price:.4f}
 {sl_info}  {tp_info}
@@ -109,11 +119,11 @@ BB: lower=${bb_lower:.4f} upper=${bb_upper:.4f}
 Funding: {funding_rate*100:.4f}%
 Regime: {regime}
 {mtf_info}
-
+{band_gap}
 Analyze this trading signal. Is this a reasonable entry?
 Check:
-1. Is entry near BB lower band (for LONG) / upper band (for SHORT)?
-2. Is SL wide enough (at least 2-3% from entry)?
+1. Is the signal at the BB lower half (for LONG) / upper half (for SHORT)?
+2. Is SL wide enough (at least 2-3% from entry) and on the correct side?
 3. Is the score adequate (≥25 is decent, ≥35 is strong)?
 4. Any red flags (negative funding, extreme volatility)?
 """

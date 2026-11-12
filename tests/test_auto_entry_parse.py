@@ -1,6 +1,9 @@
-"""Регрессия находки 1 ревью xpiki: except в `_parse_ticker_line` ссылался на
-несуществующий `sym` → NameError вместо `return {}` (и исключение вылетало из
-скоринга символа, обрывая проход по watchlist).
+"""Регрессии auto_entry: парсер строк `bybit tickers` и single-flight скана.
+
+История:
+  * except в `_parse_ticker_line` ссылался на несуществующий `sym` → NameError;
+  * условие `len(parts) >= 7` не совпадало с реальным форматом CLI (ранг + `$` +
+    запятые) → {} на каждой строке → turnover24h=0 → скан молча умирал.
 
 Запуск:
     cd /home/openclaw/bybit-ws && python3 -m pytest tests/test_auto_entry_parse.py -q
@@ -12,6 +15,9 @@ os.environ['BYBIT_LOG_SILENT'] = '1'
 sys.path.insert(0, '/home/openclaw')
 
 import pytest
+
+# Живая строка вывода `bybit tickers` (ранг, пробелы, `$`, запятые).
+REAL_LINE = '  1 BTCUSDT      $73656.100000     51,607 $3,819,640,447'
 
 
 @pytest.fixture()
@@ -27,6 +33,33 @@ def test_bad_number_returns_empty(ae):
 def test_short_line_returns_empty(ae):
     """Слишком короткая строка → {}."""
     assert ae._parse_ticker_line('SOLUSDT 1.5') == {}
+
+
+def test_real_cli_line_with_rank(ae):
+    """Реальный формат CLI: символ, цена и оборот извлекаются верно."""
+    out = ae._parse_ticker_line(REAL_LINE)
+    assert out['symbol'] == 'BTCUSDT'
+    assert out['last'] == pytest.approx(73656.1)
+    assert out['turnover24h'] == pytest.approx(3819640447)
+
+
+def test_header_and_separator_lines_ignored(ae):
+    """Шапка и разделитель таблицы CLI — не данные."""
+    assert ae._parse_ticker_line('  # Symbol       Price          Vol  Turnover') == {}
+    assert ae._parse_ticker_line('-' * 60) == {}
+
+
+def test_line_without_rank(ae):
+    """Обратная совместимость: строка без ранга парсится так же."""
+    out = ae._parse_ticker_line('SOLUSDT 145.5 1 2 3 4 1,234,567')
+    assert out['symbol'] == 'SOLUSDT'
+    assert out['last'] == pytest.approx(145.5)
+    assert out['turnover24h'] == pytest.approx(1234567)
+
+
+def test_turnover_not_zero(ae):
+    """Прод-баг: turnover24h=0 → скан отбрасывал все символы и молчал."""
+    assert ae._parse_ticker_line(REAL_LINE)['turnover24h'] > 0
 
 
 def test_corr_sizing_halves_size(ae, monkeypatch):
@@ -51,9 +84,23 @@ def test_corr_sizing_never_rounds_up_to_one_coin(ae, monkeypatch):
     assert qty is None  # ниже minOrderQty → вход пропускается, а не 1 BTC
 
 
-def test_valid_line_parsed(ae):
-    """Валидная строка парсится (защита от «починили и сломали»)."""
-    out = ae._parse_ticker_line('SOLUSDT 145.5 1 2 3 4 1,234,567')
-    assert out['symbol'] == 'SOLUSDT'
-    assert out['last'] == pytest.approx(145.5)
-    assert out['turnover24h'] == pytest.approx(1234567)
+def test_single_flight_skips_when_busy(monkeypatch):
+    """Идущий скан не должен запускаться параллельно вторым циклом."""
+    ma = pytest.importorskip('bybit_ws.main_async')
+    calls = []
+
+    def fake_scan(positions):
+        calls.append(positions)
+        return [{'sym': 'BTCUSDT'}]
+
+    monkeypatch.setattr(ma, 'auto_entry_scan', fake_scan)
+    monkeypatch.setattr(ma, '_ENTRY_SCAN_BUSY', True)
+
+    assert ma._auto_entry_single_flight({}) == []
+    assert calls == [], 'скан не должен вызываться, пока прошлый идёт'
+
+    # флаг снят → скан выполняется и флаг возвращается в False
+    monkeypatch.setattr(ma, '_ENTRY_SCAN_BUSY', False)
+    assert ma._auto_entry_single_flight({}) == [{'sym': 'BTCUSDT'}]
+    assert calls == [{}]
+    assert ma._ENTRY_SCAN_BUSY is False

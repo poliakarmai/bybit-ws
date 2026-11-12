@@ -231,15 +231,29 @@ def record_sl_hit(sym: str):
 
 
 def _parse_ticker_line(line: str) -> dict:
-    """Парсит строку тикера из bybit-cli tickers в словарь."""
+    """Парсит строку `bybit tickers`: `  1 BTCUSDT  $73656.100000  51,607  $3,819,640,447`.
+
+    Разбор по смыслу, не по числу колонок: ранг может отсутствовать, `$` и
+    запятые в числах, между ценой и объёмом бывает колонка изменения за 24ч.
+    Символ — первая нечисловая колонка, turnover24h — последняя.
+    ponytail: формат CLI живёт вне репо — если снова поменяется, парсер вернёт {}
+    и скан молча умрёт; живой формат держит tests/test_auto_entry_parse.py.
+    """
     parts = line.strip().split()
-    if len(parts) < 7:
+    if len(parts) < 4:
+        return {}
+    if parts[0].startswith(('#', '-')):  # шапка/разделитель вывода CLI — не данные
         return {}
     try:
+        off = 1 if parts[0].isdigit() else 0
+
+        def num(s: str) -> float:
+            return float(s.replace('$', '').replace(',', ''))
+
         return {
-            'symbol': parts[0],
-            'last': float(parts[1].replace(',','')),
-            'turnover24h': float(parts[-1].replace(',','')) if parts[-1].replace(',','').replace('.','').isdigit() else 0,
+            'symbol': parts[off],
+            'last': num(parts[off + 1]),
+            'turnover24h': num(parts[-1]),
             'fundingRate': 0.0,  # bybit-cli tickers не показывает funding, берём из REST
         }
     except Exception as e:
@@ -397,8 +411,11 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     ab_group = None
     gate_details = None
     try:
-        from .ab_test import assign_group as _assign_group
-        ab_group = _assign_group(signal_id)
+        from .ab_test import assign_variant as _assign_variant
+        # Группа назначается здесь и переиспользуется при записи сделки: раньше
+        # звали несуществующий assign_group → ImportError глотался except'ом ниже,
+        # и ML-гейт не работал вообще ни на одном сигнале.
+        ab_group = _assign_variant(sym, 'Buy', total)
 
         if ab_group == 'A':
             # Группа A: ML Gate работает как обычно (RF + опционально DSPy)
@@ -435,7 +452,9 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
                 ml_info_extra = ''
         # else: группа B — пропускаем без ML Gate (ml_passed уже True)
     except Exception as e:
-        log_event(f'⚠️ ml_gate({sym}): {e}')  # модель недоступна → полагаемся на эвристику
+        # Тип исключения в логе обязателен: ImportError тут глотал весь ML-гейт
+        # молча — в логе было «cannot import name», но никто не читал.
+        log_event(f'⚠️ ml_gate({sym}): {type(e).__name__}: {e}')
 
     if not ml_passed:
         # Логируем причину блокировки — какой гейт не прошёл
@@ -776,10 +795,24 @@ def auto_entry_scan(positions):
 
             # ── Orderbook imbalance filter (27.06) ──
             try:
-                from .orderbook_filter import should_enter_by_imbalance
-                ob_ok, ob_reason = should_enter_by_imbalance(sym, 'Buy')
+                from .orderbook_filter import (
+                    get_orderbook_imbalance,
+                    should_enter_by_imbalance,
+                )
+                ob_ok, ob_reason = should_enter_by_imbalance(sym, 'Buy', regime_name)
                 if not ob_ok:
                     log_event(f'📊 OB BLOCK {sym}: {ob_reason}')
+                    # Контрфакт: фильтр требует перевеса покупателей, а на падающем
+                    # рынке стакан 0.48-0.50 режет ВСЕ лонги. Без этих записей не
+                    # ответить, спасает фильтр или душит — данные копятся в
+                    # counterfactual_entries, порог не трогаем до цифр.
+                    try:
+                        from .state_db import db as _sdb
+                        _sdb.log_counterfactual(sym, 'Buy', s['score'], s['bb_pos'],
+                                                s['cur'], get_orderbook_imbalance(sym),
+                                                f'ob:{ob_reason}')
+                    except Exception:
+                        pass
                     continue
             except Exception:
                 pass  # фильтр недоступен → не блокируем
@@ -797,8 +830,11 @@ def auto_entry_scan(positions):
             # ── Фаза 6.8: Cross-model entry judge (Nemotron) ──
             try:
                 from .entry_judge import should_enter as judge_should_enter
-                # SL ещё не установлен на этапе входа — используем BB lower как ориентир
-                _est_sl = bb2.get('lower', 0) * 0.95 if bb2.get('lower', 0) > 0 else None
+                # Ориентир SL для судьи: auto_sl ставит LONG-SL от mark*0.95, а не
+                # от BB lower. Лимитка стоит на 10-12% ниже BB lower (дисконт входа),
+                # поэтому прежний _est_sl = lower*0.95 оказывался ВЫШЕ цены входа —
+                # судья справедливо блокировал 100% лонгов «SL не с той стороны».
+                _est_sl = round(price * 0.95, 8)
                 can_enter, judge_reason = judge_should_enter(
                     symbol=sym, side='Buy', score=s['score'],
                     bb_pos=s['bb_pos'], entry_price=price,

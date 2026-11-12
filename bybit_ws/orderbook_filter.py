@@ -9,6 +9,12 @@ import time
 
 IMBALANCE_LONG_THRESHOLD = 0.55
 IMBALANCE_SHORT_THRESHOLD = 0.45
+# LONG в даунтренде — это вход в перепроданность, а стакан там sell-heavy по
+# определению (живой замер 12.11: 12 из 12 кандидатов 0.29-0.55, медиана 0.49).
+# Порог 0.55 в этом режиме режет 100% сигналов, т.е. работает не фильтром, а
+# запретом на лонги. ponytail: порог — калибровочный винт; цифры по отсечённым
+# сигналам копятся в counterfactual_entries, по ним и подкручивать.
+IMBALANCE_LONG_THRESHOLD_DOWNTREND = 0.45
 IMBALANCE_DEPTH_PCT = 0.005  # ±0.5% от mid
 ORDERBOOK_DEPTH = 50  # уровней стакана
 
@@ -62,12 +68,13 @@ def get_orderbook_imbalance(symbol: str) -> float | None:
         return None
 
 
-def should_enter_by_imbalance(symbol: str, side: str) -> tuple[bool, str]:
+def should_enter_by_imbalance(symbol: str, side: str, regime: str = '') -> tuple[bool, str]:
     """Проверить, стоит ли входить по стакану.
 
     Args:
         symbol: тикер
         side: 'Buy' (LONG) или 'Sell' (SHORT)
+        regime: режим рынка (TRENDING_DOWN и т.п.) — в даунтренде порог LONG мягче
 
     Returns:
         (can_enter: bool, reason: str)
@@ -77,10 +84,13 @@ def should_enter_by_imbalance(symbol: str, side: str) -> tuple[bool, str]:
         # API недоступен — пропускаем (не блокируем вход)
         return True, "imbalance: no data (pass)"
 
-    if side == 'Buy' and imbalance < IMBALANCE_LONG_THRESHOLD:
+    long_thr = (IMBALANCE_LONG_THRESHOLD_DOWNTREND if regime.startswith('TRENDING_DOWN')
+                else IMBALANCE_LONG_THRESHOLD)
+
+    if side == 'Buy' and imbalance < long_thr:
         return False, (
-            f"imbalance: {imbalance:.2f} < {IMBALANCE_LONG_THRESHOLD} "
-            f"(sell pressure — skip LONG)"
+            f"imbalance: {imbalance:.2f} < {long_thr} "
+            f"(sell pressure — skip LONG{', ' + regime if regime else ''})"
         )
     elif side == 'Sell' and imbalance > IMBALANCE_SHORT_THRESHOLD:
         return False, (
