@@ -117,7 +117,6 @@ Entry: ${entry_price:.4f}
 Score: {score}/50 (BB position: {bb_pos:.0f}%)
 BB: lower=${bb_lower:.4f} upper=${bb_upper:.4f}
 Funding: {funding_rate*100:.4f}%
-Regime: {regime}
 {mtf_info}
 {band_gap}
 Analyze this trading signal. Is this a reasonable entry?
