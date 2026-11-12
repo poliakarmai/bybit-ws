@@ -39,8 +39,8 @@ _BACKTEST_LOCK = threading.Lock()
 
 # ── RPC helpers ──────────────────────────────────────────────────────────────
 
-RPC_PORT = 8766
-RPC_BASE = f"http://127.0.0.1:{RPC_PORT}"
+RPC_PORT = int(os.getenv("BYBIT_RPC_PORT", "8766"))
+RPC_BASE = os.getenv("BYBIT_RPC_URL", f"http://127.0.0.1:{RPC_PORT}")
 
 # Auth token: get from state.db KV store (same as rpc.py _get_auth_token)
 STATE_DB_PATH = os.path.expanduser('~/.local/share/bybit-ws/state.db')
@@ -186,7 +186,7 @@ def _fmt_candidates(data: list, mode: str) -> str:
 
 # ── MCP Server ───────────────────────────────────────────────────────────────
 
-app = Server("hermes-tools")
+app = Server("bybit-ws")
 
 
 @app.list_tools()
@@ -744,6 +744,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 async def main():
     async with stdio_server() as (reader, writer):
         await app.run(reader, writer, app.create_initialization_options())
+
+
+def cli() -> None:
+    """Console-script entry point: `bybit-ws-mcp` (stdio MCP-сервер)."""
+    asyncio.run(main())
 
 
 if __name__ == "__main__":

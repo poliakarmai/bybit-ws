@@ -88,12 +88,50 @@ bash deploy.sh                 # атомарный деплой с canary-пр�
 
 ---
 
+## Установка для AI-агентов (MCP)
+
+`bybit-ws` — не библиотека, а движок; MCP-сервер — тонкая обёртка над его RPC.
+Ставится **на машину, где работает движок** (или на машину, которой доступен его RPC).
+
+> ⚠️ Имя `bybit-ws` в PyPI **занято** официальным WS-клиентом Bybit — `pip install bybit-ws`
+> поставит чужой пакет. Ставить из git:
+
+```bash
+pip install "git+https://github.com/poliakarmai/bybit-ws.git"
+```
+
+Подключение (Claude Desktop / Cursor / Codex / Hermes) — запись в `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "bybit-ws": {
+      "command": "bybit-ws-mcp",
+      "env": {
+        "BYBIT_RPC_URL": "http://127.0.0.1:8766",
+        "RPC_TOKEN": "<токен из ~/.config/bybit-ws/env>"
+      }
+    }
+  }
+}
+```
+
+Инструменты: `get_positions`, `get_risk_status`, `scan_market`, `place_entry`, `get_metrics`,
+`get_journal`, `backtest_run`, `validation_report`, `experiment_list`, `vpn_status`.
+
+`place_entry` — реальный ордер. Держи `RPC_TOKEN` в env, не в конфиге MCP-клиента в открытом виде.
+
+Проверка: агент вызывает `get_positions` → позиции с uPnL. Пусто/ошибка подключения —
+сначала подними движок: `systemctl --user start bybit-ws-async`, затем `curl -s 127.0.0.1:8766/health`.
+
+---
+
 ## Возможности
 
 ### 🤖 Авто-трейдинг
 - **Bollinger Grid** LONG/SHORT на дневном таймфрейме
 - **9-метричный скоринг**: BB%, объём, падающие дни, фондинг, волатильность, качество + ML Gate
-- **LSTM-классификатор** рынка (5 классов; 82.3% — заявлено 01.08, не перезамерялось)
+- **LSTM-классификатор** рынка (5 классов) — **не в строю**: `val_accuracy 0.653`, режим залипает (два значения за 22 дня), требует переобучения
 - **Авто-входы** с MTF-подтверждением, orderbook-анализом и Entry Judge (DeepSeek, fail-closed, fail-open только при длительном отказе LLM)
 - **Auto-TP**: ATR-adaptive, 3 ноги `[0.40, 0.35, 0.25]` (% размера), множители ATR по режиму. BB 20% Middle / 80% Upper — fallback, когда ATR недоступен
 - **Unified SL**: 5 механизмов → один приоритетный (tight > simple > hard > BE > default)

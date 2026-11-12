@@ -9,6 +9,16 @@
 
 ## [Unreleased] — 2026-11-12
 
+### Added
+- **Установка как пакет: `pip install git+…` теперь доводит до рабочего MCP.**
+  `pyproject.toml` расходился с `requirements.txt` (не было `filelock/numpy/pandas/aiohttp/…`),
+  `mcp` не был объявлен, `mcp_server.py` не входил в пакет (`py-modules`), а точка входа
+  `bybit-ws = bybit_ws.main:run_cli` вела в удалённый модуль — `python -m bybit_ws` падал
+  с `ModuleNotFoundError`. Теперь: зависимости синхронизированы, `mcp>=1.0,<2` (в 2.x другой API),
+  команда `bybit-ws-mcp`, `bybit_ws/__main__.py` → `main_async.run`, `BYBIT_RPC_URL`/`BYBIT_RPC_PORT`
+  переопределяют адрес RPC, `Server("bybit-ws")` вместо `hermes-tools`.
+  Проверено в чистом venv: установка → 10 инструментов, JSON-RPC `initialize` отвечает.
+
 ### Fixed
 - **Атомарная запись JSON-состояния в 30 модулях.** `open(path, 'w') + json.dump` усекает файл
   до нуля до записи: при `ENOSPC` (диск был забит на 100%) и при параллельном чтении потребитель
