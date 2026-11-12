@@ -479,8 +479,10 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
         # и ML-гейт не работал вообще ни на одном сигнале.
         ab_group = _assign_variant(sym, 'Buy', total)
 
-        if ab_group == 'A':
-            # Группа A: ML Gate работает как обычно (RF + опционально DSPy)
+        if ab_group == 'A' and ML_ENABLED:
+            # Группа A + ML_ENABLED: ML Gate (RF + опционально DSPy).
+            # ML_ENABLED=0 отключает ВЕСЬ ML, включая ML Gate — иначе ab_test
+            # fallback 'A' вызывал ml_gate_pass в обход флага и шумел 'joblib не установлен'.
             from .ml_scorer import DSPY_ENABLED as _dspy_en
             from .ml_scorer import combined_gate, ml_gate_pass
             signal_data = {
