@@ -324,7 +324,28 @@ def _count_down_days(sym: str) -> int:
     return down
 
 def _calc_rsi(sym: str, period: int = 14) -> float:
-    """Compute RSI(14) from daily klines for telemetry. Returns 50 on failure."""
+    """RSI(14) по дневным свечам (телеметрия). 50 при неудаче.
+
+    Свечи берём из WS-кеша — 46 символов × REST давали ~9с на цикл,
+    а кеш уже содержит 100 дневных свечей с прогрева.
+    """
+    try:
+        klines = _ws_kline(sym, 'D')
+        if klines and len(klines) >= period + 1:
+            closes = [k[4] for k in klines][-(period + 1):]
+            gains = losses = 0
+            for i in range(1, len(closes)):
+                diff = closes[i] - closes[i - 1]
+                if diff > 0:
+                    gains += diff
+                else:
+                    losses += abs(diff)
+            if losses == 0:
+                return 100.0
+            rs = gains / losses
+            return round(100 - (100 / (1 + rs)), 1)
+    except Exception as e:
+        log_event(f'⚠️ rsi WS ({sym}): {e}')
     try:
         data = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit={period + 5}')
         if not data or data.get('retCode') != 0:

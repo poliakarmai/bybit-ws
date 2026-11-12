@@ -37,6 +37,15 @@ def test_count_down_days_rest_fallback(monkeypatch):
     assert ae._count_down_days('NOCACHEUSDT') == 3
 
 
+def test_calc_rsi_from_ws_cache(monkeypatch):
+    """RSI считается из WS-кеша и совпадает с REST-формулой."""
+    # 15 свечей: 14 подряд растущих на 1 → RSI = 100
+    up = [[i, 1, 1, 1, 100 + i, 1] for i in range(15)]
+    monkeypatch.setattr(ae, '_ws_kline', lambda sym, interval='D': up)
+    monkeypatch.setattr(ae, 'bybit', lambda *a, **kw: (_ for _ in ()).throw(AssertionError('REST!')))
+    assert ae._calc_rsi('FOOUSDT') == 100.0
+
+
 def test_funding_rate_single_bulk_request(monkeypatch):
     """Один запрос на весь скан: 3 символа → 1 вызов API."""
     calls = []
