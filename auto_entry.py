@@ -655,6 +655,7 @@ def auto_entry_scan(positions):
                 candidates.append((sym, line))
                 break
 
+    _t0 = time.time()
     scored = []
     for sym, ticker_line in candidates:
         bb = _get_bb_ws(sym, 'D')
@@ -687,7 +688,10 @@ def auto_entry_scan(positions):
             scored.append(result)
 
     # ── Фаза 4.3.1: Multi-TF конфлюенс-фильтр ──
+    _t1 = time.time()
     scored = _filter_by_mtf_confluence(scored, 'LONG')
+    log_event(f'⏱ scan timings: score={_t1 - _t0:.1f}s confluence={time.time() - _t1:.1f}s'
+              f' ({len(candidates)} симв)')
 
     scored.sort(key=lambda x: x['score'], reverse=True)
 
