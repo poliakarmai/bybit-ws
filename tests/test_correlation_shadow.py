@@ -156,3 +156,22 @@ def test_margin_for_strategy_wires_shadow(monkeypatch):
     margin = ps.margin_for_strategy('long', score=5.5, symbol='ADAUSDT')
     assert margin > 0
     assert calls and calls[0][0] == 'ADAUSDT' and calls[0][1] == margin
+
+
+def test_check_correlation_single_position_refreshes_snapshot(monkeypatch, tmp_path):
+    """<2 позиций → ранний return, но snapshot обязан перезаписаться.
+
+    Раньше check_correlation при <2 позиций возвращался без записи файла —
+    mtime протухал, и shadow-чек каждый цикл логировал «данные протухли».
+    """
+    from bybit_ws import correlation
+
+    snap = tmp_path / 'correlation.json'
+    monkeypatch.setattr(correlation, 'CORRELATION_SNAPSHOT', str(snap))
+
+    result = correlation.check_correlation({'LTCUSDT': {'side': 'Buy'}})
+
+    assert result['position_count'] == 1
+    assert snap.exists()
+    assert time.time() - snap.stat().st_mtime < 5
+

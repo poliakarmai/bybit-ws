@@ -20,6 +20,22 @@ CORRELATION_THRESHOLD = 0.80
 MIN_CANDLES = 12  # minimum overlapping candles for valid correlation
 
 
+def _save_snapshot(result: dict) -> None:
+    """Atomic write of the correlation snapshot.
+
+    Must run on EVERY path (incl. <2 positions), otherwise the mtime goes stale
+    and staleness checks (position_sizing/risk_manager) report 'данные протухли'.
+    """
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = CORRELATION_SNAPSHOT + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(result, f, indent=2, default=str)
+        os.replace(tmp, CORRELATION_SNAPSHOT)
+    except OSError:
+        pass
+
+
 def fetch_klines(symbol, interval='60', limit=24):
     """Fetch kline close prices for a symbol.
 
@@ -128,13 +144,15 @@ def check_correlation(positions):
             - 'position_count': number of symbols analyzed
     """
     if not positions or len(positions) < 2:
-        return {
+        result = {
             'pairs': [],
             'flagged': [],
             'messages': [],
             'timestamp': datetime.now(UTC).isoformat(),
             'position_count': len(positions) if positions else 0,
         }
+        _save_snapshot(result)
+        return result
 
     symbols = list(positions.keys())
 
@@ -146,7 +164,7 @@ def check_correlation(positions):
             prices[sym] = closes
 
     if len(prices) < 2:
-        return {
+        result = {
             'pairs': [],
             'flagged': [],
             'messages': [],
@@ -154,6 +172,8 @@ def check_correlation(positions):
             'position_count': len(positions),
             'symbols_fetched': len(prices),
         }
+        _save_snapshot(result)
+        return result
 
     # Compute correlations for all pairs
     syms = sorted(prices.keys())
@@ -262,14 +282,7 @@ def check_correlation(positions):
         'threshold': CORRELATION_THRESHOLD,
     }
 
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        tmp = CORRELATION_SNAPSHOT + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(result, f, indent=2, default=str)
-        os.replace(tmp, CORRELATION_SNAPSHOT)
-    except OSError:
-        pass
+    _save_snapshot(result)
 
     return result
 
