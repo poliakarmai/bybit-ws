@@ -421,7 +421,7 @@ def check_weekly_pumps(positions=None):
             import urllib.request as _urllib
             kdata = json.loads(_urllib.urlopen(
                 f'https://api.bybit.com/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=8',
-                timeout=5
+                timeout=3
             ).read())
             closes = [float(c[4]) for c in kdata['result']['list']]
             if len(closes) < 8:
@@ -432,7 +432,7 @@ def check_weekly_pumps(positions=None):
             return sym, None
 
     pump_candidates = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {executor.submit(_fetch_kline, sym): sym for sym, _, _ in candidates}
         for future in as_completed(futures, timeout=15):
             try:
