@@ -7,7 +7,7 @@
 
 ---
 
-## [Unreleased] — 2026-10-28
+## [Unreleased] — 2026-11-12
 
 ### Fixed
 - **Атомарная запись JSON-состояния в 30 модулях.** `open(path, 'w') + json.dump` усекает файл
@@ -18,10 +18,24 @@
   Уже-атомарные места (`tmp` + `os.replace`) не тронуты.
 - Правило зафиксировано в `AGENTS.md`: JSON-состояние в живом контуре пишется только через
   `safe_json_write`.
+- **Hedge positionIdx**: LONG для hedge-символов (LINK/ARB/ENA/DOGE/ADA) идёт с `positionIdx=1`;
+  `_resolve_long_idx()` берёт индекс из `position/list`, а не из устаревшего кэша `_HEDGE_SYMS`
+  (17 ошибок `10001 positionIdx not match`/день).
+- **Entry Judge**: убран `Regime` из prompt — судья резал все LONG по залипшему `TRENDING_DOWN`
+  (код-гейт уже фильтрует режим, дублирование в LLM давало ложный `revise`).
+- **check_weekly_pumps**: 20 воркеров + `urlopen timeout 3s` — fetch укладывается в бюджет цикла.
+- **ML_ENABLED = master-switch**: `BYBIT_ML_ENABLED=0` теперь гейтит и ML Gate, а не только
+  ensemble — иначе ab_test fallback `'A'` вызывал `ml_gate_pass` в обход флага и шумел
+  `joblib не установлен` каждый первый цикл процесса.
+- **correlation.json**: snapshot пишется во всех ветках `check_correlation` (включая `<2` позиций),
+  иначе mtime протухал и shadow-чек вечно логировал `данные протухли` / `Cluster risk: stale snapshot`.
 
 ### Added
 - `tests/test_regime_cache_atomic.py` — контроль чувствительности (старый truncating-write
   ловится читателем) + отсутствие частичных чтений при атомарной записи.
+- `tests/test_auto_entry_hedge_idx.py`, `tests/test_entry_judge_regime.py`,
+  `tests/test_ml_gate_flag.py`, `test_check_correlation_single_position_refreshes_snapshot`
+  (в `tests/test_correlation_shadow.py`) — регрессы на все пять фиксов цикла 12.11.
 
 ### Docs
 - Живые числа (сделки, PnL, комиссии, счётчики тестов) убраны из `AGENTS.md`/`README.md`:
