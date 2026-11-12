@@ -606,6 +606,25 @@ def apply_entry_leverage(sym, side='Buy'):
     return lev
 
 
+def _resolve_long_idx(pos_data, sym: str) -> int:
+    """positionIdx для LONG-входа по ответу position/list (уже запрошенному).
+
+    hedge-режим определяется по НАЛИЧИЮ записи positionIdx 1/2 в ответе — они есть
+    даже при size=0. Символ без позиции в hedge-режиме иначе получает idx=0 и
+    Bybit отвечает 10001 «position idx not match position mode» (LINK/ARB/ENA/…).
+    """
+    if not (pos_data and pos_data.get('retCode') == 0):
+        return position_idx(sym, 'Buy')
+    plist = pos_data['result'].get('list', [])
+    if {int(p.get('positionIdx', 0)) for p in plist} & {1, 2}:
+        learn_position_idx(sym, 1)
+        return 1  # LONG (Buy) в hedge-режиме = positionIdx 1
+    for p in plist:
+        if float(p.get('size', 0)) > 0:
+            return int(p.get('positionIdx', 0))
+    return position_idx(sym, 'Buy')
+
+
 def auto_entry_scan(positions):
     """Скрининг и авто-вход по 9-метричному скорингу (v4.0 + LSTM-режим 5.4)."""
     entries = []
@@ -795,12 +814,7 @@ def auto_entry_scan(positions):
                     continue
 
             pos_data = bybit('GET', f'/v5/position/list?category=linear&settleCoin=USDT&symbol={sym}')
-            idx = position_idx(sym, 'Buy')
-            if pos_data and pos_data.get('retCode') == 0:
-                for p in pos_data['result'].get('list', []):
-                    if float(p.get('size', 0)) > 0:
-                        idx = int(p.get('positionIdx', 0))
-                        break
+            idx = _resolve_long_idx(pos_data, sym)
 
             # ── Фаза 5.6: Ансамбль RF+LSTM+RL — стоит ли входить? ──
             ensemble_decision = None
