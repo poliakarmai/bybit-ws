@@ -29,8 +29,22 @@
   `joblib не установлен` каждый первый цикл процесса.
 - **correlation.json**: snapshot пишется во всех ветках `check_correlation` (включая `<2` позиций),
   иначе mtime протухал и shadow-чек вечно логировал `данные протухли` / `Cluster risk: stale snapshot`.
+- **Наблюдаемость: `trade_history.strategy` больше не константа.** При импорте закрытых PnL
+  с биржи писалось `strategy='auto'` для всех (203 auto-сделки за 30 дней под одним ярлыком —
+  разрез по механизмам был невозможен). Новый `manual_positions.strategy_by_link()` берёт имя
+  из префикса `orderLinkId` ордера, которым ОТКРЫТА позиция (`ae_`→auto_entry, `as_`→auto_short,
+  `re_`→reentry, `dca_`→dca, `bb_`→scalp, `mr_`→mean_revert, `fe_`→funding, `pd_`→pump),
+  иначе `'unknown'`. Набор префиксов сверяется с `AUTO_LINK_PREFIXES` тестом на равенство
+  множеств — два списка не разъедутся. История не переписывается: `external_id` = `orderId`
+  (UUID биржи), не `orderLinkId`, бэкфилл невозможен.
+- **`exit_reason`: `'Unknown'` разделён на `NO_LEVELS` / `NO_MATCH`.** Один ярлык покрывал два
+  разных случая (уровней SL/TP не было вовсе / уровни были, цена разошлась), из-за чего
+  18 сделок и −$219 за 30 дней не поддавались разбору. Теперь причина видна и в БД, и строкой
+  `❔ выход NO_*` в `events.log` (exit/sl/tp/hold). Старые строки остаются `'Unknown'`.
 
 ### Added
+- `tests/test_strategy_attribution.py` — равенство таблиц префиксов + 8 известных/5 неизвестных
+  link'ов; `tests/test_exit_reason_and_diag.py` обновлён под новый контракт (+2 кейса).
 - `tests/test_regime_cache_atomic.py` — контроль чувствительности (старый truncating-write
   ловится читателем) + отсутствие частичных чтений при атомарной записи.
 - `tests/test_auto_entry_hedge_idx.py`, `tests/test_entry_judge_regime.py`,
