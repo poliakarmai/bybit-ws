@@ -100,7 +100,9 @@ def check_profit_triggers(positions):
     alerts = []
     triggered = load_json(PROFIT_TRIGGERS_FILE)
     for sym, p in positions.items():
-        entry, mark = p['entry'], p['mark']
+        entry, mark = p.get('entry') or 0, p.get('mark') or 0
+        if not entry:
+            continue  # заглушка из _note_entry (size=0, entry=0) — не позиция
         pnl_pct = (mark - entry) / entry * 100
         if pnl_pct <= 0:
             continue
