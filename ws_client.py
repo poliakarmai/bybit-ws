@@ -300,6 +300,45 @@ def _on_close_public(ws, close_status_code, close_msg):
     log_event(f'🔌 WS public closed: {close_status_code} {close_msg}')
 
 
+def _warmup_klines(symbols):
+    """Залить историю свечей в кеш сразу после подписки.
+
+    Bybit kline-стрим отдаёт снапшот из ОДНОЙ свечи (проверено 12.11: kline.D.BTCUSDT
+    snapshot → 1 candle), а _calc_bb() требует 20. Без прогрева _bb_cache остаётся
+    пустым, _get_bb_ws() навсегда уходит в REST, и подписка на kline — мёртвый груз:
+    скан тратил по REST-запросу на каждый символ в каждом цикле.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .api import bybit
+
+    def _one(sym):
+        for interval in ('D', 'W'):
+            try:
+                r = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}'
+                                 f'&interval={interval}&limit={KLINE_LIMIT}')
+                if not r or r.get('retCode') != 0:
+                    continue
+                rows = [[int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])]
+                        for c in r['result']['list']]
+                rows.sort(key=lambda x: x[0])
+                with _cache_lock:
+                    _kline_cache.setdefault(sym, {})[interval] = rows[-KLINE_LIMIT:]
+                    bb = _calc_bb([k[4] for k in _kline_cache[sym][interval]])
+                    if bb:
+                        _bb_cache.setdefault(sym, {})[interval] = bb
+            except Exception as e:  # один битый символ не валит прогрев остальных
+                log_event(f'⚠️ WS warmup {sym}/{interval}: {e}')
+                continue
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(_one, symbols))
+        log_event(f'🔥 WS kline warmup: {len(_bb_cache)} символов в BB-кеше')
+    except Exception as e:
+        log_event(f'⚠️ WS kline warmup: {e}')
+
+
 def _on_open_public(ws):
     global _connected
     log_event('🔌 WS public connected to Bybit' if not _WS_FULL_ENABLED
@@ -326,6 +365,9 @@ def _on_open_public(ws):
     with _cache_lock:
         _connected = True
         _subscribed_symbols.update(symbols)
+
+    # Прогрев истории — в отдельном потоке, чтобы не блокировать приём сообщений.
+    threading.Thread(target=_warmup_klines, args=(symbols,), daemon=True).start()
 
 
 # ═══════════════════════════════════════════════════════════
