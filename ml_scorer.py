@@ -16,7 +16,12 @@ import sqlite3
 import sys
 from pathlib import Path
 
-import joblib
+try:
+    import joblib
+    ML_DEPS_OK = True
+except ImportError:  # сервис крутится на системном python без ML-стека
+    joblib = None
+    ML_DEPS_OK = False
 import numpy as np
 
 try:
@@ -28,6 +33,7 @@ DB_PATH = Path.home() / ".local" / "share" / "gridsignal-bot" / "users.db"
 MODEL_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_scorer.pkl"
 FEATURES_PATH = Path.home() / ".local" / "share" / "bybit-ws" / "ml_features.json"
 _FALLBACK_KEY = 'bybit-ws-model-integrity-dev'
+_ML_DEPS_WARNED = False
 _HMAC_RAW = os.getenv('BYBIT_HMAC_SECRET')
 if not _HMAC_RAW:
     if os.getenv('BYBIT_WS_PRODUCTION') == '1':
@@ -214,6 +220,14 @@ def predict(signal_data: dict) -> float | None:
     Возвращает ML-вес от 0 до 1, или None если модель не обучена.
     """
     if not MODEL_PATH.exists():
+        return None
+    if not ML_DEPS_OK:
+        # Один раз на процесс, а не на каждый символ: гейт недоступен штатно
+        # (в requirements нет scikit-learn/joblib) и работает fail-open.
+        global _ML_DEPS_WARNED
+        if not _ML_DEPS_WARNED:
+            _ML_DEPS_WARNED = True
+            print('[ML] joblib не установлен — ML-гейт отключён (fail-open)', file=sys.stderr, flush=True)
         return None
 
     try:
