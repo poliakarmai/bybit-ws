@@ -606,6 +606,12 @@ def get_cached_world_prediction(symbol: str, force_refresh: bool = False):
     if not force_refresh and symbol in _world_cache and _world_cache_ts.get(symbol, 0) > now - _CACHE_TTL:
         return _world_cache[symbol]
 
+    # Предсказание считается ПАЧКОЙ на _WORLD_CACHE_SYMBOLS, значит и свежесть общая:
+    # символ вне этого списка иначе пересчитывал все 13 через torch каждый вызов
+    # (замер 12.11: 40с из 120с heavy cycle уходило на это в каждом проходе).
+    if not force_refresh and _world_cache_ts and now - max(_world_cache_ts.values()) < _CACHE_TTL:
+        return _world_cache.get(symbol)
+
     try:
         model, scaler_params = _ensure_world_model()
     except Exception:
