@@ -104,3 +104,33 @@ def test_single_flight_skips_when_busy(monkeypatch):
     assert ma._auto_entry_single_flight({}) == [{'sym': 'BTCUSDT'}]
     assert calls == [{}]
     assert ma._ENTRY_SCAN_BUSY is False
+
+
+def test_open_entry_symbols_only_live_entry_limits(ae, monkeypatch, tmp_path):
+    """Гард от дублей: в множестве только живые лимитки на вход.
+
+    Прецедент 12.11: XRPUSDT получил две лимитки (0.9069 и 0.9078) в разных
+    циклах — позиции ещё нет, проверка «позиция уже есть» не срабатывала.
+    """
+    import json
+
+    import bybit_ws
+
+    snap = {
+        'XRPUSDT_a': {'symbol': 'XRPUSDT', 'status': 'New', 'kind': 'LIMIT_ENTRY'},
+        'SUIUSDT_b': {'symbol': 'SUIUSDT', 'status': 'PartiallyFilled', 'kind': 'OTHER'},
+        'LTCUSDT_c': {'symbol': 'LTCUSDT', 'status': 'New', 'kind': 'TP'},
+        'GRAMUSDT_d': {'symbol': 'GRAMUSDT', 'status': 'Filled', 'kind': 'LIMIT_ENTRY'},
+    }
+    p = tmp_path / 'orders.json'
+    p.write_text(json.dumps(snap))
+    monkeypatch.setattr(bybit_ws, 'ORDERS_SNAPSHOT', str(p))
+
+    assert ae._open_entry_symbols() == {'XRPUSDT', 'SUIUSDT'}
+
+
+def test_open_entry_symbols_missing_file_is_empty(ae, monkeypatch, tmp_path):
+    """Нет снапшота — не блокируем вход (fail-open), но и не падаем."""
+    import bybit_ws
+    monkeypatch.setattr(bybit_ws, 'ORDERS_SNAPSHOT', str(tmp_path / 'nope.json'))
+    assert ae._open_entry_symbols() == set()

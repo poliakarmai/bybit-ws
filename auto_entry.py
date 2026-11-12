@@ -261,6 +261,20 @@ def _parse_ticker_line(line: str) -> dict:
         return {}
 
 
+def _open_entry_symbols() -> set:
+    """Символы с уже висящей лимиткой на вход (снапшот orders.json)."""
+    try:
+        from . import ORDERS_SNAPSHOT
+        from .snapshot import load_json
+        snap = load_json(ORDERS_SNAPSHOT) or {}
+        return {o['symbol'] for o in snap.values()
+                if o.get('symbol')
+                and o.get('status') in ('New', 'PartiallyFilled')
+                and o.get('kind') in ('LIMIT_ENTRY', 'OTHER')}
+    except Exception:
+        return set()
+
+
 def _count_down_days(sym: str) -> int:
     """Считает количество последовательных дней падения."""
     try:
@@ -667,6 +681,14 @@ def auto_entry_scan(positions):
             from .symbol_blacklist import is_blacklisted as _is_blacklisted
             if _is_blacklisted(sym):
                 log_event(f'🚫 auto_entry: {sym} в blacklist — пропускаю')
+                continue
+
+            # Уже висит лимитка на вход по этому символу — вторую не ставим.
+            # Прецедент 12.11: XRPUSDT получил два ордера (0.9069 и 0.9078) в
+            # разных циклах, позиции-то ещё нет, и «позиция уже есть» не сработало —
+            # лимитки удваивали экспозицию по символу.
+            if sym in _open_entry_symbols():
+                log_event(f'⏭️ auto_entry: {sym} — уже висит лимитка на вход, пропускаю')
                 continue
 
             # Маржа от score с учётом агрессии режима (Фаза 5.4)
