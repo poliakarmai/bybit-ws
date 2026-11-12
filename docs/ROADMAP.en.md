@@ -2,8 +2,9 @@
 
 **English** · [Русский](ROADMAP.md)
 
-> Development plan. Version: 11.5.x. Updated: 2026-10-31 (Phase 11.2 closed for P0; 31.10 — two incidents on live data, see §31.10; documentation checked against the code — `docs/INDEX.md`).
-> The current roadmap is also available in Obsidian: `bybit-ws/short-analysis-2026-10-19.md` and `bybit-ws/docs-audit-lena-2026-10-19.md` (`hermes/bybit-ws-roadmap.md` is absent).
+> Development plan. Version: 11.5.x. Updated: **2026-11-12** (checked against code and the live DB:
+> LSTM regression, REGIME gate, ms-P0 closed, test count, RPC route count).
+> **Live backlog tracker — `ROADMAP.md` in the repo root** (score 8/10, T3/T4). This file — phases 8–13.
 
 ## Current status (v11.5.x)
 
