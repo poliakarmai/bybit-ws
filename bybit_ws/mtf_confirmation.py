@@ -17,6 +17,7 @@ from .api import bybit
 # Конфигурация
 CONFLUENCE_MIN_TFS = 2       # минимум ТФ для одобрения (2/3)
 TF_LIST: tuple[str, ...] = ('D', 'W', 'M')
+_TTL = {'D': 300.0, 'W': 3600.0, 'M': 3600.0}  # W/M меняются раз в неделю/месяц
 TF_LABELS = {'D': 'day', 'W': 'week', 'M': 'month'}
 
 
@@ -103,7 +104,9 @@ def check_confluence(symbol: str, direction: str = 'LONG') -> dict | None:
 
     from .candle_cache import get_candles as _get_candles_cached
     for tf in TF_LIST:
-        candles = _get_candles_cached(symbol, tf, _fetch_candles, ttl=300)
+        # D обновляем каждые 5 мин, W/M — раз в час: недельная свеча не меняется
+        # внутри цикла, а рефетч 3 ТФ × 46 символов стоил ~40с на проход.
+        candles = _get_candles_cached(symbol, tf, _fetch_candles, ttl=_TTL[tf])
         if not candles or len(candles) < 20:
             tf_results[tf] = None
             continue
