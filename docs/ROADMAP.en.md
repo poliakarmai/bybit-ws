@@ -14,9 +14,9 @@
 | Android: server side (JWT + /set-tp + /generate-jwt) | ✅ prod |
 | ATR-adaptive SL + ATR-based TP (3 levels) | ✅ prod |
 | 7 entry filters (MTF, Orderbook, Volume, Entry Judge, Correlation, Post-trade, Risk) | ✅ prod |
-| LSTM Market Regime (5 regimes, automatic LONG/SHORT; 82.3% — reported on 01.08, not remeasured) | ✅ prod |
+| LSTM Market Regime (5 regimes; **dead**: `val_accuracy 0.653` in `models/lstm_regime_features.json`, only two values in 22 days `TRENDING_DOWN 41/42%` — stuck output; see `ROADMAP.md`) | ⚠️ needs retraining |
 | LSTM World Model (multi-task OHLCV, entry scoring) | ✅ prod |
-| REGIME_AUTO: block entries by market regime | ✅ prod |
+| REGIME_AUTO: regime gate (since 20.10 LONG is NOT blocked; `RANGING`/`CHOPPY` close both sides; threshold `BYBIT_REGIME_MIN_CONFIDENCE=60` with live conf <=42% = gate disabled) | ✅ prod (effectively neutral) |
 | Adaptive TP/SL by LSTM regime (v9) | ✅ prod |
 | Self-learning (event-driven: ≥10 trades and ≥6h since the previous run, otherwise fallback after 24h) | ✅ prod |
 | Anti-ludomania: 3 losses/hour → 30-minute block | ✅ prod |
@@ -27,10 +27,10 @@
 | Paper Trading (historical backtest) | ✅ prod |
 | Web dashboard (SVG + HTML/Chart.js) | ✅ prod |
 | MCP tools (10) | ✅ prod |
-| RPC REST API (~44 GET+POST routes, see `docs/API.md`) | ✅ prod |
+| RPC REST API (51 path handlers GET+POST, see `docs/API.md`) | ✅ prod |
 | One-click trading through Hermes chat | ✅ prod |
 | Alerts (ntfy + Telegram) | ✅ prod |
-| Tests (52 checks in `test_smoke.py`; `pytest` — test count from the run output: `python3 -m pytest -q`) | ✅ prod |
+| Tests: 52 checks in `test_smoke.py` + **577** in `tests/` (`python3 -m pytest -q`, 12.11); CI runs only 5 scripts — full suite is outside the gate (T4 in `ROADMAP.md`) | ✅ prod |
 
 ## Roadmap
 
@@ -52,7 +52,7 @@
 | World Model in LONG + SHORT scoring | ✅ |
 | Fix exit_reason (SL/TP based on price movement) | ✅ |
 | Anti-ludomania (3 losses → block) | ✅ |
-| REGIME_AUTO: LSTM blocks entries | ✅ |
+| REGIME_AUTO: LSTM regime gate (LONG unblocked since 20.10) | ✅ |
 | Adaptive TP/SL by regime (v9) | ✅ |
 | BlackSwan v2 (alert only, no auto-close) | ✅ |
 | MTF gap closed (block without D-TF data) | ✅ |
@@ -540,7 +540,7 @@ then SL −$40.19 / −$25.06 / −$23.94); there is no sample for 10x strategie
 
 | # | Work | Done when | Status |
 |---|--------|--------|--------|
-| 1 | 🔴 **P0: position lifetime is calculated in seconds, while `openTime` arrives in milliseconds** — `bybit_ws/time_exit.py:53` and `auto_short.py:980` do not divide by 1000 (`partial_tp.py:156` does it correctly nearby). Consequence: `age_hours ≈ −496 000`, both time exits are dead code. Proof: `TIME_EXIT_MAX_HOURS = 24`, while the ZEC position lived 80.6h | fix normalizes ms→s before calculation; test “openTime in ms → hours calculated correctly” fails before the fix and passes after; `TIME EXIT` / `⏱ TIME-SL SHORT` appears in the log; before enabling, measure which of the 6 live positions will exit in the first cycle | ⬜ |
+| 1 | ✅ **P0: position age in ms** — both time exits were dead code. Fixed: `time_exit.normalize_open_ts()` (ms→s) is applied in `time_exit.py:37,71` and `auto_short.py:936,955,1013`; tests `tests/test_time_exit_ms.py` (8 passed). | done | ✅ 12.11 |
 | 2 | ✅ **Report on 10x strategies** — `docs/REPORT-10x.md`: 8 trades (16–17.06), +$3.87, TP/SL 4/4, liquidations 0, leverage and hold = NULL (telemetry appeared later). Conclusion: no sample, PF cannot be calculated | done | ✅ 31.10 |
 
 **Why P0 was not done immediately:** the fix changes live behavior — the bot will start closing

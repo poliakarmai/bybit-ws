@@ -2,7 +2,9 @@
 
 **Русский** · [English](ROADMAP.en.md)
 
-> План развития. Версия: 11.5.x. Обновлено: 2026-10-31 (Фаза 11.2 закрыта по P0; 31.10 — два инцидента на живых данных, см. §31.10; документация сверена с кодом — `docs/INDEX.md`).
+> План развития. Версия: 11.5.x. Обновлено: **2026-11-12** (сверено с кодом и живой БД:
+> LSTM-регресс, REGIME-гейт, P0 по ms закрыт, счёт тестов, число RPC-маршрутов).
+> **Живой трекер остатка — `ROADMAP.md` в корне** (оценка 8/10, T3/T4). Этот файл — история фаз 8–13.
 > Актуальный roadmap также в Obsidian: `bybit-ws/short-analysis-2026-10-19.md` и `bybit-ws/docs-audit-lena-2026-10-19.md` (`hermes/bybit-ws-roadmap.md` отсутствует).
 
 ## Текущий статус (v11.5.x)
@@ -14,9 +16,9 @@
 | Android: серверная часть (JWT + /set-tp + /generate-jwt) | ✅ prod |
 | ATR-adaptive SL + ATR-based TP (3 уровня) | ✅ prod |
 | 7 фильтров входа (MTF, Orderbook, Volume, Entry Judge, Correlation, Post-trade, Risk) | ✅ prod |
-| LSTM Market Regime (5 режимов, авто LONG/SHORT; 82.3% — заявлено 01.08, не перезамерялось) | ✅ prod |
+| LSTM Market Regime (5 режимов; **мёртв**: `val_accuracy 0.653` в `models/lstm_regime_features.json`, за 22 дня два значения `TRENDING_DOWN 41/42%` — залипание; см. `ROADMAP.md`) | ⚠️ требует переобучения |
 | LSTM World Model (multi-task OHLCV, entry scoring) | ✅ prod |
-| REGIME_AUTO: блокировка входов по режиму рынка | ✅ prod |
+| REGIME_AUTO: гейт по режиму (с 20.10 LONG больше НЕ блокируется; `RANGING`/`CHOPPY` закрывают обе стороны; порог `BYBIT_REGIME_MIN_CONFIDENCE=60` при живом conf ≤42% = гейт выключен) | ✅ prod (фактически нейтрален) |
 | Адаптивный TP/SL по LSTM-режиму (v9) | ✅ prod |
 | Self-learning (event-driven: ≥10 сделок и ≥6ч с прошлого прогона, иначе fallback через 24ч) | ✅ prod |
 | Anti-ludomania: 3 убытка/час → блок 30 мин | ✅ prod |
@@ -27,10 +29,10 @@
 | Paper Trading (исторический бэктест) | ✅ prod |
 | Веб-дашборд (SVG + HTML/Chart.js) | ✅ prod |
 | MCP-инструменты (10 шт.) | ✅ prod |
-| RPC REST API (~44 маршрута GET+POST, см. `docs/API.md`) | ✅ prod |
+| RPC REST API (51 обработчик пути GET+POST, см. `docs/API.md`) | ✅ prod |
 | One-click trading через Hermes-чат | ✅ prod |
 | Алерты (ntfy + Telegram) | ✅ prod |
-| Тесты (52 проверки в `test_smoke.py`; `pytest` — число тестов из вывода прогона: `python3 -m pytest -q`) | ✅ prod |
+| Тесты: 52 проверки в `test_smoke.py` + **577** в `tests/` (`python3 -m pytest -q`, 12.11); в CI гоняется только 5 скриптов — полный сьют вне гейта (T4 в `ROADMAP.md`) | ✅ prod |
 
 ## Дорожная карта
 
@@ -455,8 +457,8 @@ SL по паре → пауза этой пары 4ч. Точка гейта —
 
 | # | Задача | Статус |
 |---|--------|--------|
-| 9 | Единый execution-контур (OrderIntent → RiskDecision → Executor → OrderRepository) — рефакторинг на недели, трогает live, только после P0 и прогона на paper | ⬜ |
-| 10 | CI: добавить lint/типы к текущим py_compile + smoke + modules + logic + regression | ⬜ |
+| 9 | Единый execution-контур (OrderIntent → RiskDecision → Executor → OrderRepository) — рефакторинг на недели, трогает live, только после P0 и прогона на paper | ⬜ → T3 в `ROADMAP.md` |
+| 10 | CI: добавить lint/типы к текущим py_compile + smoke + modules + logic + regression | ⬜ → T4 в `ROADMAP.md` |
 | 11 | Отчёт бэктестов: commit SHA, хеш конфига, версия данных, комиссии, equity curve | ✅ `backtest_runner --out` пишет артефакт: `git_commit`, `engine_version`, `params_hash`, `config_hash` (sha256 боевого config.yaml), `data_hash` свечей, `fees_model`/`funding_model`, метрики с `total_fees`/`total_funding`, `equity_curve` + `equity_hash`; два прогона → одинаковый `equity_hash` (`tests/test_backtest_artifact.py`). Базовый артефакт до фикса ATR: `~/.local/share/bybit-ws/experiments/runs/baseline_solusdt_180d.json` (17 сделок, PF 0.43, PnL −33.0%, fees $18.31, funding $0.05) |
 | 12 | Лицензия: репозиторий под **AGPL-3.0** (`LICENSE`, `pyproject.toml`). Смена лицензии не отменяет права по опубликованным версиям — вопрос юридический, решать до коммерческой упаковки | ⬜ |
 
@@ -540,7 +542,7 @@ count(*) FROM trade_history WHERE manual=0"`; версии — `ls ~/.local/shar
 
 | # | Работа | Готово, когда | Статус |
 |---|--------|---------------|--------|
-| 1 | 🔴 **P0: время жизни позиции считается в секундах, а `openTime` приходит в миллисекундах** — `bybit_ws/time_exit.py:53` и `auto_short.py:980` не делят на 1000 (`partial_tp.py:156` рядом делает правильно). Следствие: `age_hours ≈ −496 000`, оба time-exit'а — мёртвый код. Пруф: `TIME_EXIT_MAX_HOURS = 24`, а позиция ZEC прожила 80.6ч | фикс нормализует ms→s перед расчётом; тест «openTime в ms → часы считаются верно» падает до фикса и проходит после; в логе появляется `TIME EXIT` / `⏱ TIME-SL SHORT`; перед включением — замер, какие из 6 живых позиций уйдут в первом цикле | ⬜ |
+| 1 | ✅ **P0: возраст позиции в мс** — был мёртвый код в обоих time-exit'ах. Исправлено: `time_exit.normalize_open_ts()` (ms→s) применяется в `time_exit.py:37,71` и `auto_short.py:936,955,1013`; тесты `tests/test_time_exit_ms.py` (8 passed). Пруф закрытия: `grep -n normalize_open_ts bybit_ws/time_exit.py` | готово | ✅ 12.11 |
 | 2 | ✅ **Отчёт по 10x-стратегиям** — `docs/REPORT-10x.md`: 8 сделок (16–17.06), +$3.87, TP/SL 4/4, ликвидаций 0, плечо и hold = NULL (телеметрия появилась позже). Вывод: выборки нет, PF считать не на чем | готово | ✅ 31.10 |
 
 **Почему P0 не сделан сразу:** фикс меняет живое поведение — бот начнёт закрывать
