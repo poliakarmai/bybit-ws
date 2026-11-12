@@ -21,6 +21,7 @@ from .universe import (  # noqa: F401 — AUTO_ENTRY_WATCH реэкспорт
     AUTO_ENTRY_WATCH,
     scan_universe,
 )
+from .ws_client import get_kline as _ws_kline
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -53,6 +54,7 @@ MAX_DAILY_TRADES = 6      # дневной лимит LONG-входов (overtra
 CHASE_PCT = 3.0           # блок входа, если монета выросла >3%
 CHASE_LOOKBACK = 5        # ...за последние 5 дневных свечей
 _daily_entries = {'date': '', 'count': 0}
+_FUNDING_CACHE: dict = {}  # bulk-снимок fundingRate, TTL 120с
 
 
 def _count_today_entries() -> int:
@@ -272,23 +274,54 @@ def _open_entry_symbols() -> set:
         return set()
 
 
-def _count_down_days(sym: str) -> int:
-    """Считает количество последовательных дней падения."""
-    try:
-        r = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=8')
+def _funding_rate(sym: str):
+    """Funding rate из bulk-снимка всех тикеров (TTL 120с).
+
+    Раньше был отдельный REST на каждый символ: 46 запросов за скан, ~20-30с
+    впустую — данные и так приходят одним ответом /v5/market/tickers.
+    """
+    global _FUNDING_CACHE
+    now = time.time()
+    if not _FUNDING_CACHE or now - _FUNDING_CACHE.get('ts', 0) > 120:
+        r = bybit('GET', '/v5/market/tickers?category=linear')
         if r and r.get('retCode') == 0:
-            candles = r['result'].get('list', [])
-            closes = [float(c[4]) for c in reversed(candles)]
-            down = 0
-            for i in range(len(closes) - 1, 0, -1):
-                if closes[i] < closes[i-1]:
-                    down += 1
-                else:
-                    break
-            return down
+            _FUNDING_CACHE = {
+                'ts': now,
+                'map': {t['symbol']: float(t.get('fundingRate') or 0)
+                        for t in r['result'].get('list', [])},
+            }
+    return _FUNDING_CACHE.get('map', {}).get(sym)
+
+
+def _count_down_days(sym: str) -> int:
+    """Считает количество последовательных дней падения.
+
+    Сначала WS-кеш (прогревается при коннекте), REST — только если кеша нет.
+    46 символов × REST-запрос на скан давали ~30с чистой латентности.
+    """
+    klines = None
+    try:
+        klines = _ws_kline(sym, 'D')
     except Exception as e:
-        log_event(f'⚠️ count_down_days({sym}): {e}')  # kline parse error — return 0 (no down days detected)
-    return 0
+        log_event(f'⚠️ count_down_days WS ({sym}): {e}')
+    if not klines or len(klines) < 2:
+        try:
+            r = bybit('GET', f'/v5/market/kline?category=linear&symbol={sym}&interval=D&limit=8')
+            if r and r.get('retCode') == 0:
+                klines = [[0, 0, 0, 0, float(c[4]), 0] for c in reversed(r['result'].get('list', []))]
+        except Exception as e:
+            log_event(f'⚠️ count_down_days({sym}): {e}')  # kline parse error — return 0
+    if not klines or len(klines) < 2:
+        return 0
+
+    closes = [k[4] for k in klines][-8:]
+    down = 0
+    for i in range(len(closes) - 1, 0, -1):
+        if closes[i] < closes[i-1]:
+            down += 1
+        else:
+            break
+    return down
 
 def _calc_rsi(sym: str, period: int = 14) -> float:
     """Compute RSI(14) from daily klines for telemetry. Returns 50 on failure."""
@@ -360,22 +393,19 @@ def full_score_coin(sym: str, bb_data: dict, ticker_line: str) -> dict:
     elif down >= 1:   down_score = 3
     else:             down_score = 1
 
-    # 4. Funding (0-5) — проверяем через REST
+    # 4. Funding (0-5) — один bulk-запрос на весь скан вместо 46 поштучных
     fund_score = 3  # default если не получили
     try:
-        fr = bybit('GET', f'/v5/market/tickers?category=linear&symbol={sym}')
-        if fr and fr.get('retCode') == 0:
-            tickers = fr['result'].get('list', [])
-            if tickers:
-                funding = float(tickers[0].get('fundingRate', 0))
-                abs_f = abs(funding)
-                if abs_f < 0.00005:        fund_score = 5
-                elif abs_f < 0.0001:       fund_score = 4
-                elif abs_f < 0.0002:       fund_score = 3
-                elif abs_f < 0.0004:       fund_score = 2
-                else:                      fund_score = 0
+        funding = _funding_rate(sym)
+        if funding is not None:
+            abs_f = abs(funding)
+            if abs_f < 0.00005:        fund_score = 5
+            elif abs_f < 0.0001:       fund_score = 4
+            elif abs_f < 0.0002:       fund_score = 3
+            elif abs_f < 0.0004:       fund_score = 2
+            else:                      fund_score = 0
     except Exception as e:
-        log_event(f'⚠️ funding_parse({sym}): {e}')  # funding rate parse error — default score 0
+        log_event(f'⚠️ funding_parse({sym}): {e}')  # funding rate parse error — default score 3
 
     # 5. BB Width / Volatility (0-5)
     if 3 <= bb_width <= 8:    vola_score = 5
