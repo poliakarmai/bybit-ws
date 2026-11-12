@@ -2,7 +2,8 @@
 
 Два дефекта наблюдаемости:
 1. exit_reason выводился из знака PnL ('TP' на убытке) — здесь проверяем, что
-   метка идёт от уровня SL/TP, который мы держали, а без уровней — 'Unknown'.
+   метка идёт от уровня SL/TP, который мы держали; без уровней — 'NO_LEVELS',
+   уровни были, но цена разошлась — 'NO_MATCH'.
 2. trade_history/closed-pnl живут стороной ЗАКРЫТИЯ, а entry_diag — стороной
    ВХОДА: LONG (закрытие 'Sell') обязан находить diag, записанный как 'Buy'.
 """
@@ -21,15 +22,15 @@ def test_exit_at_sl_level_is_sl():
     assert ma.classify_exit(95.1, sl=95.0, tp=110.0, hold_hours=3) == 'SL'
 
 
-def test_exit_far_from_levels_is_unknown():
-    """Ни SL, ни TP: 'Unknown', даже если сделка в плюсе (раньше был 'TP')."""
-    assert ma.classify_exit(102.0, sl=95.0, tp=110.0, hold_hours=3) == 'Unknown'
+def test_exit_far_from_levels_is_no_match():
+    """Уровни были, цена разошлась: 'NO_MATCH', даже если сделка в плюсе."""
+    assert ma.classify_exit(102.0, sl=95.0, tp=110.0, hold_hours=3) == 'NO_MATCH'
 
 
-def test_exit_without_levels_is_unknown_not_pnl():
-    """SL/TP не нашли — честный 'Unknown' при любом PnL."""
-    assert ma.classify_exit(120.0, sl=None, tp=None, hold_hours=1) == 'Unknown'
-    assert ma.classify_exit(80.0, sl=None, tp=None, hold_hours=1) == 'Unknown'
+def test_exit_without_levels_is_no_levels_not_pnl():
+    """SL/TP не нашли — 'NO_LEVELS' при любом PnL (не путать с NO_MATCH)."""
+    assert ma.classify_exit(120.0, sl=None, tp=None, hold_hours=1) == 'NO_LEVELS'
+    assert ma.classify_exit(80.0, sl=None, tp=None, hold_hours=1) == 'NO_LEVELS'
 
 
 def test_long_hold_without_levels_is_time():
@@ -44,7 +45,7 @@ def test_level_beats_time():
 def test_tolerance_is_relative_and_bounded():
     """0.3% — допуск на проскальзывание; 0.5% уже не «наш уровень»."""
     assert ma.classify_exit(105.2 * 1.002, sl=None, tp=105.2, hold_hours=1) == 'TP'
-    assert ma.classify_exit(105.2 * 1.005, sl=None, tp=105.2, hold_hours=1) == 'Unknown'
+    assert ma.classify_exit(105.2 * 1.005, sl=None, tp=105.2, hold_hours=1) == 'NO_MATCH'
 
 
 # ── (б) ликвидация: биржа говорит сама (execType), цена тут не судья ────
@@ -184,23 +185,23 @@ def test_import_long_exit_at_tp_gets_tp_and_entry_diag(harness, monkeypatch):
     db.close()
 
 
-def test_import_long_loss_not_at_sl_is_unknown(harness, monkeypatch):
-    """Убыток ≠ SL: цена выхода далеко от нашего уровня → 'Unknown', не 'SL'."""
+def test_import_long_loss_not_at_sl_is_no_match(harness, monkeypatch):
+    """Убыток ≠ SL: уровни были, цена далеко от них → 'NO_MATCH', не 'SL'."""
     db, tmp = harness
     db.save_positions({'ETHUSDT': {'side': 'Buy', 'entry': 100.0,
                                    'stopLoss': 90.0, 'takeProfit': 120.0}})
     assert _run_import(monkeypatch, tmp, [_closed_trade('ETHUSDT', 100.0, 97.0, -3.0, 1.0)]) == 1
 
     row = db.conn.execute('SELECT exit_reason FROM trade_history').fetchone()
-    assert row[0] == 'Unknown'
+    assert row[0] == 'NO_MATCH'
     db.close()
 
 
-def test_import_without_levels_and_with_profit_is_unknown(harness, monkeypatch):
-    """Профит без известных SL/TP — 'Unknown' (PnL-фолбэка больше нет)."""
+def test_import_without_levels_and_with_profit_is_no_levels(harness, monkeypatch):
+    """Профит без известных SL/TP — 'NO_LEVELS' (PnL-фолбэка больше нет)."""
     db, tmp = harness
     assert _run_import(monkeypatch, tmp, [_closed_trade('SOLUSDT', 100.0, 104.0, 4.0, 2.0)]) == 1
 
     row = db.conn.execute('SELECT exit_reason FROM trade_history').fetchone()
-    assert row[0] == 'Unknown'
+    assert row[0] == 'NO_LEVELS'
     db.close()

@@ -106,6 +106,27 @@ def origin_by_link(link):
     return 'auto' if str(link or '').startswith(AUTO_LINK_PREFIXES) else 'manual'
 
 
+# Имя механизма входа по префиксу. Ключи ОБЯЗАНЫ совпадать с AUTO_LINK_PREFIXES
+# (тест tests/test_strategy_attribution.py проверяет равенство множеств):
+# один и тот же контракт, а не два списка, которые разъедутся.
+STRATEGY_BY_PREFIX = {'ae_': 'auto_entry', 'as_': 'auto_short', 're_': 'reentry',
+                      'dca_': 'dca', 'bb_': 'scalp', 'mr_': 'mean_revert',
+                      'fe_': 'funding', 'pd_': 'pump'}
+
+
+def strategy_by_link(link):
+    """Имя механизма входа по префиксу orderLinkId; неизвестный/пустой -> 'unknown'.
+
+    Нужен, чтобы trade_history.strategy не был константой 'auto': без разреза
+    по механизмам нельзя сказать, какой из них приносит минус (замер 12.11:
+    203 auto-сделки за 30д, все под одним ярлыком).
+    """
+    for pfx, name in STRATEGY_BY_PREFIX.items():
+        if str(link or '').startswith(pfx):
+            return name
+    return 'unknown'
+
+
 # Плечи, с которыми входит только бот (config: long/short 3x, скальп/фандинг/junk 10x).
 AUTO_LEVERAGES = (3.0, 10.0)
 

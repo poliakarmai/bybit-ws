@@ -186,7 +186,11 @@ def classify_exit(exit_price, sl, tp, hold_hours, tol=SLTP_MATCH_TOL, exec_type=
         return 'SL'
     if hold_hours and hold_hours > 48:
         return 'Time'
-    return 'Unknown'
+    # Один 'Unknown' смешивал два разных случая и прятал диагностику
+    # (12.11: 18 сделок/−$219 за 30д, разобрать нельзя).
+    if not (sl or tp):
+        return 'NO_LEVELS'
+    return 'NO_MATCH'
 
 
 def _import_bybit_trades(data_dir):
@@ -261,17 +265,29 @@ def _import_bybit_trades(data_dir):
                         entry_price=float(item.get('avgEntryPrice') or 0) or None) or {}
                     exit_reason = classify_exit(price, sltp.get('sl'), sltp.get('tp'), hold_h,
                                                 exec_type=item.get('execType'))
+                    # Раньше эти закрытия молча падали в 'Unknown' и всплывали
+                    # только при разборе PnL. Теперь причина видна в SSOT-логе.
+                    if exit_reason in ('NO_LEVELS', 'NO_MATCH'):
+                        log_event(f'❔ выход {exit_reason} {sym}: exit={price} '
+                                  f'sl={sltp.get("sl")} tp={sltp.get("tp")} hold={hold_h}')
                     try:
                         diag = sync_db.get_entry_diagnostic_for_close(sym, closing_side) or {}
+                        # Атрибуция механизма входа: orderLinkId ордера, которым
+                        # открыта позиция (уже запрашивается для _manual).
+                        # Фолбэк 'unknown' — честнее, чем ярлык 'auto' для всех.
+                        _link = None
+                        _strategy = 'unknown'
                         try:
                             from .manual_positions import (
                                 entry_origin,
                                 is_manual_position,
+                                strategy_by_link,
                             )
                             _manual = 1 if is_manual_position(sym, include_closed=True) else 0
                             # Ордер входа решает: если он без нашего префикса —
                             # вход ручной, чья бы метка ни лежала в pumps.json.
-                            _origin = entry_origin(sym, int(entry_ts_raw) or None)[0]
+                            _origin, _link = entry_origin(sym, int(entry_ts_raw) or None)
+                            _strategy = strategy_by_link(_link)
                             if _origin == 'auto':
                                 _manual = 0
                             elif _origin == 'manual':
@@ -280,7 +296,7 @@ def _import_bybit_trades(data_dir):
                             _manual = 0
                         sync_db.add_trade(
                             symbol=sym, side=closing_side,
-                            strategy='auto', entry_price=float(item.get('avgEntryPrice', 0)),
+                            strategy=_strategy, entry_price=float(item.get('avgEntryPrice', 0)),
                             exit_price=price, size=qty, pnl=pnl,
                             entry_at=int(entry_ts_raw / 1000) if entry_ts_raw else None,
                             closed_at=int(ts_val),
