@@ -152,12 +152,12 @@
 
 Source: strategic audit “how to turn the project into a marketable product” (ChatGPT, 1331 lines).
 The audit was based on the README and part of the code, so **each item was checked against the repository**, and the wording
-was run through Petr in `verify` mode (contract: verdict + quote + rationale).
-**Petr's verdict: CONDITIONAL — 8 of 10 findings confirmed by verbatim quotes, GO after the top three are closed.**
+was run through an external review in `verify` mode (contract: verdict + quote + rationale).
+**Review verdict: CONDITIONAL — 8 of 10 findings confirmed by verbatim quotes, GO after the top three are closed.**
 
 #### P0 — money and risk
 
-| # | Task | Evidence | Petr | Status |
+| # | Task | Evidence | Review | Status |
 |---|--------|----------------|------|--------|
 | 1 | Fail-closed in LONG risk checks | `auto_entry.py:785` correlation — `except Exception: pass`, entry proceeds with `corr_sizer=1.0`; `:798` concentration — log only, no `continue`; `:810` chase guard and `:821` daily limit — same | CONFIRMED (HIGH) | ✅ `a6d79cf` |
 | 2 | Correlation check for SHORT | `grep -n "corr" auto_short.py` → 0 lines; LONG is blocked at r>0.85, SHORT — never | CONFIRMED (HIGH) | 🟡 shadow in `a6d79cf`, enforce after measurement |
@@ -166,7 +166,7 @@ was run through Petr in `verify` mode (contract: verdict + quote + rationale).
 
 #### P1 — evidence and observability
 
-| # | Task | Evidence | Petr | Status |
+| # | Task | Evidence | Review | Status |
 |---|--------|----------------|------|--------|
 | 5 | Costs in the backtest engine (fee/funding/slippage) | `bybit_ws/experiments/engine.py` (347 lines): 0 mentions of fee/funding/slippage/commission | CONFIRMED (HIGH) | ✅ `c525be8` |
 | 6 | Trading readiness in `/health` (`TRADING_DISABLED`/`DEGRADED`) | `rpc.py:998` returns status/alive/uptime/cycle/paused; no readiness indicator | CONFIRMED (MEDIUM) | ✅ `e0bb539` |
@@ -289,7 +289,7 @@ Top 5 losses over 30 days are all LONG: ZKUSDT −122.58, DOTUSDT −73.99, AKEU
 |---|---|---|
 | 1 | Backtest artifact: commit SHA, config hash, data version, fee/funding/slippage, equity curve | ✅ 31.10: `--out` + 4 tests, repeated SOLUSDT 180d run returns the same `equity_hash` |
 | 2 | #3 ATR clamp + #10 sizing | ⚠️ #3: measured, cap is not the root cause — defaults kept, controls in config; ✅ #10: risk-constant sizing + leverage from request |
-| 3 | Silent entry-block watchdog | ✅ 31.10: `watchdog.py` + cron `a954882a4f59` (hourly, no_agent), 7 tests, live run catches the deposit gate |
+| 3 | Silent entry-block watchdog | ✅ 31.10: `watchdog.py` + cron (hourly, no_agent), 7 tests, live run catches the deposit gate |
 | 4 | Aggregate exposure limit (manual+automated) | test the 7.9x scenario, rejection written to `risk_decisions` |
 | 5 | Two weeks of clean journal → decision on #8/#5 | decision distribution without pytest rows, threshold proposed based on numbers |
 

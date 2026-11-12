@@ -415,7 +415,7 @@ mcp_servers:
   bybit-ws:
     command: python3
     args:
-      - /home/openclaw/.local/bin/hermes-mcp-server.py
+      - ~/.local/bin/hermes-mcp-server.py
     timeout: 120
     connect_timeout: 30
 ```
@@ -488,7 +488,7 @@ MCP-сервер запускается как подпроцесс Hermes → �
 mcp_servers:
   bybit-ws:
     command: python3
-    args: [/home/openclaw/.local/bin/hermes-mcp-server.py]
+    args: [~/.local/bin/hermes-mcp-server.py]
     env:
       RPC_TOKEN: "${RPC_TOKEN}"    # ← передать токен
     timeout: 120

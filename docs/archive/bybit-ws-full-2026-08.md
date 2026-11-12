@@ -330,7 +330,7 @@ bybit-ws/
 | `/v5/market/kline` | GET | Свечи |
 | `/v5/account/transaction-log` | GET | Фандинг (SETTLEMENT) |
 
-**Аутентификация:** HMAC-SHA256. Ключи из переменных окружения (`BYBIT_API_KEY`, `BYBIT_API_SECRET`), загружаемых через systemd `EnvironmentFile=/home/openclaw/.config/bybit-ws/env`. Legacy-путь `~/.config/bybit-cli/config` — fallback с предупреждением.
+**Аутентификация:** HMAC-SHA256. Ключи из переменных окружения (`BYBIT_API_KEY`, `BYBIT_API_SECRET`), загружаемых через systemd `EnvironmentFile=~/.config/bybit-ws/env`. Legacy-путь `~/.config/bybit-cli/config` — fallback с предупреждением.
 
 ### 7.2 RPC (порт 8766)
 

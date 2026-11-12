@@ -48,7 +48,7 @@ print(token[0]) if token else print('No token')
 | Resource | Path | Note |
 |--------|------|------------|
 | Environment variable | `TELEGRAM_BOT_TOKEN` | For a custom bot |
-| Hermes integration | Call `hermes send --to telegram:Poliakarm` | The token is managed by Hermes, not bybit-ws |
+| Hermes integration | Call `hermes send --to telegram:<channel>` | The token is managed by Hermes, not bybit-ws |
 
 **`.env` file:**
 - May be used to set `TELEGRAM_BOT_TOKEN` and other environment variables.

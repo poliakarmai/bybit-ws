@@ -415,8 +415,8 @@ After=network.target
 [Service]
 Type=simple
 User=openclaw
-WorkingDirectory=/home/openclaw/bybit-ws
-ExecStart=/home/openclaw/bybit-ws/.venv/bin/python -m bybit_ws
+WorkingDirectory=%h/bybit-ws
+ExecStart=%h/bybit-ws/.venv/bin/python -m bybit_ws
 Restart=always
 RestartSec=10
 

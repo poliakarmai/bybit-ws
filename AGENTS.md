@@ -3,7 +3,7 @@
 > Навигация для AI-агентов. Карта документации → [docs/INDEX.md](docs/INDEX.md) (EN: [docs/INDEX.en.md](docs/INDEX.en.md)).
 > **Язык документации (с 01.11.2026):** новые и правленые доки — на английском (`README.en.md`,
 > `docs/INDEX.en.md`), русская версия остаётся рядом. Перевод принимается только после
-> `python3 ~/.hermes/scripts/verify_translation.py <ru> <en>`: сверяет URL, инлайн-код, блоки кода
+> `python3 verify_translation.py <ru> <en>` (внутренний скрипт): сверяет URL, инлайн-код, блоки кода
 > и заголовки — машинный перевод любит «перевести» команду и переписать путь.
 > **Обновлено: 2026-10-28** — живые числа вынесены в команды (§ «Живые числа»), в тексте остались только инварианты и структура.
 > Документы старше 25.10, помеченные «архив», не читать: они описывают удалённое поведение.
@@ -59,12 +59,12 @@ RSS и прочие метрики — в `GET /metrics` (значение пл�
 
 > **manual-фильтр:** `trade_history.manual` отделяет авто-входы от ручных. `/enter` →
 > `mark_manual_position()` → при закрытии `manual=1` → self-learn исключает (адаптер грузит
-> `manual=0`). Ручные входы — сделки Алексея; исторически они дают основную часть минуса
+> `manual=0`). Ручные входы — сделки владельца счёта; исторически они дают основную часть минуса
 > аккаунта, и бот их не считает.
 
 > **Плечо важнее стороны.** Исторические крупные убытки — на 10–25x. Авто-ветка выставляет
 > конфижное плечо через `api.set_leverage()` перед ордером; ручной `/enter` навязывает плечо
-> только если оно передано явно (без капов — решение Алексея).
+> только если оно передано явно (без капов — решение владельца счёта).
 
 > **Входы — post-only (с 23.10).** Авто-ветка (`auto_entry.py:843`, `auto_short.py:685`) ставит
 > лимитки `timeInForce: PostOnly`: maker 0.02% вместо taker 0.055%; если ордер пересекает спред,
@@ -219,9 +219,9 @@ python3 -m bybit_ws.watchdog --hours 1 --dry-run --json
   (dry-spell throttle, BB% < порога) — рабочая фильтрация кандидатов, НЕ блокировка:
   их тысячи в час, по ним алерт звонил бы всегда.
 - Алерт: 0 входов за окно и ≥20 блокировок → `alerts.send_telegram_alert(level="STOP")`.
-- Крон: Hermes `a954882a4f59`, ежечасно, `no_agent`, `deliver=local`
+- Крон: ежечасно, `no_agent`, `deliver=local`
   (сообщение уходит своим каналом, дубля в чат нет). Скрипт-обёртка:
-  `~/.hermes/scripts/bybit_watchdog.sh`.
+  `bybit_watchdog.sh` (внутренний скрипт).
 - Тест: `tests/test_watchdog.py` (сценарий инцидента 31.10 + что фильтрация не блокировка).
 
 ## Проверка работоспособности (обязательно для AI-агентов)
@@ -375,7 +375,7 @@ with open(os.path.expanduser('~/.config/bybit-ws/env')) as f:
             key = line.strip().split('=',1)[1].encode()
             break
 for fname in ['lstm_regime.pt', 'lstm_regime_scaler.pkl']:
-    path = f'/home/openclaw/.local/share/bybit-ws/models/{fname}'
+    path = os.path.expanduser(f'~/.local/share/bybit-ws/models/{fname}')
     with open(path, 'rb') as fh: sha = hashlib.sha256(fh.read()).hexdigest()
     sig = hmac.new(key, sha.encode(), hashlib.sha256).hexdigest()
     with open(path + '.hmac', 'w') as fh: fh.write(sig)

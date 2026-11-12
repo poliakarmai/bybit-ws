@@ -24,7 +24,6 @@
 | [experiment-sweep-results.md](experiment-sweep-results.md) | Parameter sweep 16.09: 10 tickers × 15 variants — conclusion "edge is in symbol selection" | 📜 report, numbers dated 16.09 |
 | [WEBHOOKS.md](WEBHOOKS.md) | Payload structure of alert events (ENTRY/SL/TP/…) for external consumers | ✅ 26.10 |
 | [research/](research/) | A/B experiments with date and verdict | 📜 reports, not instructions |
-| [TZ-audit-bes-2026-10-23.md](TZ-audit-bes-2026-10-23.md) | External audit spec (Phase 11) | 📜 input to Phase 11 |
 | [REPORT-10x.md](REPORT-10x.md) | Report on x10 strategies (no sample, 8 trades) | 📜 31.10 |
 | [../REVIEW.md](../REVIEW.md) | Review rules (what counts as broken) | ✅ 20.10 |
 | [../CHANGELOG.md](../CHANGELOG.md) | Version history | ✅ 25.10 |

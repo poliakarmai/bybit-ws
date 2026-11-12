@@ -128,7 +128,7 @@ import json; print(json.dumps(monte_carlo_stress_test_v9(get_params_for_regime()
 python3 -c "
 from bybit_ws.journal.self_learn import causal_analysis
 import sqlite3
-db='/home/openclaw/.local/share/bybit-ws/state.db'
+db='~/.local/share/bybit-ws/state.db'
 conn=sqlite3.connect(db); conn.row_factory=sqlite3.Row
 trades=[dict(r) for r in conn.execute('SELECT pnl,closed_at FROM trade_history WHERE closed_at IS NOT NULL ORDER BY entry_at')]
 conn.close()
@@ -139,7 +139,7 @@ print(causal_analysis(trades))
 python3 -c "
 from bybit_ws.journal.self_learn import weighted_wr, weighted_composite_score
 import sqlite3
-db='/home/openclaw/.local/share/bybit-ws/state.db'
+db='~/.local/share/bybit-ws/state.db'
 conn=sqlite3.connect(db); conn.row_factory=sqlite3.Row
 trades=[dict(r) for r in conn.execute('SELECT pnl,closed_at,hold_hours FROM trade_history WHERE closed_at IS NOT NULL ORDER BY entry_at')]
 conn.close()

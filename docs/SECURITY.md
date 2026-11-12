@@ -48,7 +48,7 @@ print(token[0]) if token else print('No token')
 | Ресурс | Путь | Примечание |
 |--------|------|------------|
 | Переменная окружения | `TELEGRAM_BOT_TOKEN` | Для собственного бота |
-| Hermes-интеграция | Вызов `hermes send --to telegram:Poliakarm` | Токен управляется Hermes, не bybit-ws |
+| Hermes-интеграция | Вызов `hermes send --to telegram:<канал>` | Токен управляется Hermes, не bybit-ws |
 
 **Файл `.env`:**
 - Может использоваться для установки `TELEGRAM_BOT_TOKEN` и других переменных окружения.
