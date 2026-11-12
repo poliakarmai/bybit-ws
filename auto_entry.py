@@ -17,6 +17,10 @@ from .api import account_wallet, bybit, get_bb_data, set_leverage, verify_levera
 from .config import Config
 from .file_utils import safe_json_write
 from .position_sizing import margin_for_strategy
+from .universe import (  # noqa: F401 — AUTO_ENTRY_WATCH реэкспорт
+    AUTO_ENTRY_WATCH,
+    scan_universe,
+)
 
 # WebSocket BB-кеш (Фаза 6) — feature flag BYBIT_WS_BB_ENABLED
 _WS_BB_ENABLED = os.environ.get('BYBIT_WS_BB_ENABLED', '1') == '1'
@@ -40,13 +44,6 @@ def _get_bb_ws(symbol, interval='D'):
         except Exception:
             pass
     return get_bb_data(symbol, interval)
-
-AUTO_ENTRY_WATCH = [
-    'BTCUSDT','ETHUSDT','LTCUSDT','XRPUSDT','ADAUSDT','DOGEUSDT',
-    'NEARUSDT','SUIUSDT','WLDUSDT','LINKUSDT',
-    'AAVEUSDT','AVAXUSDT','INJUSDT','ONDOUSDT','ARBUSDT',
-    'ENAUSDT','FETUSDT','APTUSDT','ATOMUSDT',
-]
 
 COOLDOWN_FILE = os.path.join(DATA_DIR, 'cooldown.json')
 MIN_SCORE = 25  # порог для авто-входа (макс. score = 55: bb15+vol10+down10+fund5+vola5+q5+wm5)
@@ -587,19 +584,7 @@ def auto_entry_scan(positions):
                     _optuna_min_scores[sym] = params['min_score']
         except Exception:
             pass
-    all_watch = list(AUTO_ENTRY_WATCH)
-    wl_file = os.path.join(DATA_DIR, 'watchlist_custom.txt')
-    if os.path.exists(wl_file):
-        with open(wl_file) as f:
-            custom = [l.strip() for l in f if l.strip() and l.strip().endswith('USDT')]
-            all_watch.extend([s for s in custom if s not in all_watch])
-
-    try:
-        cfg = Config()
-        banned = set(cfg.risk.get('banned_symbols', []))
-        all_watch = [s for s in all_watch if s not in banned]
-    except Exception as e:
-        log_event(f'⚠️ auto_entry: {e}')
+    all_watch = scan_universe()
 
     try:
         r = safe_run([BYBIT_CLI, 'tickers'], timeout=15)

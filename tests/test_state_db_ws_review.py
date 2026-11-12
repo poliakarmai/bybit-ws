@@ -70,9 +70,11 @@ def test_dca_counter_finds_open_entry(sdb):
 
 # ── ws_client: дубли и идемпотентность ─────────────────────────
 
-def test_watch_symbols_unique(ws):
-    dupes = {s for s in ws.WATCH_SYMBOLS if ws.WATCH_SYMBOLS.count(s) > 1}
-    assert not dupes, f'дубли в WATCH_SYMBOLS: {dupes}'
+def test_watch_symbols_unique():
+    universe = pytest.importorskip('bybit_ws.universe')
+    syms = universe.watch_symbols()
+    dupes = {s for s in syms if syms.count(s) > 1}
+    assert not dupes, f'дубли в watch_symbols(): {dupes}'
 
 
 def test_start_is_idempotent(ws, monkeypatch):

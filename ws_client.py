@@ -37,6 +37,7 @@ except ImportError:
     websocket = None
 
 from .alerts import log_event
+from .universe import watch_symbols
 
 # ═══════════════════════════════════════════════════════════
 # Feature flags
@@ -65,22 +66,6 @@ _private_connected = False
 _last_update = 0.0
 _last_private_update = 0.0
 _subscribed_symbols: set = set()
-
-# ═══════════════════════════════════════════════════════════
-# TOP-50 Bybit фьючерсы (из AUTO_ENTRY_WATCH + ликвидные)
-# ═══════════════════════════════════════════════════════════
-
-WATCH_SYMBOLS = [
-    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'LTCUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT',
-    'HYPEUSDT', 'NEARUSDT', 'SUIUSDT', 'TONUSDT', 'WLDUSDT', 'LINKUSDT',
-    'AAVEUSDT', 'AVAXUSDT', 'DOTUSDT', 'INJUSDT', 'ONDOUSDT', 'ARBUSDT',
-    'ENAUSDT', 'FETUSDT', 'APTUSDT', 'ATOMUSDT', 'RUNEUSDT',
-    'UNIUSDT', 'OPUSDT', 'ALGOUSDT', 'BCHUSDT', 'FILUSDT', 'VETUSDT',
-    'SANDUSDT', 'MANAUSDT', 'GALAUSDT', 'PEPEUSDT', 'SHIBUSDT',
-    'EGLDUSDT', 'ZECUSDT', 'BONKUSDT', 'FLOKIUSDT', 'WIFUSDT',
-    'TIAUSDT', 'SEIUSDT', 'STRKUSDT', 'JUPUSDT', 'PYTHUSDT',
-    'WUSDT', 'MOVEUSDT', 'STGUSDT', 'ESPORTSUSDT',
-]
 
 # BB-параметры
 BB_PERIOD = 20
@@ -320,7 +305,7 @@ def _on_open_public(ws):
     log_event('🔌 WS public connected to Bybit' if not _WS_FULL_ENABLED
               else '🔌 WS public connected to Bybit (+orderbook)')
 
-    symbols = list(WATCH_SYMBOLS)
+    symbols = list(watch_symbols())
     batch_size = 5
 
     for i in range(0, len(symbols), batch_size):
