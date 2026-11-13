@@ -145,7 +145,7 @@ Walk-forward валидация ML.
 ### v8.2 — Systemd Hardening (04.08.2026)
 - `MemoryDenyWriteExecute=true` блокировал PyTorch → закомментирован
 - LSTM HMAC mismatch после переобучения — процедура переподписи
-- `TimeoutStopSec=10` — предотвращает зависание рестарта
+- `TimeoutStopSec=10` — предотвращает зависание рестарта (⚠️ 13.11.2026 заменено: `=90` + `is_shutdown()`; при `=10` каждый рестарт заканчивался SIGKILL, см. AGENTS.md § Systemd Pitfalls)
 - `lstm_world_model.py` симлинк в `bybit_ws/`
 - MTF-скидка TRENDING_DOWN: `min_tfs=1` (было 2) для SHORT
 - log_event fallback на stderr

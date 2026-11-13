@@ -250,7 +250,7 @@ bash verify.sh        # exit 0 = всё зелёное; exit 1 = есть FAIL
 **Ловушки, на которых уже спотыкались:**
 - Зависимости проверять **сервисным** интерпретатором из `ExecStart` (`/usr/bin/python3`), а не `.venv` — иначе «у меня работает».
 - `/positions`, `/balance`, `/risk` требуют Bearer-токен из `kv_store['rpc_auth_token']`; `401 Unauthorized` без токена — это НЕ поломка.
-- Рестарт: `systemctl --user restart bybit-ws-async`. SIGTERM может не уложиться в 90с → SIGKILL — норма, но после рестарта обязан расти `cycle_count`.
+- Рестарт: `systemctl --user restart bybit-ws-async`. SIGTERM обязан уложиться: простой — доли секунды, посреди цикла — до ~15с. Если systemd всё-таки добил через 90с (`Killed` в журнале) — это не «норма», а зависший цикл: смотреть, на какой стадии встал.
 - `deploy.sh` требует чистого дерева или `--force`.
 - После деплоя/рестарта: `bash verify.sh` — и только потом докладывать «работает».
 
@@ -356,7 +356,7 @@ systemctl --user restart bybit-ws-async
 - [ ] `grep Heartbeat ~/.local/share/bybit-ws/events.log | tail -1` → свежий
 - [ ] `bash deploy.sh`
 - [ ] `grep "MemoryDenyWriteExecute" deploy/bybit-ws-async.service` — должен быть закомментирован
-- [ ] `grep "TimeoutStopSec" deploy/bybit-ws-async.service` — должен быть =10
+- [ ] `grep "TimeoutStopSec" deploy/bybit-ws-async.service` — должен быть =90 (страховка; graceful-путь — `is_shutdown()`, см. Systemd Pitfalls)
 
 ## Systemd Pitfalls (v8.2, 04.08.2026)
 
@@ -384,9 +384,20 @@ for fname in ['lstm_regime.pt', 'lstm_regime_scaler.pkl']:
 "
 ```
 
-### TimeoutStopSec — зависание на SIGTERM
+### TimeoutStopSec — graceful shutdown (переделано 13.11.2026)
 
-**Решение:** `TimeoutStopSec=10` в unit-файле.
+Раньше `SHUTDOWN` читался только в шапке цикла, поэтому SIGTERM не прерывал ни
+trailing sleep (до 30с), ни heavy cycle (до 65с) → systemd ждал 10с и добивал
+процесс SIGKILL'ом на каждом рестарте.
+
+**Решение:** `TimeoutStopSec=90` в unit-файле + прерываемое ожидание в коде:
+`request_shutdown()` выставляет флаг и `SHUTDOWN_EVENT`, `_interruptible_sleep()`
+просыпается по нему мгновенно, а `heavy_cycle_opt` проверяет `is_shutdown()` между
+фазами. Читать флаг из другого модуля можно ТОЛЬКО через `is_shutdown()` —
+`from .main_async import SHUTDOWN` делает снимок на входе в функцию и проверки
+внутри неё не срабатывают никогда (страж: `tests/test_graceful_shutdown.py`).
+Живые замеры 13.11: простой — 0.63с, посреди цикла — 11.8с, в журнале
+`Stopping → Stopped` без `Killed`.
 
 ### lstm_world_model — симлинк
 

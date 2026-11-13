@@ -66,7 +66,7 @@
 |--------|--------|
 | MemoryDenyWriteExecute vs PyTorch fix | ✅ |
 | LSTM HMAC mismatch fix | ✅ |
-| TimeoutStopSec=10 (restart hang) | ✅ |
+| TimeoutStopSec=90 + `is_shutdown()` (13.11.2026; =10 caused SIGKILL on every restart) | ✅ |
 | lstm_world_model symlink in bybit_ws/ | ✅ |
 | MTF discount for TRENDING_DOWN (min_tfs=1) | ✅ |
 | log_event fallback to stderr | ✅ |
