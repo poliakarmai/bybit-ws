@@ -30,7 +30,7 @@
 | RPC REST API (51 обработчик пути GET+POST, см. `docs/API.md`) | ✅ prod |
 | One-click trading через Hermes-чат | ✅ prod |
 | Алерты (ntfy + Telegram) | ✅ prod |
-| Тесты: 52 проверки в `test_smoke.py` + **577** в `tests/` (`python3 -m pytest -q`, 12.11); в CI гоняется только 5 скриптов — полный сьют вне гейта (T4 в `ROADMAP.md`) | ✅ prod |
+| Тесты: 52 проверки в `test_smoke.py` + **578** в `tests/` (`python3 -m pytest -q`, 13.11); в CI гоняются 5 скриптов + полный `pytest -m "not integration"` (T4 закрыт) | ✅ prod |
 
 ## Дорожная карта
 

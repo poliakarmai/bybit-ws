@@ -31,7 +31,7 @@
 | RPC REST API (51 path handlers GET+POST, see `docs/API.md`) | ✅ prod |
 | One-click trading through Hermes chat | ✅ prod |
 | Alerts (ntfy + Telegram) | ✅ prod |
-| Tests: 52 checks in `test_smoke.py` + **577** in `tests/` (`python3 -m pytest -q`, 12.11); CI runs only 5 scripts — full suite is outside the gate (T4 in `ROADMAP.md`) | ✅ prod |
+| Tests: 52 checks in `test_smoke.py` + **578** in `tests/` (`python3 -m pytest -q`, 13.11); CI runs 5 scripts + full `pytest -m "not integration"` (T4 closed) | ✅ prod |
 
 ## Roadmap
 

@@ -539,8 +539,11 @@ def get_bb_lower(symbol, interval='D'):
         return None
 
 
-def place_order(symbol, side, order_type, qty, price=None, reduce_only=False, position_idx=0):
+def place_order(symbol, side, order_type, qty, price=None, reduce_only=False,
+                position_idx=None, time_in_force=None, order_link_id=None):
     """Разместить ордер через Bybit v5 REST API."""
+    if position_idx is None:
+        raise ValueError('place_order: position_idx обязателен (режим позиции по символу)')
     body = {
         'category': 'linear',
         'symbol': symbol,
@@ -553,6 +556,10 @@ def place_order(symbol, side, order_type, qty, price=None, reduce_only=False, po
         body['price'] = str(price)
     if reduce_only:
         body['reduceOnly'] = True
+    if time_in_force:
+        body['timeInForce'] = time_in_force
+    if order_link_id:
+        body['orderLinkId'] = order_link_id
     return bybit('POST', '/v5/order/create', body)
 
 

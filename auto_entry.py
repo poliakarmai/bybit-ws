@@ -13,7 +13,14 @@ from . import (
     safe_run,
 )
 from .alerts import add_alert, log_event
-from .api import account_wallet, bybit, get_bb_data, set_leverage, verify_leverage
+from .api import (
+    account_wallet,
+    bybit,
+    get_bb_data,
+    place_order,
+    set_leverage,
+    verify_leverage,
+)
 from .config import Config
 from .file_utils import safe_json_write
 from .position_sizing import margin_for_strategy
@@ -994,14 +1001,12 @@ def auto_entry_scan(positions):
             # ── Плечо стратегии на биржу ДО ордера (этап 2 аудита) ──
             lev = apply_entry_leverage(sym, 'Buy')
 
-            body = {'category': 'linear', 'symbol': sym, 'side': 'Buy',
-                    'orderType': 'Limit', 'qty': str(qty), 'price': str(price),
-                    'positionIdx': idx, 'timeInForce': 'PostOnly',
-                    'orderLinkId': f'ae_{sym.lower()}_{int(time.time())}'}
             # PostOnly: вход только maker-ом (0.02% вместо 0.055%). Если ордер
             # пересекает спред, биржа его отклоняет — вход теряется, а не
             # оплачивается taker-комиссией. Замер: fee_stats.py
-            result = bybit('POST', '/v5/order/create', body)
+            result = place_order(sym, 'Buy', 'Limit', qty, price,
+                                 position_idx=idx, time_in_force='PostOnly',
+                                 order_link_id=f'ae_{sym.lower()}_{int(time.time())}')
             if result and result.get('retCode') != 0:
                 log_event(f'⛔ POST-ONLY LONG {sym}: {result.get("retMsg", "?")} — вход не открыт')
             if result and result.get('retCode') == 0:

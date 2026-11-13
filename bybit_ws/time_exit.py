@@ -125,7 +125,7 @@ def apply_time_exits(exits: list) -> dict:
         return {'closed': 0, 'failed': 0}
 
     from .alerts import log_event
-    from .api import bybit
+    from .api import place_order
 
     result = {'closed': 0, 'failed': 0}
 
@@ -134,16 +134,12 @@ def apply_time_exits(exits: list) -> dict:
         log_event(f'⏰ {reason}')
 
         try:
-            order = bybit('POST', '/v5/order/create', {
-                'category': 'linear',
-                'symbol': sym,
-                'side': close_side,
-                'orderType': 'Market',
-                'qty': str(size),
-                'positionIdx': idx,
-                'reduceOnly': True,
-                'timeInForce': 'IOC',
-            })
+            order = place_order(
+                sym, close_side, 'Market', size,
+                reduce_only=True, position_idx=idx,
+                time_in_force='IOC',
+                order_link_id=f'te_{sym.lower()}_{int(time.time())}',
+            )
             if order and order.get('retCode') == 0:
                 result['closed'] += 1
                 log_event(f'⏰ TIME EXIT {sym}: closed {size} @ MARKET')

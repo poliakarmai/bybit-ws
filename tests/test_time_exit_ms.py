@@ -126,3 +126,37 @@ def test_short_time_sl_ms(monkeypatch):
     actions = check_short_time_sl(positions)
     assert "SHRTUSDT" in actions
     assert closed == ["SHRTUSDT"]
+
+
+def test_apply_time_exits_routes_through_place_order(monkeypatch):
+    """apply_time_exits обязан звать api.place_order с reduceOnly/IOC/positionIdx/te_-link."""
+    import pytest
+
+    from bybit_ws import alerts, api
+    from bybit_ws.time_exit import apply_time_exits
+
+    monkeypatch.setattr(alerts, "log_event", lambda *a, **kw: None)
+    captured = []
+
+    def fake_bybit(method, path, body=None, **kw):
+        captured.append((method, path, body))
+        return {"retCode": 0}
+
+    monkeypatch.setattr(api, "bybit", fake_bybit)
+
+    res = apply_time_exits([("LTCUSDT", "TIME EXIT LTCUSDT: 8h", 2.5, 2, "Sell")])
+    assert res == {"closed": 1, "failed": 0}
+    assert len(captured) == 1
+    method, path, body = captured[0]
+    assert (method, path) == ("POST", "/v5/order/create")
+    assert body["symbol"] == "LTCUSDT"
+    assert body["side"] == "Buy"
+    assert body["orderType"] == "Market"
+    assert body["qty"] == "2.5"
+    assert body["reduceOnly"] is True
+    assert body["timeInForce"] == "IOC"
+    assert body["positionIdx"] == 2
+    assert body["orderLinkId"].startswith("te_ltcusdt_")
+
+    with pytest.raises(ValueError, match="position_idx"):
+        api.place_order("LTCUSDT", "Buy", "Market", 1.0)

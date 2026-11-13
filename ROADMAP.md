@@ -6,20 +6,15 @@
 Процесс ревью и полные отчёты аудитов ведутся вне репозитория (публичный репо —
 только код и продуктовые доки). Здесь — задачи и критерии приёмки.
 
-## ✅ Сделано 2026-11-12 (T1, T2 — задеплоено, SHA `b035103`)
+## ✅ Сделано 2026-11-12..13 (T1, T2, T3, T4 — задеплоено)
 
 | Что | Факт |
 |---|---|
-| `strategy` в `trade_history` из `orderLinkId` | было `'auto'` константой у всех 203 auto-сделок за 30д; теперь `auto_entry/auto_short/reentry/dca/scalp/mean_revert/funding/pump/unknown` |
-| `exit_reason`: `Unknown` → `NO_LEVELS`/`NO_MATCH` | 18 сделок/−$219 за 30д были неразбираемы, теперь причина в БД + строка `❔ выход NO_*` в `events.log` |
-| Тесты | `577 passed` (+14), `verify.sh` exit 0, canary 8/8 |
-
-## ⬜ Следующее (из ТЗ, приоритет сверху вниз)
-
-| # | Задача | Объём | Риск | Готово, когда |
-|---|---|---|---|---|
-| T4 | **Полный `pytest` в CI.** Сейчас CI гоняет 5 скриптов (1m36s), 563+ теста `tests/` — вне гейта. Живой прогон в чистом HOME: 1 collection error (`test_ws_client.py` → `chdir('~/bybit-ws')`) + 4 fail (`test_mtf` ×3 ходят за реальными свечами, `test_correlation_shadow` читает живой депозит) | 40–60 мин | низкий | `- run: timeout 600 python3 -m pytest -q` в `.github/workflows/test.yml`; env-тесты обезврежены (пути от `__file__`, `@pytest.mark.integration`); намеренно сломанный тест краснит CI |
-| T3 | **Единый путь создания ордера.** Три места: `api.py:542`, `auto_entry.py:1004`, `time_exit.py:137` — инварианты (positionIdx/qtyStep/reduceOnly/PostOnly) дублируются, отсюда исторические `110017` и `10001` | 60–90 мин | **средний — путь денег** | `grep -rn "/v5/order/create" bybit_ws/ *.py \| grep -v "^api.py:"` пусто; `position_idx` без дефолта; `verify.sh` exit 0; 30 мин наблюдения без `retCode != 0` |
+| T1: `strategy` в `trade_history` из `orderLinkId` | было `'auto'` константой у всех 203 auto-сделок за 30д; теперь `auto_entry/auto_short/reentry/dca/scalp/mean_revert/funding/pump/unknown` |
+| T2: `exit_reason`: `Unknown` → `NO_LEVELS`/`NO_MATCH` | 18 сделок/−$219 за 30д были неразбираемы, теперь причина в БД + строка `❔ выход NO_*` в `events.log` |
+| T4: Полный `pytest` в CI | `- run: timeout 600 python3 -m pytest -q -m "not integration"` в `.github/workflows/test.yml`; env-тесты (`test_ws_client`, `test_mtf`, `test_correlation_shadow`) изолированы; чистый `HOME` → `573 passed, 5 deselected`, exit 0 |
+| T3: `place_order` для `auto_entry` и `time_exit` | `position_idx` обязателен (без дефолта `0`), поддержаны `time_in_force` и `order_link_id`; `auto_entry.py` и `time_exit.py` переведены на `api.place_order` |
+| Тесты | `578 passed`, `verify.sh` exit 0 |
 
 ## → 9 (код): распил монолитов + сужение except
 
