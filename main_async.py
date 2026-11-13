@@ -74,8 +74,33 @@ from .unified_sl import manage_sl
 
 # ── Константы ──
 SHUTDOWN = False
+SHUTDOWN_EVENT: asyncio.Event | None = None
+_shutdown_logged = False
 MEAN_REVERT_ENABLED = False  # отключено 01.08.2026
 MEAN_REVERT_ENABLED = False  # отключено 01.08.2026 — BB%=0-5% на падающем рынке не работает
+
+
+def request_shutdown() -> None:
+    """Единая точка: выставить флаг, разбудить ожидание, залогировать один раз."""
+    global SHUTDOWN, _shutdown_logged
+    SHUTDOWN = True
+    if SHUTDOWN_EVENT is not None:
+        SHUTDOWN_EVENT.set()
+    if not _shutdown_logged:
+        _shutdown_logged = True
+        log_event('SIGTERM received, shutting down...')
+
+
+async def _interruptible_sleep(seconds: float) -> bool:
+    """Спит до seconds, но просыпается сразу по SIGTERM. True = разбудили шатдауном."""
+    if SHUTDOWN_EVENT is None:              # до инициализации цикла — обычный сон
+        await asyncio.sleep(seconds)
+        return SHUTDOWN
+    try:
+        await asyncio.wait_for(SHUTDOWN_EVENT.wait(), timeout=seconds)
+        return True
+    except (asyncio.TimeoutError, TimeoutError):
+        return False
 
 
 # ═══════════════════════════════════════════════════════════
@@ -897,6 +922,11 @@ async def heavy_cycle_async(cfg, positions, cycle_count, orders=None):
 
 async def async_main_loop():
     """Async главный цикл — замена main_loop()."""
+    global SHUTDOWN_EVENT
+    SHUTDOWN_EVENT = asyncio.Event()
+    if SHUTDOWN:                      # сигнал пришёл до старта цикла
+        SHUTDOWN_EVENT.set()
+
     cfg = Config()
     CYCLE_SECONDS = cfg.monitor.cycle_seconds
     HEAVY_CYCLE = cfg.monitor.heavy_cycle
@@ -1016,6 +1046,9 @@ async def async_main_loop():
                 log_event(f'⚠️ positions snapshot error: {e} — прошлый снапшот ({len(prev_positions)} поз.)')
                 new_positions, new_orders = dict(prev_positions), dict(prev_orders)
 
+            if SHUTDOWN:
+                break
+
             # ── Обновляем RPC-состояние ──
             try:
                 from .rpc import rpc_state as _rpc_state
@@ -1094,7 +1127,11 @@ async def async_main_loop():
                 _rpc['circuit_breaker_reason'] = ''
 
             # ── Тяжёлый цикл ──
+            if SHUTDOWN:
+                break
             await heavy_cycle_async(cfg, new_positions, cycle, new_orders)
+            if SHUTDOWN:
+                break
 
             # ── SL re-entry (тоже ВХОД: на паузе молчит) ──
             if new_positions and not _entries_paused():
@@ -1331,7 +1368,7 @@ async def async_main_loop():
             cycle_sec = float(cfg.monitor.cycle_seconds)
             sleep_time = max(0.1, cycle_sec - elapsed)
 
-            await asyncio.sleep(sleep_time)
+            await _interruptible_sleep(sleep_time)
 
         except asyncio.CancelledError:
             break
@@ -1351,9 +1388,7 @@ def run():
     asyncio.set_event_loop(loop)
 
     def _shutdown():
-        global SHUTDOWN
-        SHUTDOWN = True
-        log_event('SIGTERM received, shutting down...')
+        request_shutdown()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:

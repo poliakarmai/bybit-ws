@@ -27,7 +27,7 @@ LockPersonality=true
 ExecStart=/usr/bin/python3 -m bybit_ws.main_async
 Restart=on-failure
 RestartSec=10
-TimeoutStopSec=10
+TimeoutStopSec=90
 StartLimitBurst=3
 StartLimitInterval=120
 # ── Resource limits ──

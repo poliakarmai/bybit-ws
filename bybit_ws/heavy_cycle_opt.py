@@ -38,8 +38,12 @@ async def _cached_fetch_open_orders():
 
 async def heavy_cycle_async(cfg, positions, orders, cycle_count):
     """Оптимизированный тяжёлый цикл: все REST-запросы параллельно."""
+    from .main_async import SHUTDOWN
+
     HEAVY_CYCLE = cfg.monitor.heavy_cycle
     if cycle_count % HEAVY_CYCLE != 0:
+        return
+    if SHUTDOWN:
         return
 
     t0 = time.time()
@@ -152,6 +156,10 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
     task_coros = list(tasks.values())
     raw_results = await asyncio.gather(*task_coros, return_exceptions=True)
 
+    if SHUTDOWN:
+        log_event('🛑 heavy cycle: shutdown — phase 2 skipped')
+        return
+
     results = {}
     for name, item in zip(task_names, raw_results):
         if isinstance(item, Exception):
@@ -238,6 +246,8 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
         try:
             missing = []
             for sym, p in positions.items():
+                if SHUTDOWN:
+                    return
                 side = p.get('side', 'Buy')
                 tp_side = 'Sell' if side == 'Buy' else 'Buy'
 
@@ -307,6 +317,8 @@ async def heavy_cycle_async(cfg, positions, orders, cycle_count):
     # ═══════════════════════════════════════════════════
     # ФАЗА 4: Суточные задачи (если кратно 2880 = 24ч)
     # ═══════════════════════════════════════════════════
+    if SHUTDOWN:
+        return
     if cycle_count > 0 and cycle_count % 2880 == 0:
         # Post-trade cluster analysis + Self-learning (параллельно)
         async def _post_trade():
