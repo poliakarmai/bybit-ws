@@ -112,3 +112,35 @@ def test_fresh_process_flags(clean_globals):
 
     assert m.SHUTDOWN is True
     assert m.SHUTDOWN_EVENT.is_set() is True
+
+def test_is_shutdown_reads_live_not_snapshot(clean_globals):
+    """Регресс: `from .main_async import SHUTDOWN` в чужой функции = снимок на входе,
+    проверки внутри длинной функции не срабатывают. Читать только через is_shutdown()."""
+    m = clean_globals
+    assert m.is_shutdown() is False
+    m.SHUTDOWN = True          # меняем ПОСЛЕ «входа» — функция обязана увидеть
+    assert m.is_shutdown() is True
+    m.SHUTDOWN = False
+    assert m.is_shutdown() is False
+
+
+def test_no_value_import_of_shutdown_flag():
+    """Страж класса ошибки: `from .main_async import SHUTDOWN|SHUTDOWN_EVENT` в любом
+    модуле делает снимок на входе в функцию → поздние проверки не срабатывают.
+    Разрешено только `import is_shutdown` и чтение `main_async.SHUTDOWN` через модуль."""
+    import ast
+    bad = []
+    for p in Path(ROOT).rglob('*.py'):
+        rel = p.relative_to(ROOT).as_posix()
+        if rel.startswith(('tests/', 'build/', 'venv/', '.venv/')) or rel == 'conftest.py':
+            continue
+        try:
+            tree = ast.parse(p.read_text(encoding='utf-8', errors='replace'))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith('main_async'):
+                for a in node.names:
+                    if a.name in ('SHUTDOWN', 'SHUTDOWN_EVENT'):
+                        bad.append(f'{rel}:{node.lineno} from {node.module} import {a.name}')
+    assert not bad, 'снимок флага вместо is_shutdown(): ' + '; '.join(bad)

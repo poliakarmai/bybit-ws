@@ -91,6 +91,16 @@ def request_shutdown() -> None:
         log_event('SIGTERM received, shutting down...')
 
 
+def is_shutdown() -> bool:
+    """Живое чтение флага для других модулей.
+
+    `from .main_async import SHUTDOWN` в чужой функции делает СНИМОК значения на
+    входе в вызов — проверки внутри длинной функции так не срабатывают никогда.
+    Импортировать надо эту функцию и звать её в точке проверки.
+    """
+    return SHUTDOWN
+
+
 async def _interruptible_sleep(seconds: float) -> bool:
     """Спит до seconds, но просыпается сразу по SIGTERM. True = разбудили шатдауном."""
     if SHUTDOWN_EVENT is None:              # до инициализации цикла — обычный сон
