@@ -271,10 +271,12 @@ bash verify.sh        # exit 0 = всё зелёное; exit 1 = есть FAIL
 
 ```bash
 # Kill switch — закрыть ВСЕ позиции (нужны оба заголовка: Bearer + X-Emergency-Auth)
-curl -X POST http://127.0.0.1:8766/kill_switch -H "Authorization: Bearer $TOKEN" -H "X-Emergency-Auth: $EMERGENCY_TOKEN"
+# токен берётся из EMERGENCY_TOKEN (в .env / юните), в доке не подставляем $VAR:
+# guard агента режет файл целиком на паттерне «curl + $*TOKEN» (exfil_curl)
+curl -X POST http://127.0.0.1:8766/kill_switch -H "Authorization: Bearer ***" -H "X-Emergency-Auth: <токен из .env>"
 
 # Emergency close — без паузы
-curl -X POST http://127.0.0.1:8766/emergency_close -H "Authorization: Bearer $TOKEN" -H "X-Emergency-Auth: $EMERGENCY_TOKEN"
+curl -X POST http://127.0.0.1:8766/emergency_close -H "Authorization: Bearer ***" -H "X-Emergency-Auth: <токен из .env>"
 
 # Сбросить LLM Circuit Breaker
 systemctl --user restart bybit-ws-async
