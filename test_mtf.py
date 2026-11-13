@@ -6,6 +6,8 @@
 - format_confluence() вывод
 """
 
+import pytest
+
 from bybit_ws.mtf_confirmation import (
     CONFLUENCE_MIN_TFS,
     _bb_signal,
@@ -84,6 +86,7 @@ class TestBBSignal:
         assert result['distance_to_band'] >= 0
 
 
+@pytest.mark.integration
 class TestCheckConfluence:
     """Тесты check_confluence() с реальным API (D-ТФ минимум)."""
 
@@ -173,6 +176,7 @@ class TestFormatConfluence:
         assert 'Filter' in result
 
 
+@pytest.mark.integration
 class TestIntegration:
     """Интеграционные тесты: mtf_confirmation работает с реальным API."""
 

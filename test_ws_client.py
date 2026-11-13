@@ -11,8 +11,9 @@ import time
 import unittest
 
 # Добавляем путь к bybit_ws
-sys.path.insert(0, os.path.expanduser('~/bybit-ws'))
-os.chdir(os.path.expanduser('~/bybit-ws'))
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
+os.chdir(ROOT)
 
 
 class TestBBKeyAliases(unittest.TestCase):
