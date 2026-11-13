@@ -13,7 +13,9 @@ import sys
 # fragile here: other test modules put /home/openclaw first, where `bybit_ws` is a
 # symlink to the repo root (no journal/ package). Direct file loading is immune to
 # that ordering.
-_ANALYZER_PATH = '/home/openclaw/bybit-ws/bybit_ws/journal/analyzer.py'
+from pathlib import Path
+
+_ANALYZER_PATH = str(Path(__file__).resolve().parent / 'bybit_ws' / 'journal' / 'analyzer.py')
 _spec = importlib.util.spec_from_file_location('_journal_analyzer_under_test', _ANALYZER_PATH)
 assert _spec and _spec.loader, f'cannot load analyzer from {_ANALYZER_PATH}'
 _mod = importlib.util.module_from_spec(_spec)

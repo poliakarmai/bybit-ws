@@ -83,7 +83,7 @@ def test_clean_runs_before_pump_entries():
     Именно нарушение этого порядка дало дубль QUSDT 260 вместо 130: clean
     выполнялся после check_weekly_pumps и судил по устаревшему снапшоту.
     """
-    src = Path('/home/openclaw/bybit-ws/main_async.py').read_text()
+    src = (Path(__file__).resolve().parents[1] / 'main_async.py').read_text()
     i_clean = src.find('_clean_pump_state, DATA_DIR')
     i_entry = src.find('run_in_thread(check_pumps, positions')
     assert i_clean != -1, 'вызов _clean_pump_state пропал из main_async.py'
