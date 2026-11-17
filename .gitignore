@@ -45,3 +45,4 @@ state.db
 .repowise/
 .claude/
 .mcp.json
+.hypothesis/
