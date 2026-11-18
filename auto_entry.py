@@ -1045,10 +1045,8 @@ def auto_entry_scan(positions):
                     f'🤖 Авто-вход {sym} @ ${price:.4f} — {qty} шт, плечо {lev}x '
                     f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info}{regime_info}{rl_info})'
                 )
-                add_alert('ENTRY',
-                    f'🚀 LONG {sym}: вход ${price:.4f} — {qty} шт, плечо {lev}x | '
-                    f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
-                )
+                # Алерт входа шлёт main_async после risk_check (add_alert + send_telegram_alert).
+                # Не дублировать здесь: до risk-гейта алерт соврёт, если вход заблокируют.
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
                 # ── v8.1: запись контекста входа в trade_history ──
                 try:
