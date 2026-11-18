@@ -634,6 +634,20 @@ def _resolve_long_idx(pos_data, sym: str) -> int:
     return position_idx(sym, 'Buy')
 
 
+def format_regime_tag(regime_name: str) -> str:
+    """`TRENDING_DOWN` → ` | рынок: 📉 Trending Down`. Пусто для NEUTRAL/None.
+
+    Это ГЛОБАЛЬНЫЙ режим рынка (LSTM по BTC/ETH, `lstm_regime.predict_regime`),
+    а не характеристика монеты входа: LONG в TRENDING_DOWN разрешён с 20.10
+    (стратегия покупает перепроданный дип у нижней ленты Боллинджера).
+    """
+    if not regime_name or regime_name == 'NEUTRAL':
+        return ''
+    from .regime import REGIME_LABELS, REGIME_EMOJI
+    return (f' | рынок: {REGIME_EMOJI.get(regime_name, "📊")} '
+            f'{REGIME_LABELS.get(regime_name, regime_name)}')
+
+
 def auto_entry_scan(positions):
     """Скрининг и авто-вход по 9-метричному скорингу (v4.0 + LSTM-режим 5.4)."""
     entries = []
@@ -1024,15 +1038,15 @@ def auto_entry_scan(positions):
                     elif mtf['confluence'] == 2:
                         bonus = ' +15%'
                     mtf_info = f' | MTF:{mtf["confluence"]}/3({mtf["strength"]}{bonus})'
-                regime_info = f' | 📊{regime_name}' if regime_name != 'NEUTRAL' else ''
+                regime_info = format_regime_tag(regime_name)
                 rl_info = f' | 🧠{ensemble_decision}' if ensemble_decision else ''
 
                 entries.append(
-                    f'🤖 Авто-вход {sym} @ ${price:.4f} x{qty} '
+                    f'🤖 Авто-вход {sym} @ ${price:.4f} — {qty} шт, плечо {lev}x '
                     f'(score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}% {s["breakdown"]}{mtf_info}{regime_info}{rl_info})'
                 )
                 add_alert('ENTRY',
-                    f'🚀 LONG {sym}: вход ${price:.4f} ×{qty} ({lev}x) | '
+                    f'🚀 LONG {sym}: вход ${price:.4f} — {qty} шт, плечо {lev}x | '
                     f'score={s["score"]}/{s["max_score"]} BB={s["bb_pos"]:.0f}%{mtf_info}{regime_info}{rl_info}'
                 )
                 log_event(f'Авто-вход {sym} @ ${price:.4f} score={s["score"]} BB={s["bb_pos"]:.0f}%')
